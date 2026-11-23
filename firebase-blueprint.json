@@ -1,0 +1,342 @@
+{
+  "entities": {
+    "PublicBranding": {
+      "title": "PublicBranding",
+      "description": "Non-sensitive team branding displayed on the sign-in screen.",
+      "type": "object",
+      "properties": {
+        "appName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "teamName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "primaryColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "maxLength": 7 },
+        "secondaryColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "maxLength": 7 },
+        "logo": { "type": "string", "maxLength": 180000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["appName", "teamName", "primaryColor", "secondaryColor", "updatedAt"]
+    },
+    "TeamSettings": {
+      "title": "TeamSettings",
+      "description": "Team configuration managed exclusively by the Captain.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "appName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "teamName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "primaryColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "maxLength": 7 },
+        "secondaryColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "maxLength": 7 },
+        "logo": { "type": "string", "maxLength": 180000 },
+        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9\\-]{4,20}$", "maxLength": 20 },
+        "requireApproval": { "type": "boolean" },
+        "lockSkills": { "type": "boolean" },
+        "themeVersion": { "type": "string", "maxLength": 24 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "appName", "teamName", "primaryColor", "secondaryColor", "inviteCode", "requireApproval", "lockSkills", "themeVersion", "updatedAt"]
+    },
+    "InviteCode": {
+      "title": "InviteCode",
+      "description": "Active team invite code verified by document ID without exposing list access.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z0-9\\-]{4,20}$", "maxLength": 20 },
+        "active": { "type": "boolean" },
+        "requireApproval": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "active", "requireApproval", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted RBAC table of promoted captains keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "promotedBy": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "promotedBy", "createdAt"]
+    },
+    "PlayerProfile": {
+      "title": "PlayerProfile",
+      "description": "Team roster player card (no PII, no PINs, no medical details).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "role": { "type": "string", "enum": ["admin", "player"] },
+        "jersey": { "type": "number" },
+        "age": { "type": "number" },
+        "height": { "type": "number" },
+        "weight": { "type": "number" },
+        "foot": { "type": "string", "enum": ["يمين", "يسار", "كلتاهما"] },
+        "primaryPos": { "type": "string", "enum": ["حارس مرمى", "مدافع", "لاعب وسط", "جناح", "مهاجم"] },
+        "secondaryPos": { "type": "string", "enum": ["لا يوجد", "حارس مرمى", "مدافع", "لاعب وسط", "جناح", "مهاجم"] },
+        "photoZoom": { "type": "number" },
+        "photoY": { "type": "number" },
+        "hasPhoto": { "type": "boolean" },
+        "skills": { "type": "object" },
+        "top3Strengths": { "type": "string", "maxLength": 200 },
+        "weak3Points": { "type": "string", "maxLength": 200 },
+        "seasonGoal": { "type": "string", "maxLength": 200 },
+        "availability": { "type": "string", "maxLength": 120 },
+        "availableStatus": { "type": "string", "enum": ["available", "unavailable"] },
+        "roleModelStarId": { "type": "string", "pattern": "^[a-z0-9_]*$", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teamId", "ownerUid", "name", "role", "jersey", "primaryPos", "skills", "availableStatus", "createdAt", "updatedAt"]
+    },
+    "PlayerPhoto": {
+      "title": "PlayerPhoto",
+      "description": "Compressed JPEG player portrait stored separately from roster docs to stay well below Firestore 1MB limits.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "playerId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "dataUrl": { "type": "string", "maxLength": 250000 },
+        "photoZoom": { "type": "number" },
+        "photoY": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "playerId", "ownerUid", "dataUrl", "photoZoom", "photoY", "updatedAt"]
+    },
+    "JoinRequest": {
+      "title": "JoinRequest",
+      "description": "Pending request to join the team keyed by applicant Firebase Auth UID to prevent duplicates.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "jersey": { "type": "number" },
+        "primaryPos": { "type": "string", "enum": ["حارس مرمى", "مدافع", "لاعب وسط", "جناح", "مهاجم"] },
+        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9\\-]{4,20}$", "maxLength": 20 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "jersey", "primaryPos", "inviteCode", "status", "createdAt", "updatedAt"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Player match attendance confirmation.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "playerId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "playerName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "type": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["جاي", "ما فيني"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "playerId", "ownerUid", "playerName", "date", "type", "status", "createdAt"]
+    },
+    "ReadinessRecord": {
+      "title": "ReadinessRecord",
+      "description": "Private pre-match readiness log accessible strictly by owner and Captain.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "playerId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "sleep": { "type": "number" },
+        "fatigue": { "type": "number" },
+        "mood": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "playerId", "ownerUid", "date", "sleep", "fatigue", "mood", "createdAt"]
+    },
+    "InjuryRecord": {
+      "title": "InjuryRecord",
+      "description": "Private injury log accessible strictly by owner and Captain.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "playerId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "ownerUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "type": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "location": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "severity": { "type": "string", "enum": ["خفيفة", "متوسطة", "شديدة"] },
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "expectedReturn": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "playerId", "ownerUid", "type", "location", "severity", "date", "expectedReturn", "createdAt"]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Official team match score recorded by Captain.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "opponent": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "ourScore": { "type": "number" },
+        "oppScore": { "type": "number" },
+        "result": { "type": "string", "enum": ["فوز", "تعادل", "خسارة"] },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "date", "opponent", "ourScore", "oppScore", "result", "createdBy", "createdAt"]
+    },
+    "MatchReport": {
+      "title": "MatchReport",
+      "description": "Post-match player performance report.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "playerId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "opponent": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "goals": { "type": "number" },
+        "assists": { "type": "number" },
+        "minutes": { "type": "number" },
+        "interceptions": { "type": "number" },
+        "turnovers": { "type": "number" },
+        "rating": { "type": "number" },
+        "rpe": { "type": "number" },
+        "bestMoment": { "type": "string", "maxLength": 200 },
+        "worstMoment": { "type": "string", "maxLength": 200 },
+        "motmVote": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "playerId", "ownerUid", "opponent", "goals", "assists", "minutes", "rating", "createdAt"]
+    },
+    "PeerRatingBallot": {
+      "title": "PeerRatingBallot",
+      "description": "Private anonymous ballot readable only by its own author; never listable and never self-targeted.",
+      "type": "object",
+      "properties": {
+        "targetId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "raterUid": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "score": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["targetId", "raterUid", "score", "createdAt", "updatedAt"]
+    },
+    "PeerRatingStat": {
+      "title": "PeerRatingStat",
+      "description": "Aggregated anonymous peer rating totals without rater identity; readable only once count >= 3.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "targetId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "count": { "type": "number" },
+        "totalScore": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "targetId", "count", "totalScore", "updatedAt"]
+    },
+    "AdminRating": {
+      "title": "AdminRating",
+      "description": "Captain evaluation for a player.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "targetId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "score": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "targetId", "score", "updatedAt"]
+    },
+    "SuggestionRecord": {
+      "title": "SuggestionRecord",
+      "description": "Anonymous team suggestion (no authorUid stored).",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "text", "createdAt"]
+    },
+    "TacticsConfig": {
+      "title": "TacticsConfig",
+      "description": "Saved team formation and pitch player slots.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "formation": { "type": "string", "enum": ["2-2-1", "1-2-2", "2-1-2", "3-1-1", "1-3-1"] },
+        "slots": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "formation", "slots", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/publicMeta/{docId}": {
+      "schema": { "$ref": "#/entities/PublicBranding" },
+      "description": "Non-sensitive team branding (single doc: branding)."
+    },
+    "/settings/{docId}": {
+      "schema": { "$ref": "#/entities/TeamSettings" },
+      "description": "Team configuration (single doc: team)."
+    },
+    "/inviteCodes/{code}": {
+      "schema": { "$ref": "#/entities/InviteCode" },
+      "description": "Active invite code verified by exact doc ID lookup."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Promoted captains keyed by Firebase Auth UID."
+    },
+    "/players/{playerId}": {
+      "schema": { "$ref": "#/entities/PlayerProfile" },
+      "description": "Team roster profiles (no PII, no PINs, no medical details)."
+    },
+    "/playerPhotos/{playerId}": {
+      "schema": { "$ref": "#/entities/PlayerPhoto" },
+      "description": "Compressed JPEG portraits separated from roster docs."
+    },
+    "/joinRequests/{uid}": {
+      "schema": { "$ref": "#/entities/JoinRequest" },
+      "description": "Pending team join requests keyed by applicant UID."
+    },
+    "/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/AttendanceRecord" },
+      "description": "Match attendance confirmations."
+    },
+    "/readiness/{readinessId}": {
+      "schema": { "$ref": "#/entities/ReadinessRecord" },
+      "description": "Private pre-match readiness records (owner + Captain only)."
+    },
+    "/injuries/{injuryId}": {
+      "schema": { "$ref": "#/entities/InjuryRecord" },
+      "description": "Private injury logs (owner + Captain only)."
+    },
+    "/matches/{matchId}": {
+      "schema": { "$ref": "#/entities/MatchRecord" },
+      "description": "Official match results."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/MatchReport" },
+      "description": "Post-match player performance reports."
+    },
+    "/peerRatings/{ratingId}": {
+      "schema": { "$ref": "#/entities/PeerRatingBallot" },
+      "description": "Private anonymous peer ballots keyed as targetId__raterUid."
+    },
+    "/peerRatingStats/{targetId}": {
+      "schema": { "$ref": "#/entities/PeerRatingStat" },
+      "description": "Aggregated peer rating totals readable only when count >= 3."
+    },
+    "/adminRatings/{targetId}": {
+      "schema": { "$ref": "#/entities/AdminRating" },
+      "description": "Captain evaluations per player."
+    },
+    "/suggestions/{suggestionId}": {
+      "schema": { "$ref": "#/entities/SuggestionRecord" },
+      "description": "Anonymous team suggestions."
+    },
+    "/tactics/{docId}": {
+      "schema": { "$ref": "#/entities/TacticsConfig" },
+      "description": "Team tactical board state (single doc: current)."
+    }
+  }
+}
