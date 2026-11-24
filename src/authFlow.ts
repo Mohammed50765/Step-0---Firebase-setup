@@ -196,6 +196,45 @@ export function sanitizePersonalTeamInput(input: PersonalTeamInput): SanitizedPe
   };
 }
 
+export interface CleanSessionFlags {
+  isFirebaseMode: false;
+  isGoogleStandardMode: false;
+  googleJoinStatus: 'none';
+  isCaptainSession: false;
+  appStarted: false;
+  db: null;
+  user: null;
+}
+
+/**
+ * Single source of truth for Captain UI and Captain action authorization.
+ * Local player `role` ('admin' or 'player') MUST NEVER grant Captain privileges;
+ * authorization comes exclusively from `isCaptainSession` resolved via Firestore `admins/{uid}`.
+ */
+export function isCaptainAuthorized(input: {
+  isFirebaseMode: boolean;
+  isCaptainSession: boolean;
+  localPlayerRole?: unknown;
+}): boolean {
+  void input?.localPlayerRole;
+  return Boolean(input?.isFirebaseMode && input?.isCaptainSession);
+}
+
+/**
+ * Produces a zeroed session-state object used on sign-out, auth-null, and account change.
+ */
+export function createCleanSessionFlags(): CleanSessionFlags {
+  return {
+    isFirebaseMode: false,
+    isGoogleStandardMode: false,
+    googleJoinStatus: 'none',
+    isCaptainSession: false,
+    appStarted: false,
+    db: null,
+    user: null,
+  };
+}
+
 declare global {
   interface Window {
     MaydanAuthFlow?: {
@@ -203,6 +242,8 @@ declare global {
       buildGoogleLocalStorageKey: typeof buildGoogleLocalStorageKey;
       buildDefaultGooglePlayerProfile: typeof buildDefaultGooglePlayerProfile;
       sanitizePersonalTeamInput: typeof sanitizePersonalTeamInput;
+      isCaptainAuthorized: typeof isCaptainAuthorized;
+      createCleanSessionFlags: typeof createCleanSessionFlags;
     };
   }
 }
@@ -213,5 +254,7 @@ if (typeof window !== 'undefined') {
     buildGoogleLocalStorageKey,
     buildDefaultGooglePlayerProfile,
     sanitizePersonalTeamInput,
+    isCaptainAuthorized,
+    createCleanSessionFlags,
   };
 }

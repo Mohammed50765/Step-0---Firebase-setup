@@ -613,6 +613,19 @@ class FootballLibraryController {
     this.render();
   }
 
+  public reset(): void {
+    this.showCaptainForm = false;
+    this.editingArticleId = null;
+    this.openArticleId = null;
+    this.showExcerpt = false;
+    this.selectedCategory = 'الكل';
+    this.selectedLevel = 'الكل';
+    this.searchQuery = '';
+    this.ctx = null;
+    const root = document.getElementById(this.containerId);
+    if (root) root.innerHTML = '';
+  }
+
   private getAllArticles(): FootballArticle[] {
     const custom = this.ctx ? this.ctx.getCustomArticles() : [];
     return mergeLibraryArticles(custom);

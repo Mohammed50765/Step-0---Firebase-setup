@@ -76,7 +76,7 @@
     .grid-4 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .grid-5 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 
-    @media (min-width: 720px) {
+    @media (min-width: 1100px) {
       .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
       .split-2 { display: grid; grid-template-columns: 5fr 7fr; gap: 16px; align-items: start; }
@@ -3297,7 +3297,7 @@
 
       let db = null, user = null, activeSlotKey = null;
       let isFirebaseMode = false, isGoogleStandardMode = false, googleJoinStatus = 'none';
-      let currentFbUser = null, isCaptainSession = false, appStarted = false;
+      let currentFbUser = null, isCaptainSession = false, appStarted = false, authTransitionSeq = 0;
       let undoSnapshot = null, tourIdx = 0;
       let liveStats = { goals: 0, assists: 0, shots: 0, saves: 0, turnovers: 0 };
       let liveTimerSeconds = 0, liveTimerRunning = false, liveTimerInterval = null, liveHalf = 1;
@@ -3869,13 +3869,187 @@
         syncLoginCopy();
       }
 
+      function isVerifiedCaptain() {
+        const localRole = user && user.role;
+        if (window.MaydanAuthFlow && typeof window.MaydanAuthFlow.isCaptainAuthorized === 'function') {
+          return window.MaydanAuthFlow.isCaptainAuthorized({
+            isFirebaseMode,
+            isCaptainSession,
+            localPlayerRole: localRole
+          });
+        }
+        return Boolean(isFirebaseMode && isCaptainSession);
+      }
+
+      function clearAdminPanelDom() {
+        const setHtml = (id, val) => { const el = document.getElementById(id); if (el) el.innerHTML = val; };
+        const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+        const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+        const setChk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = Boolean(val); };
+
+        setHtml('pendingJoinList', '');
+        setHtml('admPlayersList', '');
+        setHtml('admCaptainRatingsList', '');
+        setHtml('admQuotaBody', '');
+        setHtml('qrContainer', '');
+        setTxt('inviteCodeDisplay', '—');
+        setVal('admAppName', '');
+        setVal('admTeam', '');
+        setVal('admCol1', ROYAL_PRIMARY);
+        setVal('admCol2', ROYAL_SECONDARY);
+        setChk('admLockSkills', false);
+        setChk('admRequireApproval', false);
+        setVal('admLogoFile', '');
+        setVal('importJsonInput', '');
+        setVal('wipeConfirmInput', '');
+        const tabAdmin = document.getElementById('tab-admin');
+        if (tabAdmin) tabAdmin.classList.add('hidden');
+      }
+
+      function clearRenderedContainersDom() {
+        clearAdminPanelDom();
+        const setHtml = (id, val) => { const el = document.getElementById(id); if (el) el.innerHTML = val; };
+        const hideEl = (id) => { const el = document.getElementById(id); if (el) el.classList.add('hidden'); };
+
+        setHtml('captainFatigueRadar', ''); hideEl('captainFatigueRadar');
+        setHtml('captainPitchPayList', ''); hideEl('captainPitchPayList');
+        const pitchForm = document.getElementById('pitchSessionForm');
+        if (pitchForm) { pitchForm.reset(); pitchForm.classList.add('hidden'); }
+        hideEl('captainQuickRateForm');
+        hideEl('btnSaveTactics');
+        setHtml('attendList', '');
+        setHtml('waReminderPreview', '');
+        setHtml('myInjList', '');
+        setHtml('injModalContent', '');
+        setHtml('threeWayTable', '');
+        setHtml('prTarget', '');
+        setHtml('capRateTarget', '');
+        setHtml('rpMotm', '');
+        setHtml('cmpP1', '');
+        setHtml('cmpP2', '');
+        setHtml('tacCaptainBody', '');
+        setHtml('tacPosterBoard', '');
+        setHtml('tacFifaBoard', '');
+        setHtml('tacSpotlightCard', '');
+        setHtml('tacSubsList', '');
+        setHtml('footballLibraryMount', '');
+        setHtml('votingHubMount', '');
+        setHtml('missionVerifyMount', '');
+        setHtml('suggList', '');
+        setHtml('liveEventFeed', '');
+        setHtml('notifModalList', '');
+        const badge = document.getElementById('hdrUserBadge');
+        if (badge) badge.textContent = '—';
+        const teamEl = document.getElementById('hdrTeamName');
+        if (teamEl) teamEl.textContent = 'فريق السداسي';
+        hideEl('quotaBanner');
+        hideEl('googleTeamBar');
+        [
+          'moreSheet', 'joinModal', 'createTeamModal', 'tourModal',
+          'wipeModal', 'slotModal', 'injModal', 'notifModal',
+          'starsExplorerModal', 'celebrateModal', 'pngPreviewModal'
+        ].forEach(hideEl);
+      }
+
+      function resetAppSessionState(opts) {
+        const cfg = opts || {};
+        const resetTab = cfg.resetTab !== false;
+        const clearTeamCache = cfg.clearTeamCache !== false;
+
+        if (liveTimerInterval) {
+          clearInterval(liveTimerInterval);
+          liveTimerInterval = null;
+        }
+        liveTimerRunning = false;
+        liveTimerSeconds = 0;
+        liveHalf = 1;
+        liveOurScore = 0;
+        liveOppScore = 0;
+        liveEvents = [];
+        liveStats = { goals: 0, assists: 0, shots: 0, saves: 0, turnovers: 0 };
+        lastLiveShieldState = null;
+        lastKnownTierRank = {};
+        peerStatsSnapshot = {};
+        undoSnapshot = null;
+        activeSlotKey = null;
+        isSubmittingReport = false;
+        lastReportSig = '';
+        lastReportAt = 0;
+
+        if (window.MaydanTacticsStudio) {
+          window.MaydanTacticsStudio.onTabDeactivated();
+        }
+        if (window.MaydanVoting && window.MaydanVoting.ui && typeof window.MaydanVoting.ui.stopTimer === 'function') {
+          window.MaydanVoting.ui.stopTimer();
+        }
+        if (window.MaydanFootballLibrary && window.MaydanFootballLibrary.controller && typeof window.MaydanFootballLibrary.controller.reset === 'function') {
+          window.MaydanFootballLibrary.controller.reset();
+        }
+        if (window.MaydanBackend) {
+          window.MaydanBackend.stopListeners();
+          if (clearTeamCache && typeof window.MaydanBackend.clearSessionData === 'function') {
+            window.MaydanBackend.clearSessionData();
+          }
+        }
+        if (clearTeamCache) {
+          try {
+            localStorage.removeItem(ONBOARD_DRAFT_KEY);
+            localStorage.removeItem('maydan_team_cache_v1');
+          } catch (e) {}
+        }
+
+        const cleanFlags = (window.MaydanAuthFlow && typeof window.MaydanAuthFlow.createCleanSessionFlags === 'function')
+          ? window.MaydanAuthFlow.createCleanSessionFlags()
+          : { isFirebaseMode: false, isGoogleStandardMode: false, googleJoinStatus: 'none', isCaptainSession: false, appStarted: false, db: null, user: null };
+
+        isFirebaseMode = cleanFlags.isFirebaseMode;
+        isGoogleStandardMode = cleanFlags.isGoogleStandardMode;
+        googleJoinStatus = cleanFlags.googleJoinStatus;
+        isCaptainSession = cleanFlags.isCaptainSession;
+        appStarted = cleanFlags.appStarted;
+        currentFbUser = null;
+        db = cleanFlags.db;
+        user = cleanFlags.user;
+
+        syncAdminControlsVisibility(false);
+        syncGoogleTeamBar();
+        clearRenderedContainersDom();
+
+        if (resetTab) {
+          document.querySelectorAll('.tab-panel').forEach(el => el.classList.add('hidden'));
+          const neutralPanel = document.getElementById('tab-fifa');
+          if (neutralPanel) neutralPanel.classList.remove('hidden');
+          document.querySelectorAll('.nav-tab').forEach(b => {
+            b.classList.toggle('active', b.dataset.tab === 'fifa');
+          });
+          syncAdminControlsVisibility(false);
+          document.querySelectorAll('.bnav-btn').forEach(b => {
+            if (b.id === 'btnMoreMenu') b.classList.remove('active');
+            else b.classList.toggle('active', b.dataset.btab === 'fifa');
+          });
+        }
+      }
+
       function syncAdminControlsVisibility(isAdmin) {
-        document.getElementById('navAdminBtn').classList.toggle('hidden', !isAdmin);
-        document.getElementById('sheetAdminBtn').classList.toggle('hidden', !isAdmin);
+        const allowAdmin = Boolean(isAdmin && isVerifiedCaptain());
+        document.getElementById('navAdminBtn').classList.toggle('hidden', !allowAdmin);
+        document.getElementById('sheetAdminBtn').classList.toggle('hidden', !allowAdmin);
         const saveTacBtn = document.getElementById('btnSaveTactics');
-        if (saveTacBtn) saveTacBtn.classList.toggle('hidden', !isAdmin);
+        if (saveTacBtn) saveTacBtn.classList.toggle('hidden', !allowAdmin);
         const capQuickForm = document.getElementById('captainQuickRateForm');
-        if (capQuickForm) capQuickForm.classList.toggle('hidden', !isAdmin);
+        if (capQuickForm) capQuickForm.classList.toggle('hidden', !allowAdmin);
+        const admRatingsCard = document.getElementById('admCaptainRatingsCard');
+        if (admRatingsCard) admRatingsCard.classList.toggle('hidden', !allowAdmin);
+        const admQuotaCard = document.getElementById('admQuotaCard');
+        if (admQuotaCard) admQuotaCard.classList.toggle('hidden', !allowAdmin);
+        const capFatigue = document.getElementById('captainFatigueRadar');
+        if (capFatigue && !allowAdmin) capFatigue.classList.add('hidden');
+        const capPay = document.getElementById('captainPitchPayList');
+        if (capPay && !allowAdmin) capPay.classList.add('hidden');
+        const pitchForm = document.getElementById('pitchSessionForm');
+        if (pitchForm && !allowAdmin) pitchForm.classList.add('hidden');
+        const adminTabPanel = document.getElementById('tab-admin');
+        if (adminTabPanel && !allowAdmin) adminTabPanel.classList.add('hidden');
       }
 
       function syncGoogleTeamBar() {
@@ -3888,7 +4062,7 @@
           ? db.settings.teamName
           : '';
         if (googleJoinStatus === 'pending') {
-          txt.textContent = '⏳ طلب انضمامك قيد مراجعة الكابتن — يمكنك متابعة استخدام التطبيق بحسابك القياسي أو إدارة فريقك الشخصي الآن.';
+          txt.textContent = '⏳ طلب انضمامك قيد مراجعة الكابتن — يمكنك متابعة استخدام التطبيق بحسابك القياسي الآن أو إدارة فريقك الشخصي.';
         } else if (googleJoinStatus === 'rejected') {
           txt.textContent = 'حسابك القياسي نشط — يمكنك استخدام التطبيق بحرية، أو إنشاء فريقك، أو الانضمام بكود دعوة جديد.';
         } else if (customTeam) {
@@ -3906,7 +4080,7 @@
         applyTheme();
         updateNetworkStatus(false);
         syncGoogleTeamBar();
-        const isAdmin = isFirebaseMode ? isCaptainSession : (!isGoogleStandardMode && user.role === 'admin');
+        const isAdmin = isVerifiedCaptain();
         document.getElementById('hdrUserBadge').textContent = `${user.name} • ${isAdmin ? 'كابتن' : 'لاعب'}${(!isFirebaseMode && !isGoogleStandardMode) ? ' (تجريبي)' : ''}`;
         syncAdminControlsVisibility(isAdmin);
 
@@ -3923,9 +4097,12 @@
         if (window.MaydanFootballLibrary) renderFootballLibrary(false);
         renderSuggestions();
         if (isAdmin) renderAdmin();
+        else clearAdminPanelDom();
       }
 
       async function doLogin(fbUser) {
+        const seq = ++authTransitionSeq;
+        resetAppSessionState({ resetTab: true, clearTeamCache: true });
         if (!fbUser || !window.MaydanBackend) {
           showLoginScreenState('signed_out');
           return;
@@ -3933,6 +4110,7 @@
         currentFbUser = fbUser;
         try {
           const res = await window.MaydanBackend.resolveSession(fbUser);
+          if (seq !== authTransitionSeq) return;
           const urlCode = getUrlJoinCode();
           const route = (window.MaydanAuthFlow && typeof window.MaydanAuthFlow.resolvePostAuthRoute === 'function')
             ? window.MaydanAuthFlow.resolvePostAuthRoute({
@@ -3999,10 +4177,10 @@
             isCaptainSession,
             db,
             () => {
+              if (seq !== authTransitionSeq || !currentFbUser || currentFbUser.uid !== fbUser.uid || !db) return;
               const found = db.players.find(p => p.id === fbUser.uid || p.ownerUid === fbUser.uid);
               if (!found) return;
               user = found;
-              if (isCaptainSession) user.role = 'admin';
               if (!appStarted) {
                 startApp();
               } else {
@@ -4018,7 +4196,8 @@
       }
 
       function enterDemoMode() {
-        if (window.MaydanBackend) window.MaydanBackend.stopListeners();
+        ++authTransitionSeq;
+        resetAppSessionState({ resetTab: true, clearTeamCache: true });
         isFirebaseMode = false;
         isGoogleStandardMode = false;
         googleJoinStatus = 'none';
@@ -4055,7 +4234,7 @@
         syncGoogleTeamBar();
         document.getElementById('loginScreen').classList.add('hidden');
         document.getElementById('appShell').classList.remove('hidden');
-        const isAdmin = isFirebaseMode ? isCaptainSession : (!isGoogleStandardMode && user.role === 'admin');
+        const isAdmin = isVerifiedCaptain();
         document.getElementById('hdrUserBadge').textContent = `${user.name} • ${isAdmin ? 'كابتن' : 'لاعب'}${(!isFirebaseMode && !isGoogleStandardMode) ? ' (تجريبي)' : ''}`;
         syncAdminControlsVisibility(isAdmin);
 
@@ -4066,7 +4245,7 @@
         renderPreMatch();
         renderStatsAndCompare();
         renderSuggestions();
-        if (isAdmin) renderAdmin();
+        if (isAdmin) renderAdmin(); else clearAdminPanelDom();
         switchTab('fifa');
 
         if (!localStorage.getItem(TOUR_SEEN_KEY)) {
@@ -4104,6 +4283,11 @@
       }
 
       function switchTab(id) {
+        if (id === 'admin' && !isVerifiedCaptain()) {
+          clearAdminPanelDom();
+          syncAdminControlsVisibility(false);
+          id = 'fifa';
+        }
         if (id !== 'tactics' && window.MaydanTacticsStudio) {
           window.MaydanTacticsStudio.onTabDeactivated();
         }
@@ -4121,8 +4305,9 @@
         if (panel) panel.classList.remove('hidden');
 
         document.querySelectorAll('.nav-tab').forEach(b => {
-          b.className = 'nav-tab' + (b.dataset.tab === id ? ' active' : '');
+          b.classList.toggle('active', b.dataset.tab === id);
         });
+        syncAdminControlsVisibility(isVerifiedCaptain());
         const primaryBottom = ['fifa', 'live', 'tactics', 'stats'];
         document.querySelectorAll('.bnav-btn').forEach(b => {
           if (b.id === 'btnMoreMenu') b.classList.toggle('active', !primaryBottom.includes(id));
@@ -4146,8 +4331,8 @@
         if (id === 'library') {
           renderFootballLibrary(true);
         }
-        if (id === 'admin' && user && (user.role === 'admin' || isCaptainSession)) {
-          renderQuotaEstimator();
+        if (id === 'admin' && isVerifiedCaptain()) {
+          renderAdmin();
         }
         window.scrollTo({ top: 0, behavior: document.body.classList.contains('data-saver') ? 'auto' : 'smooth' });
       }
@@ -4808,7 +4993,7 @@
         if (midSel) midSel.value = savedRoleOverride === 'CAM_WINGER' ? 'CAM_WINGER' : 'CM';
         if (midWrap) midWrap.classList.toggle('hidden', pos !== 'لاعب وسط');
 
-        const isLocked = Boolean(db.settings && db.settings.lockSkills && user.role !== 'admin');
+        const isLocked = Boolean(db.settings && db.settings.lockSkills && !isVerifiedCaptain());
         document.getElementById('skillsLockTag').classList.toggle('hidden', !isLocked);
 
         // Preserve legacy players safely: if explicit 360-pt stats6 exists, load it;
@@ -4975,7 +5160,7 @@
       async function renderTactics(ensureLoad) {
         if (!db || !user) return;
         if (!db.tactics) db.tactics = { formation: '2-2-1', slots: {} };
-        const isAdmin = Boolean(user && (user.role === 'admin' || isCaptainSession));
+        const isAdmin = isVerifiedCaptain();
         syncAdminControlsVisibility(isAdmin);
         if (!window.MaydanTacticsStudio) {
           if (!ensureLoad) return;
@@ -4991,7 +5176,7 @@
             },
             getTeamSettings: () => (db && db.settings) || {},
             getReadiness: () => (db && db.readiness) || [],
-            isAdmin: () => Boolean(user && (user.role === 'admin' || isCaptainSession)),
+            isAdmin: () => isVerifiedCaptain(),
             isFirebaseMode: () => Boolean(isFirebaseMode),
             openSlotPicker: (slotLabel, currentPlayerId, onPick) => {
               const titleEl = document.getElementById('slotModalTitle');
@@ -5070,9 +5255,9 @@
 
         lib.controller.mount('footballLibraryMount', {
           getCustomArticles: readCombinedOverrides,
-          isCaptain: () => Boolean(user && (user.role === 'admin' || isCaptainSession)),
+          isCaptain: () => isVerifiedCaptain(),
           onSaveArticle: async (article) => {
-            if (!(user && (user.role === 'admin' || isCaptainSession))) {
+            if (!isVerifiedCaptain()) {
               toast('إدارة المكتبة متاحة للكابتن فقط', true);
               return false;
             }
@@ -5095,7 +5280,7 @@
             return true;
           },
           onDeleteArticle: async (articleId) => {
-            if (!(user && (user.role === 'admin' || isCaptainSession))) {
+            if (!isVerifiedCaptain()) {
               toast('حذف المقالات متاح للكابتن فقط', true);
               return false;
             }
@@ -5236,7 +5421,7 @@
         window.MaydanPreMatch.ui.mount({
           getState: () => db,
           getCurrentUser: () => user,
-          isCaptain: () => Boolean(user && (user.role === 'admin' || isCaptainSession)),
+          isCaptain: () => isVerifiedCaptain(),
           isFirebaseMode: () => Boolean(isFirebaseMode),
           persistAction: (action, payload) => persistAction(action, payload),
           saveLocal: () => saveLocal(db),
@@ -5256,7 +5441,7 @@
         ve.ui.mount({
           getState: () => db,
           getCurrentUser: () => user,
-          isCaptain: () => Boolean(user && (user.role === 'admin' || isCaptainSession)),
+          isCaptain: () => isVerifiedCaptain(),
           isFirebaseMode: () => Boolean(isFirebaseMode),
           persistAction: (action, payload) => persistAction(action, payload),
           saveLocal: () => saveLocal(db),
@@ -5281,7 +5466,7 @@
           getInjuries: () => db.injuries || [],
           getPlayers: () => db.players || [],
           getCurrentUser: () => user,
-          isCaptain: () => Boolean(user && (user.role === 'admin' || isCaptainSession)),
+          isCaptain: () => isVerifiedCaptain(),
           onRecoverAvailable: async () => {
             if (!user) return;
             user.availableStatus = 'available';
@@ -5312,6 +5497,10 @@
           }
         }
         if (!bodyEl) return;
+        if (!isVerifiedCaptain()) {
+          bodyEl.innerHTML = '';
+          return;
+        }
 
         const barCol =
           health.status === 'high'
@@ -5352,6 +5541,11 @@
       }
 
       function renderAdmin() {
+        if (!isVerifiedCaptain() || !db || !user) {
+          clearAdminPanelDom();
+          syncAdminControlsVisibility(false);
+          return;
+        }
         const s = db.settings || {};
         document.getElementById('admAppName').value = s.appName || 'ميدان 6v6';
         document.getElementById('admTeam').value = s.teamName || '';
@@ -5383,6 +5577,7 @@
         `).join('') || '<p class="muted">لا توجد طلبات انضمام معلّقة.</p>';
 
         document.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => {
+          if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
           takeSnapshot();
           const idx = db.pendingPlayers.findIndex(x => (x.id || x.uid) === b.dataset.approve);
           if (idx === -1) return;
@@ -5408,6 +5603,7 @@
         }));
 
         document.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', () => {
+          if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
           takeSnapshot();
           const targetId = b.dataset.reject;
           if (!isFirebaseMode) db.pendingPlayers = db.pendingPlayers.filter(x => (x.id || x.uid) !== targetId);
@@ -5431,6 +5627,7 @@
         `).join('');
 
         document.querySelectorAll('[data-toggle-role]').forEach(b => b.addEventListener('click', async () => {
+          if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
           const target = db.players.find(p => p.id === b.dataset.toggleRole);
           if (!target) return;
           takeSnapshot();
@@ -5462,6 +5659,7 @@
 
           capListEl.querySelectorAll('[data-save-cap-rate]').forEach(btn => {
             btn.addEventListener('click', async () => {
+              if (!isVerifiedCaptain()) { toast('تقييم الكابتن الرسمي متاح للكابتن فقط', true); return; }
               const targetId = btn.dataset.saveCapRate;
               const inp = capListEl.querySelector(`[data-cap-score-input="${CSS.escape(targetId)}"]`);
               const score = Math.max(1, Math.min(10, Math.round(Number(inp ? inp.value : 7) || 7)));
@@ -5474,8 +5672,7 @@
       }
 
       async function saveCaptainOfficialRating(targetId, score) {
-        const isAdmin = Boolean(user && (user.role === 'admin' || isCaptainSession));
-        if (!isAdmin) {
+        if (!isVerifiedCaptain()) {
           toast('تقييم الكابتن الرسمي متاح للكابتن فقط', true);
           return;
         }
@@ -5519,7 +5716,7 @@
         if (user) user = db.players.find(p => p.id === user.id) || db.players[0];
         saveLocal(db);
         applyTheme(); renderFifaAndProfile(); renderLiveSelectors(); renderTactics(); renderStatsAndCompare();
-        if (user && user.role === 'admin') renderAdmin();
+        if (isVerifiedCaptain()) renderAdmin(); else clearAdminPanelDom();
         document.getElementById('toast').classList.add('hidden');
         toast('تم التراجع عن آخر تعديل ↩');
       });
@@ -5564,17 +5761,20 @@
       document.getElementById('btnEnterDemo').addEventListener('click', enterDemoMode);
 
       async function handleSignOut() {
-        if ((isFirebaseMode || isGoogleStandardMode || currentFbUser) && window.MaydanBackend) {
-          await window.MaydanBackend.signOut();
+        ++authTransitionSeq;
+        try {
+          if (window.MaydanBackend) {
+            await window.MaydanBackend.signOut();
+          }
+        } catch (err) {
+          // Ensure full state reset even if signOut fails
+        } finally {
+          resetAppSessionState({ resetTab: true, clearTeamCache: true });
+          showLoginScreenState('signed_out');
+          try {
+            window.location.reload();
+          } catch (e) {}
         }
-        isFirebaseMode = false;
-        isGoogleStandardMode = false;
-        googleJoinStatus = 'none';
-        isCaptainSession = false;
-        currentFbUser = null;
-        user = null;
-        syncGoogleTeamBar();
-        showLoginScreenState('signed_out');
       }
       document.getElementById('btnLogout').addEventListener('click', handleSignOut);
       document.getElementById('btnSignOutPending').addEventListener('click', handleSignOut);
@@ -6229,8 +6429,7 @@
         }
       });
       document.getElementById('btnSaveTactics').addEventListener('click', async () => {
-        const isAdmin = Boolean(user && (user.role === 'admin' || isCaptainSession));
-        if (!isAdmin) {
+        if (!isVerifiedCaptain()) {
           toast('حفظ التشكيلة الرسمية متاح للكابتن فقط', true);
           return;
         }
@@ -6293,6 +6492,7 @@
 
       document.getElementById('captainQuickRateForm').addEventListener('submit', async e => {
         e.preventDefault();
+        if (!isVerifiedCaptain()) { toast('تقييم الكابتن الرسمي متاح للكابتن فقط', true); return; }
         const targetId = document.getElementById('capRateTarget').value;
         const score = Number(document.getElementById('capRateScore').value);
         if (!targetId) return;
@@ -6338,7 +6538,7 @@
       // Admin Events
       document.getElementById('admSettingsForm').addEventListener('submit', async e => {
         e.preventDefault();
-        if (!(user && (user.role === 'admin' || isCaptainSession))) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         takeSnapshot();
         const nextSettings = Object.assign({}, db.settings, {
           appName: document.getElementById('admAppName').value.trim() || 'ميدان 6v6',
@@ -6357,9 +6557,11 @@
       });
 
       document.getElementById('admLogoFile').addEventListener('change', e => {
+        if (!isVerifiedCaptain()) { e.target.value = ''; toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         const file = e.target.files && e.target.files[0];
         if (!file) return;
         compressImageFile(file, 160, 160, 0.82, async dataUrl => {
+          if (!isVerifiedCaptain()) return;
           takeSnapshot();
           const nextSettings = Object.assign({}, db.settings, { logo: dataUrl });
           const res = await persistActionChecked('settings', nextSettings);
@@ -6371,6 +6573,7 @@
         });
       });
       document.getElementById('btnClearLogo').addEventListener('click', async () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         takeSnapshot();
         const nextSettings = Object.assign({}, db.settings, { logo: '' });
         const res = await persistActionChecked('settings', nextSettings);
@@ -6382,6 +6585,7 @@
       });
 
       document.getElementById('btnResetRoyal').addEventListener('click', async () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         takeSnapshot();
         const nextSettings = Object.assign({}, db.settings, { primaryColor: ROYAL_PRIMARY, secondaryColor: ROYAL_SECONDARY });
         const res = await persistActionChecked('settings', nextSettings);
@@ -6396,6 +6600,7 @@
       });
 
       document.getElementById('admRequireApproval').addEventListener('change', async e => {
+        if (!isVerifiedCaptain()) { e.target.checked = !e.target.checked; toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         const prev = db.settings.requireApproval;
         db.settings.requireApproval = e.target.checked;
         const res = await persistActionChecked('settings', db.settings);
@@ -6405,6 +6610,7 @@
       });
 
       document.getElementById('btnRegenCode').addEventListener('click', async () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         takeSnapshot();
         const prevInviteCode = db.settings.inviteCode || '';
         if (isFirebaseMode && window.MaydanBackend) {
@@ -6426,6 +6632,7 @@
       });
 
       document.getElementById('btnCopyInvite').addEventListener('click', () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         const code = validateInviteCodeLocal(db.settings && db.settings.inviteCode);
         if (!code) { toast('لا يوجد كود دعوة حالياً — اضغط «تدوير الكود» أولاً', true); return; }
         const inviteUrl = `${location.href.split('#')[0]}#join=${encodeURIComponent(code)}`;
@@ -6435,6 +6642,7 @@
       });
 
       document.getElementById('btnWaInvite').addEventListener('click', () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         const code = validateInviteCodeLocal(db.settings && db.settings.inviteCode);
         if (!code) { toast('لا يوجد كود دعوة حالياً — اضغط «تدوير الكود» أولاً', true); return; }
         const inviteUrl = `${location.href.split('#')[0]}#join=${encodeURIComponent(code)}`;
@@ -6447,6 +6655,7 @@
       });
 
       document.getElementById('btnTestJoinReq').addEventListener('click', () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         if (isFirebaseMode) {
           toast('في وضع Firebase تصل طلبات اللاعبين الحقيقية تلقائياً هنا فور إرسالها بكود الدعوة.');
           return;
@@ -6463,7 +6672,7 @@
 
       document.getElementById('admAddPForm').addEventListener('submit', async e => {
         e.preventDefault();
-        if (!(user && (user.role === 'admin' || isCaptainSession))) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         takeSnapshot();
         const np = {
           id: 'p_' + Date.now(), ownerUid: '', name: document.getElementById('admNewName').value.trim(),
@@ -6482,7 +6691,7 @@
 
       document.getElementById('admMatchForm').addEventListener('submit', async e => {
         e.preventDefault();
-        if (!(user && (user.role === 'admin' || isCaptainSession))) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         takeSnapshot();
         const ourS = Number(document.getElementById('amOur').value), oppS = Number(document.getElementById('amTheir').value);
         const resTxt = ourS > oppS ? 'فوز' : ourS < oppS ? 'خسارة' : 'تعادل';
@@ -6497,6 +6706,7 @@
 
       // Backup, Restore, Demo & Double-Confirm Wipe
       document.getElementById('btnExportJson').addEventListener('click', () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         const exportObj = Object.assign({}, db, {
           players: (db.players || []).map(p => {
             const copy = Object.assign({}, p);
@@ -6514,10 +6724,12 @@
       });
 
       document.getElementById('importJsonInput').addEventListener('change', async e => {
+        if (!isVerifiedCaptain()) { e.target.value = ''; toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         const file = e.target.files && e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
         reader.onload = async ev => {
+          if (!isVerifiedCaptain()) return;
           try {
             const parsed = JSON.parse(ev.target.result);
             if (!parsed.players || !parsed.settings) throw new Error('invalid');
@@ -6544,6 +6756,7 @@
       });
 
       document.getElementById('btnExportCsv').addEventListener('click', () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         const rows = [['الاسم', 'الرقم', 'المركز', 'الأهداف', 'التمريرات']];
         db.players.forEach(p => {
           const reps = (db.reports || []).filter(r => r.playerId === p.id);
@@ -6561,6 +6774,7 @@
       });
 
       document.getElementById('btnDemoMode').addEventListener('click', () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         if (isFirebaseMode) {
           toast('وضع البيانات التجريبية مخصص للوضع المحلي التجريبي فقط حتى لا يختلط ببيانات فريقك الحقيقية.');
           return;
@@ -6584,11 +6798,13 @@
       });
 
       document.getElementById('btnOpenWipeModal').addEventListener('click', () => {
+        if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         document.getElementById('wipeConfirmInput').value = '';
         document.getElementById('wipeModal').classList.remove('hidden');
       });
       document.getElementById('closeWipeModal').addEventListener('click', () => document.getElementById('wipeModal').classList.add('hidden'));
       document.getElementById('btnConfirmWipe').addEventListener('click', async () => {
+        if (!isVerifiedCaptain()) { document.getElementById('wipeModal').classList.add('hidden'); toast('هذا الإجراء متاح للكابتن فقط', true); return; }
         if (document.getElementById('wipeConfirmInput').value.trim() !== 'حذف') {
           toast('اكتب كلمة "حذف" للتأكيد', true); return;
         }
@@ -6611,15 +6827,11 @@
       showLoginScreenState('signed_out');
       if (window.MaydanBackend) {
         window.MaydanBackend.onAuthChange(fbUser => {
-          if (fbUser) doLogin(fbUser);
-          else if (isFirebaseMode || isGoogleStandardMode) {
-            isFirebaseMode = false;
-            isGoogleStandardMode = false;
-            googleJoinStatus = 'none';
-            isCaptainSession = false;
-            currentFbUser = null;
-            user = null;
-            syncGoogleTeamBar();
+          if (fbUser) {
+            doLogin(fbUser);
+          } else {
+            ++authTransitionSeq;
+            resetAppSessionState({ resetTab: true, clearTeamCache: true });
             showLoginScreenState('signed_out');
           }
         });

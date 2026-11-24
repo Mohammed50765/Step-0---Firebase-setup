@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   buildDefaultGooglePlayerProfile,
   buildGoogleLocalStorageKey,
+  createCleanSessionFlags,
+  isCaptainAuthorized,
   resolvePostAuthRoute,
   sanitizePersonalTeamInput,
 } from './authFlow';
@@ -162,4 +164,92 @@ test('sanitizePersonalTeamInput validates team name, formation, and color', () =
   assert.equal(fallback.valid, true);
   assert.equal(fallback.formation, '2-2-1');
   assert.equal(fallback.primaryColor, '#FACC15');
+});
+
+test('isCaptainAuthorized ignores local user.role and trusts only Firebase isCaptainSession', () => {
+  assert.equal(
+    isCaptainAuthorized({ isFirebaseMode: false, isCaptainSession: false, localPlayerRole: 'admin' }),
+    false
+  );
+  assert.equal(
+    isCaptainAuthorized({ isFirebaseMode: false, isCaptainSession: true, localPlayerRole: 'admin' }),
+    false
+  );
+  assert.equal(
+    isCaptainAuthorized({ isFirebaseMode: true, isCaptainSession: false, localPlayerRole: 'admin' }),
+    false
+  );
+  assert.equal(
+    isCaptainAuthorized({ isFirebaseMode: true, isCaptainSession: true, localPlayerRole: 'player' }),
+    true
+  );
+});
+
+test('Sequential same-page transition (Captain -> Sign-out -> Player) clears all Captain flags and never leaks privileges', () => {
+  // 1. Account A: Verified Captain logs in via resolveSession (admins/{uid} exists)
+  const capRoute = resolvePostAuthRoute({
+    status: 'ready',
+    isCaptain: true,
+    loginAuthTab: 'signin',
+  });
+  assert.equal(
+    isCaptainAuthorized({
+      isFirebaseMode: capRoute.attachCloudListeners,
+      isCaptainSession: capRoute.isCaptainSession,
+      localPlayerRole: 'admin',
+    }),
+    true
+  );
+
+  // 2. Sign out / Auth state becomes null
+  const resetState = createCleanSessionFlags();
+  assert.deepEqual(resetState, {
+    isFirebaseMode: false,
+    isGoogleStandardMode: false,
+    googleJoinStatus: 'none',
+    isCaptainSession: false,
+    appStarted: false,
+    db: null,
+    user: null,
+  });
+  assert.equal(
+    isCaptainAuthorized({
+      isFirebaseMode: resetState.isFirebaseMode,
+      isCaptainSession: resetState.isCaptainSession,
+      localPlayerRole: 'admin',
+    }),
+    false
+  );
+
+  // 3. Account B: Non-captain team member logs in on the same page (even if player doc carried role: 'admin')
+  const playerRoute = resolvePostAuthRoute({
+    status: 'ready',
+    isCaptain: false,
+    loginAuthTab: 'signin',
+  });
+  assert.equal(playerRoute.isCaptainSession, false);
+  assert.equal(
+    isCaptainAuthorized({
+      isFirebaseMode: playerRoute.attachCloudListeners,
+      isCaptainSession: playerRoute.isCaptainSession,
+      localPlayerRole: 'admin',
+    }),
+    false
+  );
+
+  // 4. Account C: New standard Google user without invite code on the same page
+  const stdRoute = resolvePostAuthRoute({
+    status: 'needs_join',
+    isCaptain: false,
+    loginAuthTab: 'signin',
+  });
+  assert.equal(stdRoute.isCaptainSession, false);
+  assert.equal(
+    isCaptainAuthorized({
+      isFirebaseMode: stdRoute.attachCloudListeners,
+      isCaptainSession: stdRoute.isCaptainSession,
+      localPlayerRole: 'admin',
+    }),
+    false
+  );
 });

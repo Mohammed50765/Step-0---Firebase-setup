@@ -120,13 +120,26 @@ class MaydanBackendService {
   }
 
   async signOut(): Promise<void> {
+    this.clearSessionData();
+    await signOut(auth);
+  }
+
+  clearSessionData(): void {
     this.stopListeners();
     this.activeUid = null;
     this.activeIsCaptain = false;
+    this.activeTab = null;
     this.activeState = null;
     this.activeOnUpdate = null;
     this.activeOnError = null;
-    await signOut(auth);
+    this.photosMap = {};
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(TEAM_CACHE_KEY);
+      }
+    } catch {
+      // Ignore storage errors
+    }
   }
 
   private stopTabListeners(): void {
@@ -161,16 +174,19 @@ class MaydanBackendService {
 
   private saveTeamSnapshotCache(state: BackendState): void {
     try {
-      if (typeof localStorage === 'undefined') return;
+      if (typeof localStorage === 'undefined' || !this.activeUid) return;
       const leanPlayers = (state.players || []).map((p) => {
         const copy = { ...p };
         delete copy.photo;
         return copy;
       });
+      const safeSettings = { ...(state.settings || {}) };
+      delete safeSettings.inviteCode;
       localStorage.setItem(
         TEAM_CACHE_KEY,
         JSON.stringify({
-          settings: state.settings || {},
+          ownerUid: this.activeUid,
+          settings: safeSettings,
           players: leanPlayers,
           pitchSession: state.pitchSession || null,
           cachedAt: Date.now(),
@@ -181,7 +197,8 @@ class MaydanBackendService {
     }
   }
 
-  loadTeamSnapshotCache(): {
+  loadTeamSnapshotCache(expectedUid?: string): {
+    ownerUid?: string;
     settings?: Record<string, unknown>;
     players?: Array<Record<string, unknown>>;
     pitchSession?: Record<string, unknown> | null;
@@ -191,7 +208,12 @@ class MaydanBackendService {
       if (typeof localStorage === 'undefined') return null;
       const raw = localStorage.getItem(TEAM_CACHE_KEY);
       if (!raw) return null;
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (expectedUid && parsed?.ownerUid !== expectedUid) {
+        localStorage.removeItem(TEAM_CACHE_KEY);
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -230,6 +252,7 @@ class MaydanBackendService {
     branding?: Record<string, unknown>;
     joinRequest?: Record<string, unknown>;
   }> {
+    this.clearSessionData();
     this.activeUid = fbUser.uid;
     let isCaptain = false;
 
@@ -691,9 +714,9 @@ class MaydanBackendService {
       this.handleListenerError(err, op, path, onError);
     };
 
-    // Hydrate non-sensitive local cache first so UI stays resilient on slow 3G / quota limits
-    const cached = this.loadTeamSnapshotCache();
-    if (cached) {
+    // Hydrate non-sensitive local cache ONLY if it belongs to the exact same UID
+    const cached = this.loadTeamSnapshotCache(uid);
+    if (cached && cached.ownerUid === uid) {
       if (cached.settings && Object.keys(cached.settings).length && !Object.keys(state.settings || {}).length) {
         state.settings = { ...cached.settings };
       }

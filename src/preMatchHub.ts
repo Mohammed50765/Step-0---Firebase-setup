@@ -686,7 +686,7 @@ class MaydanPreMatchHubUI {
       `;
     }
 
-    // Captain-only team fatigue overview (strictly hidden from regular players)
+    // Captain-only team fatigue overview (strictly hidden and cleared for regular players)
     const capBox = document.getElementById('captainFatigueRadar');
     if (capBox) {
       capBox.classList.toggle('hidden', !isCaptain);
@@ -708,6 +708,8 @@ class MaydanPreMatchHubUI {
             )
             .join('')}
         `;
+      } else {
+        capBox.innerHTML = '';
       }
     }
   }
@@ -723,17 +725,17 @@ class MaydanPreMatchHubUI {
 
     this.renderFatigueWidget();
 
-    // Populate Captain schedule/fee form inputs
+    // Populate Captain schedule/fee form inputs (clear if not Captain)
     const capForm = document.getElementById('pitchSessionForm');
     if (capForm) {
       capForm.classList.toggle('hidden', !isCaptain);
+      const setVal = (id: string, val: string) => {
+        const el = document.getElementById(id) as HTMLInputElement | null;
+        if (el) el.value = val;
+      };
       if (isCaptain) {
         const activeTag = document.activeElement?.tagName;
         if (activeTag !== 'INPUT') {
-          const setVal = (id: string, val: string) => {
-            const el = document.getElementById(id) as HTMLInputElement | null;
-            if (el) el.value = val;
-          };
           setVal('pmTitle', session.title);
           setVal('pmDate', session.matchDate);
           setVal('pmTime', session.matchTime);
@@ -741,6 +743,13 @@ class MaydanPreMatchHubUI {
           setVal('pmCost', String(session.totalCost));
           setVal('pmCurrency', session.currency);
         }
+      } else {
+        setVal('pmTitle', '');
+        setVal('pmDate', '');
+        setVal('pmTime', '');
+        setVal('pmVenue', '');
+        setVal('pmCost', '');
+        setVal('pmCurrency', '');
       }
     }
 
@@ -806,11 +815,13 @@ class MaydanPreMatchHubUI {
       `;
     }
 
-    // Captain payment checklist (ONLY Captain sees & edits who paid and who didn't)
+    // Captain payment checklist (ONLY Captain sees & edits; strictly cleared otherwise)
     const capPayList = document.getElementById('captainPitchPayList');
     if (capPayList) {
       capPayList.classList.toggle('hidden', !isCaptain);
-      if (isCaptain) {
+      if (!isCaptain) {
+        capPayList.innerHTML = '';
+      } else {
         if (!confirmedIds.length) {
           capPayList.innerHTML =
             '<p class="muted" style="font-size:0.78rem;">لا يوجد لاعبون مؤكّدون بعد — ستظهر قائمة الدفع فور تأكيد الحضور بـ «جاي».</p>';
@@ -842,7 +853,10 @@ class MaydanPreMatchHubUI {
 
           capPayList.querySelectorAll<HTMLButtonElement>('[data-toggle-pay]').forEach((btn) => {
             btn.addEventListener('click', async () => {
-              if (!this.hooks) return;
+              if (!this.hooks || !this.hooks.isCaptain()) {
+                this.hooks?.toast('تحديث حالة دفع القَطّة متاح للكابتن فقط', true);
+                return;
+              }
               const targetPid = btn.dataset.togglePay || '';
               const targetPlayer = players.find((x) => String(x.id) === targetPid);
               const existing = payments.find((x) => x.playerId === targetPid);
