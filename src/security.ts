@@ -56,10 +56,33 @@ export function sanitizeHexColor(color: unknown, fallback: string): string {
   return fallback;
 }
 
-export function sanitizeInviteCode(code: unknown, fallback = 'MDN-606'): string {
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars -> exact bitmask (0..31), zero modulo bias
+export const MIN_INVITE_CODE_LEN = 8;
+export const MAX_INVITE_CODE_LEN = 20;
+
+export function generateSecureInviteCode(rawLength = 12): string {
+  const len = Math.max(10, Math.min(16, Math.round(rawLength)));
+  const bytes = new Uint8Array(len);
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
+    throw new Error('Web Crypto API (crypto.getRandomValues) غير متوفر لتوليد كود دعوة آمن');
+  }
+  cryptoApi.getRandomValues(bytes);
+  let raw = '';
+  for (let i = 0; i < len; i++) {
+    raw += INVITE_ALPHABET[bytes[i] & 31];
+  }
+  // Group cleanly as XXXX-XXXX-XXXX when 12 chars (14 chars total, 12 CSPRNG chars >= 10)
+  if (len === 12) {
+    return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+  }
+  return raw;
+}
+
+export function sanitizeInviteCode(code: unknown): string {
   const clean = String(code ?? '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
-  if (clean.length >= 4 && clean.length <= 20) return clean;
-  return fallback;
+  if (clean.length >= MIN_INVITE_CODE_LEN && clean.length <= MAX_INVITE_CODE_LEN) return clean;
+  return '';
 }
 
 export function sanitizeDateStr(dateStr: unknown): string {
@@ -165,7 +188,7 @@ export function sanitizeBackupImport(raw: unknown): CleanBackupPayload {
     primaryColor: sanitizeHexColor(st.primaryColor, ROYAL_PRIMARY),
     secondaryColor: sanitizeHexColor(st.secondaryColor, ROYAL_SECONDARY),
     logo: sanitizeImageDataUrl(st.logo, 180000),
-    inviteCode: sanitizeInviteCode(st.inviteCode, 'MDN-606'),
+    inviteCode: sanitizeInviteCode(st.inviteCode) || generateSecureInviteCode(12),
     requireApproval: typeof st.requireApproval === 'boolean' ? st.requireApproval : true,
     lockSkills: typeof st.lockSkills === 'boolean' ? st.lockSkills : false,
     themeVersion: 'royal_v2',

@@ -507,7 +507,7 @@ export async function renderFifaCardToCanvas(
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(250, 204, 21, 0.72)';
   ctx.font = `800 19px ${fontStack}`;
-  ctx.fillText(`👑 ${payload.appName || 'ميدان 6v6'} — النسخة الملكية • بطاقة FIFA عالية الدقة`, W / 2, H - 34);
+  ctx.fillText(`👑 ${payload.appName || 'ميدان 6v6'} — النسخة الملكية • درع ميدان عالي الدقة`, W / 2, H - 34);
   ctx.restore();
 
   const dataUrl = canvas.toDataURL('image/png');

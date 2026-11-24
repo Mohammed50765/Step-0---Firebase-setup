@@ -22,7 +22,6 @@ import {
 } from 'firebase/firestore';
 import {
   auth,
-  CAPTAIN_EMAIL,
   db,
   googleProvider,
   handleFirestoreError,
@@ -32,6 +31,9 @@ import {
 import {
   clampNum,
   clampStr,
+  computePeerAggregate,
+  escapeHtml,
+  generateSecureInviteCode,
   MAX_PENDING_JOIN_REQUESTS,
   ROYAL_PRIMARY,
   ROYAL_SECONDARY,
@@ -48,6 +50,13 @@ import {
   sanitizeStarId,
   TEAM_ID,
 } from './security';
+import {
+  isQuotaExceededError,
+  QUOTA_EXCEEDED_ARABIC_MSG,
+  quotaMonitor,
+} from './quotaMonitor';
+
+const TEAM_CACHE_KEY = 'maydan_team_cache_v1';
 
 export interface BackendState {
   settings: Record<string, unknown>;
@@ -63,25 +72,28 @@ export interface BackendState {
   adminRatings: Array<Record<string, unknown>>;
   tactics: { formation: string; slots: Record<string, string> };
   suggestions: Array<Record<string, unknown>>;
+  pitchSession?: Record<string, unknown>;
+  pitchPayments?: Array<Record<string, unknown>>;
+}
+
+function sanitizeTimeStr(raw: unknown, fallback = '20:30'): string {
+  const s = String(raw || '').trim();
+  return /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(s) ? s : fallback;
 }
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function isBootstrappedCaptainUser(fbUser: User | null): boolean {
-  return Boolean(
-    fbUser &&
-      fbUser.emailVerified &&
-      fbUser.email &&
-      fbUser.email.toLowerCase() === CAPTAIN_EMAIL.toLowerCase()
-  );
-}
-
 class MaydanBackendService {
-  private unsubs: Unsubscribe[] = [];
+  private coreUnsubs: Unsubscribe[] = [];
+  private tabUnsubs: Unsubscribe[] = [];
   private activeUid: string | null = null;
   private activeIsCaptain = false;
+  private activeTab: string | null = null;
+  private activeState: BackendState | null = null;
+  private activeOnUpdate: (() => void) | null = null;
+  private activeOnError: ((msg: string) => void) | null = null;
   private photosMap: Record<string, { dataUrl: string; photoZoom: number; photoY: number }> = {};
 
   init(): void {
@@ -101,18 +113,105 @@ class MaydanBackendService {
     this.stopListeners();
     this.activeUid = null;
     this.activeIsCaptain = false;
+    this.activeState = null;
+    this.activeOnUpdate = null;
+    this.activeOnError = null;
     await signOut(auth);
   }
 
-  stopListeners(): void {
-    for (const u of this.unsubs) {
+  private stopTabListeners(): void {
+    for (const u of this.tabUnsubs) {
       try {
         u();
       } catch {
         // ignore unsubscribe cleanup errors
       }
     }
-    this.unsubs = [];
+    this.tabUnsubs = [];
+    this.activeTab = null;
+    quotaMonitor.setActiveListeners(this.getActiveListenerCount());
+  }
+
+  stopListeners(): void {
+    this.stopTabListeners();
+    for (const u of this.coreUnsubs) {
+      try {
+        u();
+      } catch {
+        // ignore unsubscribe cleanup errors
+      }
+    }
+    this.coreUnsubs = [];
+    quotaMonitor.setActiveListeners(0);
+  }
+
+  getActiveListenerCount(): number {
+    return this.coreUnsubs.length + this.tabUnsubs.length;
+  }
+
+  private saveTeamSnapshotCache(state: BackendState): void {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const leanPlayers = (state.players || []).map((p) => {
+        const copy = { ...p };
+        delete copy.photo;
+        return copy;
+      });
+      localStorage.setItem(
+        TEAM_CACHE_KEY,
+        JSON.stringify({
+          settings: state.settings || {},
+          players: leanPlayers,
+          pitchSession: state.pitchSession || null,
+          cachedAt: Date.now(),
+        })
+      );
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+
+  loadTeamSnapshotCache(): {
+    settings?: Record<string, unknown>;
+    players?: Array<Record<string, unknown>>;
+    pitchSession?: Record<string, unknown> | null;
+    cachedAt?: number;
+  } | null {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const raw = localStorage.getItem(TEAM_CACHE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  private handleListenerError(
+    err: unknown,
+    op: OperationType,
+    path: string,
+    onError: (msg: string) => void
+  ): void {
+    if (isQuotaExceededError(err)) {
+      quotaMonitor.markQuotaExceeded(true);
+      onError(QUOTA_EXCEEDED_ARABIC_MSG);
+      return;
+    }
+    onError('تعذّر تحديث بعض البيانات من الخادم.');
+    try {
+      handleFirestoreError(err, op, path);
+    } catch {
+      // Logged by handleFirestoreError
+    }
+  }
+
+  private handleWriteError(err: unknown, op: OperationType, path: string): never {
+    if (isQuotaExceededError(err)) {
+      quotaMonitor.markQuotaExceeded(true);
+      throw new Error(QUOTA_EXCEEDED_ARABIC_MSG);
+    }
+    handleFirestoreError(err, op, path);
   }
 
   async resolveSession(fbUser: User): Promise<{
@@ -122,14 +221,20 @@ class MaydanBackendService {
     joinRequest?: Record<string, unknown>;
   }> {
     this.activeUid = fbUser.uid;
-    let isCaptain = isBootstrappedCaptainUser(fbUser);
+    let isCaptain = false;
 
-    if (!isCaptain) {
+    // Captain identity is strictly verified via trusted admins/{uid} document ONLY
+    if (fbUser.emailVerified) {
       try {
         const admSnap = await getDoc(doc(db, 'admins', fbUser.uid));
-        if (admSnap.exists()) isCaptain = true;
-      } catch {
-        // Non-captains may not have an admin record
+        quotaMonitor.recordReads('session', 1);
+        isCaptain = admSnap.exists();
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          quotaMonitor.markQuotaExceeded(true);
+          throw new Error(QUOTA_EXCEEDED_ARABIC_MSG);
+        }
+        isCaptain = false;
       }
     }
     this.activeIsCaptain = isCaptain;
@@ -143,8 +248,9 @@ class MaydanBackendService {
     let playerSnap;
     try {
       playerSnap = await getDoc(doc(db, 'players', fbUser.uid));
+      quotaMonitor.recordReads('session', 1);
     } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `players/${fbUser.uid}`);
+      this.handleWriteError(err, OperationType.GET, `players/${fbUser.uid}`);
     }
 
     if (playerSnap.exists()) {
@@ -189,7 +295,7 @@ class MaydanBackendService {
     }
 
     if (!settingsSnap.exists()) {
-      const defaultCode = 'MDN-606';
+      const initialCode = generateSecureInviteCode(12);
       const batch = writeBatch(db);
       batch.set(settingsRef, {
         teamId: TEAM_ID,
@@ -198,7 +304,7 @@ class MaydanBackendService {
         primaryColor: ROYAL_PRIMARY,
         secondaryColor: ROYAL_SECONDARY,
         logo: '',
-        inviteCode: defaultCode,
+        inviteCode: initialCode,
         requireApproval: true,
         lockSkills: false,
         themeVersion: 'royal_v2',
@@ -212,8 +318,8 @@ class MaydanBackendService {
         logo: '',
         updatedAt: serverTimestamp(),
       });
-      batch.set(doc(db, 'inviteCodes', defaultCode), {
-        code: defaultCode,
+      batch.set(doc(db, 'inviteCodes', initialCode), {
+        code: initialCode,
         active: true,
         requireApproval: true,
         updatedAt: serverTimestamp(),
@@ -295,8 +401,8 @@ class MaydanBackendService {
       throw new Error('يرجى تسجيل الدخول بحساب Google أولاً');
     }
 
-    const code = sanitizeInviteCode(input.inviteCode, '');
-    if (!code) throw new Error('كود الدعوة غير صالح');
+    const code = sanitizeInviteCode(input.inviteCode);
+    if (!code) throw new Error('كود الدعوة غير صالح (يجب أن يكون 8 خانات على الأقل)');
 
     let codeSnap;
     try {
@@ -388,48 +494,106 @@ class MaydanBackendService {
     return { joinedDirectly: true };
   }
 
+  private mergePhotosIntoPlayers(state: BackendState): void {
+    state.players.forEach((p) => {
+      const pid = String(p.id || '');
+      const ph = this.photosMap[pid];
+      if (ph) {
+        p.photo = ph.dataUrl;
+        p.photoZoom = ph.photoZoom;
+        p.photoY = ph.photoY;
+      } else if (!p.hasPhoto) {
+        p.photo = '';
+      }
+    });
+  }
+
+  /**
+   * Non-realtime one-shot fetch of aggregated peer rating stats (count >= 3).
+   * Intentionally NOT subscribed via onSnapshot so live score deltas cannot
+   * de-anonymize individual raters when they submit a ballot.
+   */
+  async refreshPeerRatingStats(
+    state?: BackendState
+  ): Promise<Record<string, { count: number; totalScore: number }>> {
+    const targetState = state || this.activeState;
+    if (!targetState) return {};
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, 'peerRatingStats'),
+          where('teamId', '==', TEAM_ID),
+          where('count', '>=', 3)
+        )
+      );
+      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+      const statsMap: Record<string, { count: number; totalScore: number }> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const cnt = Number(data.count || 0);
+        if (cnt >= 3) {
+          statsMap[d.id] = {
+            count: cnt,
+            totalScore: Number(data.totalScore || 0),
+          };
+        }
+      });
+      targetState.peerRatingStats = statsMap;
+      if (this.activeOnUpdate) this.activeOnUpdate();
+      return statsMap;
+    } catch (err) {
+      if (this.activeOnError) {
+        this.handleListenerError(err, OperationType.LIST, 'peerRatingStats', this.activeOnError);
+      }
+      return targetState.peerRatingStats || {};
+    }
+  }
+
   subscribeTeamData(
     uid: string,
     isCaptain: boolean,
     state: BackendState,
     onUpdate: () => void,
-    onError: (msg: string) => void
+    onError: (msg: string) => void,
+    initialTab = 'fifa'
   ): void {
     this.stopListeners();
     this.activeUid = uid;
     this.activeIsCaptain = isCaptain;
+    this.activeState = state;
+    this.activeOnUpdate = onUpdate;
+    this.activeOnError = onError;
     this.photosMap = {};
 
     const handleErr = (op: OperationType, path: string) => (err: unknown) => {
-      onError('تعذّر تحديث بعض البيانات من الخادم.');
-      try {
-        handleFirestoreError(err, op, path);
-      } catch {
-        // Logged by handleFirestoreError
+      this.handleListenerError(err, op, path, onError);
+    };
+
+    // Hydrate non-sensitive local cache first so UI stays resilient on slow 3G / quota limits
+    const cached = this.loadTeamSnapshotCache();
+    if (cached) {
+      if (cached.settings && Object.keys(cached.settings).length && !Object.keys(state.settings || {}).length) {
+        state.settings = { ...cached.settings };
       }
-    };
+      if (Array.isArray(cached.players) && cached.players.length && !state.players.length) {
+        state.players = cached.players;
+      }
+      if (cached.pitchSession && !state.pitchSession) {
+        state.pitchSession = cached.pitchSession;
+      }
+    }
 
-    const mergePhotosIntoPlayers = () => {
-      state.players.forEach((p) => {
-        const pid = String(p.id || '');
-        const ph = this.photosMap[pid];
-        if (ph) {
-          p.photo = ph.dataUrl;
-          p.photoZoom = ph.photoZoom;
-          p.photoY = ph.photoY;
-        } else if (!p.hasPhoto) {
-          p.photo = '';
-        }
-      });
-    };
-
-    // 1. Settings
-    this.unsubs.push(
+    // ==================== CORE LISTENERS ONLY (3 minimal subscriptions) ====================
+    // 1. Team Settings (1 doc)
+    this.coreUnsubs.push(
       onSnapshot(
         doc(db, 'settings', 'team'),
         (snap) => {
+          quotaMonitor.recordReads('core', 1);
+          quotaMonitor.markQuotaExceeded(false);
           if (snap.exists()) {
             state.settings = { ...snap.data() };
+            this.saveTeamSnapshotCache(state);
             onUpdate();
           }
         },
@@ -437,195 +601,314 @@ class MaydanBackendService {
       )
     );
 
-    // 2. Players
-    this.unsubs.push(
+    // 2. Team Roster (N player docs — lean, no portrait images)
+    this.coreUnsubs.push(
       onSnapshot(
         query(collection(db, 'players'), where('teamId', '==', TEAM_ID)),
         (snap) => {
+          quotaMonitor.recordReads('core', Math.max(1, snap.docChanges().length || snap.size));
+          quotaMonitor.markQuotaExceeded(false);
           state.players = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          mergePhotosIntoPlayers();
+          this.mergePhotosIntoPlayers(state);
+          this.saveTeamSnapshotCache(state);
           onUpdate();
         },
         handleErr(OperationType.LIST, 'players')
       )
     );
 
-    // 3. Player Photos (stored separately to keep /players lean)
-    this.unsubs.push(
+    // 3. Current User's Own Portrait ONLY (1 doc instead of whole team)
+    this.coreUnsubs.push(
       onSnapshot(
-        query(collection(db, 'playerPhotos'), where('teamId', '==', TEAM_ID)),
+        doc(db, 'playerPhotos', uid),
         (snap) => {
-          const nextMap: Record<string, { dataUrl: string; photoZoom: number; photoY: number }> = {};
-          snap.docs.forEach((d) => {
-            const data = d.data();
-            nextMap[d.id] = {
+          quotaMonitor.recordReads('core', 1);
+          if (snap.exists()) {
+            const data = snap.data();
+            this.photosMap[uid] = {
               dataUrl: sanitizeImageDataUrl(data.dataUrl, 250000),
               photoZoom: Number(data.photoZoom || 105),
               photoY: typeof data.photoY === 'number' ? data.photoY : 18,
             };
-          });
-          this.photosMap = nextMap;
-          mergePhotosIntoPlayers();
-          onUpdate();
-        },
-        handleErr(OperationType.LIST, 'playerPhotos')
-      )
-    );
-
-    // 4. Attendance
-    this.unsubs.push(
-      onSnapshot(
-        query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID)),
-        (snap) => {
-          state.attendance = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          onUpdate();
-        },
-        handleErr(OperationType.LIST, 'attendance')
-      )
-    );
-
-    // 5. Matches
-    this.unsubs.push(
-      onSnapshot(
-        query(collection(db, 'matches'), where('teamId', '==', TEAM_ID)),
-        (snap) => {
-          state.matches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          onUpdate();
-        },
-        handleErr(OperationType.LIST, 'matches')
-      )
-    );
-
-    // 6. Reports
-    this.unsubs.push(
-      onSnapshot(
-        query(collection(db, 'reports'), where('teamId', '==', TEAM_ID)),
-        (snap) => {
-          state.reports = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          onUpdate();
-        },
-        handleErr(OperationType.LIST, 'reports')
-      )
-    );
-
-    // 7. Suggestions
-    this.unsubs.push(
-      onSnapshot(
-        query(collection(db, 'suggestions'), where('teamId', '==', TEAM_ID)),
-        (snap) => {
-          state.suggestions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          onUpdate();
-        },
-        handleErr(OperationType.LIST, 'suggestions')
-      )
-    );
-
-    // 8. Tactics
-    this.unsubs.push(
-      onSnapshot(
-        doc(db, 'tactics', 'current'),
-        (snap) => {
-          if (snap.exists()) {
-            const d = snap.data();
-            state.tactics = {
-              formation: sanitizeFormation(d.formation),
-              slots: (d.slots && typeof d.slots === 'object' ? d.slots : {}) as Record<string, string>,
-            };
-            onUpdate();
+          } else {
+            delete this.photosMap[uid];
           }
-        },
-        handleErr(OperationType.GET, 'tactics/current')
-      )
-    );
-
-    // 9. Aggregated Peer Rating Stats (ONLY count >= 3 enforced server-side!)
-    this.unsubs.push(
-      onSnapshot(
-        query(
-          collection(db, 'peerRatingStats'),
-          where('teamId', '==', TEAM_ID),
-          where('count', '>=', 3)
-        ),
-        (snap) => {
-          const statsMap: Record<string, { count: number; totalScore: number }> = {};
-          snap.docs.forEach((d) => {
-            const data = d.data();
-            statsMap[d.id] = {
-              count: Number(data.count || 0),
-              totalScore: Number(data.totalScore || 0),
-            };
-          });
-          state.peerRatingStats = statsMap;
+          this.mergePhotosIntoPlayers(state);
           onUpdate();
         },
-        handleErr(OperationType.LIST, 'peerRatingStats')
+        handleErr(OperationType.GET, `playerPhotos/${uid}`)
       )
     );
 
-    // 10. Admin Ratings
-    this.unsubs.push(
-      onSnapshot(
-        query(collection(db, 'adminRatings'), where('teamId', '==', TEAM_ID)),
-        (snap) => {
-          state.adminRatings = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          onUpdate();
-        },
-        handleErr(OperationType.LIST, 'adminRatings')
-      )
-    );
+    // Subscribe lazily to ONLY the initially visible tab
+    this.setActiveTab(initialTab);
+  }
 
-    // 11. PRIVATE Readiness (Players query ONLY own ownerUid; Captain queries team)
-    const readinessQuery = isCaptain
-      ? query(collection(db, 'readiness'), where('teamId', '==', TEAM_ID))
-      : query(collection(db, 'readiness'), where('ownerUid', '==', uid));
-    this.unsubs.push(
-      onSnapshot(
-        readinessQuery,
-        (snap) => {
-          state.readiness = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          onUpdate();
-        },
-        handleErr(OperationType.LIST, 'readiness')
-      )
-    );
+  /**
+   * Lazy Per-Tab Listener Manager:
+   * Detaches listeners for the previous tab and subscribes ONLY to the
+   * collections required by the currently visible tab.
+   */
+  setActiveTab(tabId: string): void {
+    const uid = this.activeUid;
+    const state = this.activeState;
+    const onUpdate = this.activeOnUpdate;
+    const onError = this.activeOnError;
+    if (!uid || !state || !onUpdate || !onError) return;
+    if (this.activeTab === tabId && this.tabUnsubs.length > 0) return;
 
-    // 12. PRIVATE Injuries (Players query ONLY own ownerUid; Captain queries team)
-    const injuriesQuery = isCaptain
-      ? query(collection(db, 'injuries'), where('teamId', '==', TEAM_ID))
-      : query(collection(db, 'injuries'), where('ownerUid', '==', uid));
-    this.unsubs.push(
-      onSnapshot(
-        injuriesQuery,
-        (snap) => {
-          state.injuries = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          onUpdate();
-        },
-        handleErr(OperationType.LIST, 'injuries')
-      )
-    );
+    this.stopTabListeners();
+    this.activeTab = tabId;
 
-    // 13. Pending Join Requests (Captain ONLY)
-    if (isCaptain) {
-      this.unsubs.push(
+    const isCaptain = this.activeIsCaptain;
+    const handleErr = (op: OperationType, path: string) => (err: unknown) => {
+      this.handleListenerError(err, op, path, onError);
+    };
+
+    const subReports = () => {
+      this.tabUnsubs.push(
         onSnapshot(
-          query(collection(db, 'joinRequests'), where('status', '==', 'pending')),
+          query(collection(db, 'reports'), where('teamId', '==', TEAM_ID)),
           (snap) => {
-            state.pendingPlayers = snap.docs
-              .slice(0, MAX_PENDING_JOIN_REQUESTS)
-              .map((d) => ({ id: d.id, ...d.data() }));
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.reports = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             onUpdate();
           },
-          handleErr(OperationType.LIST, 'joinRequests')
+          handleErr(OperationType.LIST, 'reports')
         )
       );
+    };
+
+    const subMatches = () => {
+      this.tabUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'matches'), where('teamId', '==', TEAM_ID)),
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.matches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'matches')
+        )
+      );
+    };
+
+    const subAdminRatings = () => {
+      this.tabUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'adminRatings'), where('teamId', '==', TEAM_ID)),
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.adminRatings = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'adminRatings')
+        )
+      );
+    };
+
+    const subReadiness = () => {
+      const readinessQuery = isCaptain
+        ? query(collection(db, 'readiness'), where('teamId', '==', TEAM_ID))
+        : query(collection(db, 'readiness'), where('ownerUid', '==', uid));
+      this.tabUnsubs.push(
+        onSnapshot(
+          readinessQuery,
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.readiness = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'readiness')
+        )
+      );
+    };
+
+    const subInjuries = () => {
+      const injuriesQuery = isCaptain
+        ? query(collection(db, 'injuries'), where('teamId', '==', TEAM_ID))
+        : query(collection(db, 'injuries'), where('ownerUid', '==', uid));
+      this.tabUnsubs.push(
+        onSnapshot(
+          injuriesQuery,
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.injuries = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'injuries')
+        )
+      );
+    };
+
+    const subSuggestions = () => {
+      this.tabUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'suggestions'), where('teamId', '==', TEAM_ID)),
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.suggestions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'suggestions')
+        )
+      );
+    };
+
+    const subPitchHub = () => {
+      this.tabUnsubs.push(
+        onSnapshot(
+          doc(db, 'pitchSessions', 'current'),
+          (snap) => {
+            quotaMonitor.recordReads('tab', 1);
+            if (snap.exists()) {
+              state.pitchSession = { ...snap.data() };
+              this.saveTeamSnapshotCache(state);
+              onUpdate();
+            }
+          },
+          handleErr(OperationType.GET, 'pitchSessions/current')
+        )
+      );
+      const payQuery = isCaptain
+        ? query(collection(db, 'pitchPayments'), where('teamId', '==', TEAM_ID))
+        : query(collection(db, 'pitchPayments'), where('ownerUid', '==', uid));
+      this.tabUnsubs.push(
+        onSnapshot(
+          payQuery,
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.pitchPayments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'pitchPayments')
+        )
+      );
+    };
+
+    switch (tabId) {
+      case 'fifa': {
+        subReports();
+        // One-shot non-realtime fetch of aggregated peer stats on screen open
+        void this.refreshPeerRatingStats(state);
+        break;
+      }
+      case 'live': {
+        subReports();
+        break;
+      }
+      case 'tactics': {
+        this.tabUnsubs.push(
+          onSnapshot(
+            doc(db, 'tactics', 'current'),
+            (snap) => {
+              quotaMonitor.recordReads('tab', 1);
+              if (snap.exists()) {
+                const d = snap.data();
+                state.tactics = {
+                  formation: sanitizeFormation(d.formation),
+                  slots: (d.slots && typeof d.slots === 'object' ? d.slots : {}) as Record<string, string>,
+                };
+                onUpdate();
+              }
+            },
+            handleErr(OperationType.GET, 'tactics/current')
+          )
+        );
+        // Load all player portraits only when opening Tactical Studio (for Poster & Mini Cards)
+        this.tabUnsubs.push(
+          onSnapshot(
+            query(collection(db, 'playerPhotos'), where('teamId', '==', TEAM_ID)),
+            (snap) => {
+              quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+              const nextMap: Record<string, { dataUrl: string; photoZoom: number; photoY: number }> = {
+                ...this.photosMap,
+              };
+              snap.docs.forEach((d) => {
+                const data = d.data();
+                nextMap[d.id] = {
+                  dataUrl: sanitizeImageDataUrl(data.dataUrl, 250000),
+                  photoZoom: Number(data.photoZoom || 105),
+                  photoY: typeof data.photoY === 'number' ? data.photoY : 18,
+                };
+              });
+              this.photosMap = nextMap;
+              this.mergePhotosIntoPlayers(state);
+              onUpdate();
+            },
+            handleErr(OperationType.LIST, 'playerPhotos')
+          )
+        );
+        break;
+      }
+      case 'ready': {
+        this.tabUnsubs.push(
+          onSnapshot(
+            query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID)),
+            (snap) => {
+              quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+              state.attendance = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              onUpdate();
+            },
+            handleErr(OperationType.LIST, 'attendance')
+          )
+        );
+        subReadiness();
+        subReports();
+        subPitchHub();
+        break;
+      }
+      case 'stats': {
+        subMatches();
+        subReports();
+        subAdminRatings();
+        // One-shot non-realtime fetch of aggregated peer stats on screen open
+        void this.refreshPeerRatingStats(state);
+        break;
+      }
+      case 'injuries': {
+        subInjuries();
+        break;
+      }
+      case 'social': {
+        subSuggestions();
+        break;
+      }
+      case 'admin': {
+        if (isCaptain) {
+          this.tabUnsubs.push(
+            onSnapshot(
+              query(collection(db, 'joinRequests'), where('status', '==', 'pending')),
+              (snap) => {
+                quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+                state.pendingPlayers = snap.docs
+                  .slice(0, MAX_PENDING_JOIN_REQUESTS)
+                  .map((d) => ({ id: d.id, ...d.data() }));
+                onUpdate();
+              },
+              handleErr(OperationType.LIST, 'joinRequests')
+            )
+          );
+          subMatches();
+          subReadiness();
+          subInjuries();
+          subAdminRatings();
+          subSuggestions();
+        }
+        break;
+      }
+      default:
+        break;
     }
+
+    quotaMonitor.setActiveListeners(this.getActiveListenerCount());
   }
 
   async dispatchAction(
     action: string,
     payload: Record<string, unknown>,
     currentUser: Record<string, unknown>
-  ): Promise<void> {
+  ): Promise<Record<string, unknown> | void> {
     const uid = this.activeUid || auth.currentUser?.uid;
     if (!uid) throw new Error('يرجى تسجيل الدخول أولاً');
 
@@ -1045,11 +1328,14 @@ class MaydanBackendService {
         const primaryColor = sanitizeHexColor(payload.primaryColor, ROYAL_PRIMARY);
         const secondaryColor = sanitizeHexColor(payload.secondaryColor, ROYAL_SECONDARY);
         const logo = sanitizeImageDataUrl(payload.logo, 180000);
-        const inviteCode = sanitizeInviteCode(payload.inviteCode, 'MDN-606');
-        const requireApproval = Boolean(payload.requireApproval);
+        const inviteCode = sanitizeInviteCode(payload.inviteCode);
+        if (!inviteCode) {
+          throw new Error('كود الدعوة غير صالح (يجب أن يكون 8 خانات على الأقل)');
+        }
+        const requireApproval = payload.requireApproval !== false;
         const lockSkills = Boolean(payload.lockSkills);
         const prevCode = payload.prevInviteCode
-          ? sanitizeInviteCode(payload.prevInviteCode, '')
+          ? sanitizeInviteCode(payload.prevInviteCode)
           : '';
 
         const batch = writeBatch(db);
@@ -1091,6 +1377,38 @@ class MaydanBackendService {
         return;
       }
 
+      case 'rotateInviteCode': {
+        if (!this.activeIsCaptain) {
+          throw new Error('تدوير كود الدعوة متاح للكابتن فقط');
+        }
+        const newCode = generateSecureInviteCode(12);
+        const prevCode = payload.prevInviteCode
+          ? sanitizeInviteCode(payload.prevInviteCode)
+          : '';
+        const requireApproval = payload.requireApproval !== false;
+
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'settings', 'team'), {
+          inviteCode: newCode,
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(doc(db, 'inviteCodes', newCode), {
+          code: newCode,
+          active: true,
+          requireApproval,
+          updatedAt: serverTimestamp(),
+        });
+        if (prevCode && prevCode !== newCode) {
+          batch.delete(doc(db, 'inviteCodes', prevCode));
+        }
+        try {
+          await batch.commit();
+        } catch (err) {
+          handleFirestoreError(err, OperationType.WRITE, `inviteCodes/${newCode}`);
+        }
+        return { inviteCode: newCode };
+      }
+
       case 'updateRole': {
         const targetId = String(payload.id || '');
         const ownerUid = String(payload.ownerUid || '');
@@ -1116,6 +1434,73 @@ class MaydanBackendService {
           await batch.commit();
         } catch (err) {
           handleFirestoreError(err, OperationType.WRITE, `players/${targetId}`);
+        }
+        return;
+      }
+
+      case 'pitchSession': {
+        if (!this.activeIsCaptain) {
+          throw new Error('تعديل موعد المباراة والقَطّة متاح للكابتن فقط');
+        }
+        const sessionDoc = {
+          teamId: TEAM_ID,
+          title: clampStr(payload.title || 'مباراة السداسي الأسبوعية', 80) || 'مباراة السداسي الأسبوعية',
+          matchDate: sanitizeDateStr(payload.matchDate),
+          matchTime: sanitizeTimeStr(payload.matchTime, '20:30'),
+          venue: clampStr(payload.venue || 'ملعب السداسي', 80) || 'ملعب السداسي',
+          totalCost: Math.round(clampNum(payload.totalCost, 0, 100000, 0) * 10) / 10,
+          currency: clampStr(payload.currency || 'ريال', 20) || 'ريال',
+          confirmedCount: Math.round(clampNum(payload.confirmedCount, 0, 100, 0)),
+          paidCount: Math.round(clampNum(payload.paidCount, 0, 100, 0)),
+          paidTotal: Math.round(clampNum(payload.paidTotal, 0, 100000, 0) * 10) / 10,
+          updatedAt: serverTimestamp(),
+        };
+        try {
+          await setDoc(doc(db, 'pitchSessions', 'current'), sessionDoc);
+        } catch (err) {
+          this.handleWriteError(err, OperationType.WRITE, 'pitchSessions/current');
+        }
+        return;
+      }
+
+      case 'pitchPayment': {
+        if (!this.activeIsCaptain) {
+          throw new Error('تحديث حالة دفع القَطّة متاح للكابتن فقط');
+        }
+        const pay = (payload.payment || {}) as Record<string, unknown>;
+        const sess = (payload.session || {}) as Record<string, unknown>;
+        const playerId = String(pay.playerId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        if (!playerId) throw new Error('معرّف اللاعب غير صالح');
+        const paymentId = `current__${playerId}`;
+
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'pitchPayments', paymentId), {
+          teamId: TEAM_ID,
+          sessionId: 'current',
+          playerId,
+          ownerUid: String(pay.ownerUid || playerId).slice(0, 128),
+          playerName: clampStr(pay.playerName || 'لاعب', 80) || 'لاعب',
+          amount: Math.round(clampNum(pay.amount, 0, 10000, 0) * 10) / 10,
+          paid: Boolean(pay.paid),
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(doc(db, 'pitchSessions', 'current'), {
+          teamId: TEAM_ID,
+          title: clampStr(sess.title || 'مباراة السداسي الأسبوعية', 80) || 'مباراة السداسي الأسبوعية',
+          matchDate: sanitizeDateStr(sess.matchDate),
+          matchTime: sanitizeTimeStr(sess.matchTime, '20:30'),
+          venue: clampStr(sess.venue || 'ملعب السداسي', 80) || 'ملعب السداسي',
+          totalCost: Math.round(clampNum(sess.totalCost, 0, 100000, 0) * 10) / 10,
+          currency: clampStr(sess.currency || 'ريال', 20) || 'ريال',
+          confirmedCount: Math.round(clampNum(sess.confirmedCount, 0, 100, 0)),
+          paidCount: Math.round(clampNum(sess.paidCount, 0, 100, 0)),
+          paidTotal: Math.round(clampNum(sess.paidTotal, 0, 100000, 0) * 10) / 10,
+          updatedAt: serverTimestamp(),
+        });
+        try {
+          await batch.commit();
+        } catch (err) {
+          this.handleWriteError(err, OperationType.WRITE, `pitchPayments/${paymentId}`);
         }
         return;
       }
@@ -1346,6 +1731,7 @@ class MaydanBackendService {
       'suggestions',
       'adminRatings',
       'peerRatingStats',
+      'pitchPayments',
     ];
     for (const colName of colNames) {
       const snap = await getDocs(query(collection(db, colName), where('teamId', '==', TEAM_ID)));
@@ -1393,14 +1779,11 @@ declare global {
       sanitizeImageDataUrl: typeof import('./security').sanitizeImageDataUrl;
       sanitizeBackupImport: typeof import('./security').sanitizeBackupImport;
       computePeerAggregate: typeof import('./security').computePeerAggregate;
+      generateSecureInviteCode: typeof import('./security').generateSecureInviteCode;
+      sanitizeInviteCode: typeof import('./security').sanitizeInviteCode;
     };
   }
 }
-
-import {
-  computePeerAggregate,
-  escapeHtml,
-} from './security';
 
 window.MaydanBackend = backend;
 window.MaydanSecurity = {
@@ -1408,6 +1791,8 @@ window.MaydanSecurity = {
   sanitizeImageDataUrl,
   sanitizeBackupImport,
   computePeerAggregate,
+  generateSecureInviteCode,
+  sanitizeInviteCode,
 };
 
 backend.init();

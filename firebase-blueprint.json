@@ -25,7 +25,7 @@
         "primaryColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "maxLength": 7 },
         "secondaryColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "maxLength": 7 },
         "logo": { "type": "string", "maxLength": 180000 },
-        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9\\-]{4,20}$", "maxLength": 20 },
+        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9\\-]{8,20}$", "minLength": 8, "maxLength": 20 },
         "requireApproval": { "type": "boolean" },
         "lockSkills": { "type": "boolean" },
         "themeVersion": { "type": "string", "maxLength": 24 },
@@ -38,7 +38,7 @@
       "description": "Active team invite code verified by document ID without exposing list access.",
       "type": "object",
       "properties": {
-        "code": { "type": "string", "pattern": "^[A-Z0-9\\-]{4,20}$", "maxLength": 20 },
+        "code": { "type": "string", "pattern": "^[A-Z0-9\\-]{8,20}$", "minLength": 8, "maxLength": 20 },
         "active": { "type": "boolean" },
         "requireApproval": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -112,7 +112,7 @@
         "name": { "type": "string", "minLength": 1, "maxLength": 80 },
         "jersey": { "type": "number" },
         "primaryPos": { "type": "string", "enum": ["حارس مرمى", "مدافع", "لاعب وسط", "جناح", "مهاجم"] },
-        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9\\-]{4,20}$", "maxLength": 20 },
+        "inviteCode": { "type": "string", "pattern": "^[A-Z0-9\\-]{8,20}$", "minLength": 8, "maxLength": 20 },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -267,6 +267,41 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["teamId", "formation", "slots", "updatedAt"]
+    },
+    "PitchSession": {
+      "title": "PitchSession",
+      "description": "Upcoming match schedule and aggregate pitch fee totals (no per-player payment identity).",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "matchDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "matchTime": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$", "maxLength": 5 },
+        "venue": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "totalCost": { "type": "number" },
+        "currency": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "confirmedCount": { "type": "number" },
+        "paidCount": { "type": "number" },
+        "paidTotal": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "title", "matchDate", "matchTime", "venue", "totalCost", "currency", "confirmedCount", "paidCount", "paidTotal", "updatedAt"]
+    },
+    "PitchPayment": {
+      "title": "PitchPayment",
+      "description": "Private per-player pitch fee payment record readable strictly by owner and Captain.",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "sessionId": { "type": "string", "enum": ["current"] },
+        "playerId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "playerName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "amount": { "type": "number" },
+        "paid": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teamId", "sessionId", "playerId", "ownerUid", "playerName", "amount", "paid", "updatedAt"]
     }
   },
   "firestore": {
@@ -337,6 +372,14 @@
     "/tactics/{docId}": {
       "schema": { "$ref": "#/entities/TacticsConfig" },
       "description": "Team tactical board state (single doc: current)."
+    },
+    "/pitchSessions/{docId}": {
+      "schema": { "$ref": "#/entities/PitchSession" },
+      "description": "Upcoming match schedule and aggregate pitch fee totals (single doc: current)."
+    },
+    "/pitchPayments/{paymentId}": {
+      "schema": { "$ref": "#/entities/PitchPayment" },
+      "description": "Private per-player pitch fee payment status keyed as current__{playerId} (owner + Captain only)."
     }
   }
 }
