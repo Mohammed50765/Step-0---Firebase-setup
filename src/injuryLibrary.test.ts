@@ -39,9 +39,12 @@ test('INJURIES_LIBRARY_9 contains exactly 9 required 6v6 injuries with all 7 str
     assert.ok(item.causes6v6.length >= 20, `Missing 6v6 causes for ${item.id}`);
     assert.ok(item.warningSigns.length >= 2, `Missing warningSigns for ${item.id}`);
     assert.ok(item.safeFirstAid.length >= 3, `Missing safeFirstAid for ${item.id}`);
+    assert.ok(item.avoidActions.length >= 2, `Missing avoidActions for ${item.id}`);
     assert.ok(item.seeDoctorNow.length >= 3, `Missing seeDoctorNow for ${item.id}`);
     assert.ok(item.prevention.length >= 3, `Missing prevention for ${item.id}`);
     assert.equal(item.returnStages.length, 4, `Expected 4 gradual return stages for ${item.id}`);
+    assert.ok(item.sourceRef.length >= 10, `Missing sourceRef for ${item.id}`);
+    assert.ok(/^\d{4}-\d{2}$/.test(item.lastReviewed), `Invalid lastReviewed for ${item.id}`);
   }
 });
 
@@ -53,9 +56,11 @@ test('INJURIES_LIBRARY_9 strictly excludes medication names and dosages', () => 
       item.causes6v6,
       ...item.warningSigns,
       ...item.safeFirstAid,
+      ...item.avoidActions,
       ...item.seeDoctorNow,
       ...item.prevention,
       ...item.returnStages,
+      item.sourceRef,
     ].join(' ')
   )
     .join(' ')
@@ -71,7 +76,7 @@ test('INJURIES_LIBRARY_9 strictly excludes medication names and dosages', () => 
   assert.ok(INJURY_DISCLAIMER_AR.includes('ليس تشخيصاً طبياً'));
 });
 
-test('renderInjuryDetailHtml includes all 7 sections and prominent doctor warning box', () => {
+test('renderInjuryDetailHtml includes all 7 sections, what-to-avoid, source, and prominent doctor warning box', () => {
   const ankle = getInjuryByIdOrName('التواء الكاحل');
   assert.ok(ankle);
   const html = renderInjuryDetailHtml(ankle);
@@ -79,9 +84,11 @@ test('renderInjuryDetailHtml includes all 7 sections and prominent doctor warnin
   assert.ok(html.includes('2. الأسباب الشائعة في ملاعب السداسي'));
   assert.ok(html.includes('3. الأعراض التحذيرية'));
   assert.ok(html.includes('4. الإسعاف الأولي الآمن'));
+  assert.ok(html.includes('ما يجب تجنّبه'));
   assert.ok(html.includes('5. متى تراجع الطبيب فوراً'));
   assert.ok(html.includes('6. الوقاية قبل وأثناء المباراة'));
   assert.ok(html.includes('7. مراحل العودة التدريجية للّعب'));
+  assert.ok(html.includes('المرجع التوعوي'));
   assert.ok(html.includes('alert-danger'));
   assert.ok(html.includes('btnLogThisInjury'));
 });

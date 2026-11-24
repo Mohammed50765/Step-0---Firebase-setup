@@ -94,7 +94,12 @@ export function sanitizeDateStr(dateStr: unknown): string {
 const VALID_POS = new Set(['حارس مرمى', 'مدافع', 'لاعب وسط', 'جناح', 'مهاجم']);
 const VALID_SECONDARY_POS = new Set(['لا يوجد', 'حارس مرمى', 'مدافع', 'لاعب وسط', 'جناح', 'مهاجم']);
 const VALID_FOOT = new Set(['يمين', 'يسار', 'كلتاهما']);
-const VALID_FORMATIONS = new Set(['2-2-1', '1-2-2', '2-1-2', '3-1-1', '1-3-1']);
+const VALID_FORMATIONS = new Set([
+  '2-2-1', '1-2-2', '2-1-2', '3-1-1', '1-3-1',
+  '1-2-1', '2-2', '1-1-2',
+  '2-3-1', '3-2-1', '2-2-2',
+  '4-3-3', '4-2-3-1', '3-5-2', '4-4-2',
+]);
 
 export function sanitizePrimaryPos(pos: unknown): string {
   const s = String(pos ?? '').trim();
@@ -128,6 +133,60 @@ export function sanitizeSkills(raw: Record<string, unknown> | undefined, maxCap 
     out[key] = Math.round(clampNum(raw?.[key], 1, maxCap, 6));
   }
   return out;
+}
+
+export const STAT6_KEYS = ['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY'] as const;
+export type Stat6Key = (typeof STAT6_KEYS)[number];
+export type Stats6Map = Record<Stat6Key, number>;
+
+const VALID_ROLE_OVERRIDES = new Set(['', 'ST', 'CAM_WINGER', 'CM', 'DEF_CB', 'GK']);
+const VALID_MATCH_RESULTS = new Set(['فوز', 'تعادل', 'خسارة']);
+
+export function sanitizeStats6(raw: unknown): Stats6Map | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const out: Stats6Map = { PAC: 60, SHO: 60, PAS: 60, DRI: 60, DEF: 60, PHY: 60 };
+  let sum = 0;
+  for (const k of STAT6_KEYS) {
+    const v = Math.round(Number(obj[k]));
+    if (!Number.isFinite(v) || v < 40 || v > 85) return null;
+    out[k] = v;
+    sum += v;
+  }
+  if (sum !== 360) return null;
+  return out;
+}
+
+export function stats6ToLegacySkills(s6: Stats6Map): SkillsMap {
+  const to10 = (v: number) => Math.max(1, Math.min(10, Math.round(v / 10)));
+  return {
+    speed: to10(s6.PAC),
+    shooting: to10(s6.SHO),
+    passing: to10(s6.PAS),
+    dribbling: to10(s6.DRI),
+    defending: to10(s6.DEF),
+    stamina: to10(s6.PHY),
+    vision: to10(s6.PAS),
+    teamwork: to10((s6.PAS + s6.PHY) / 2),
+    control: to10(s6.DRI),
+    positioning: to10((s6.SHO + s6.DEF) / 2),
+  };
+}
+
+export function sanitizeRoleOverride(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  return VALID_ROLE_OVERRIDES.has(s) ? s : '';
+}
+
+export function sanitizePitchMode(raw: unknown): '5v5' | '6v6' | '7v7' | '11v11' {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (s === '5v5' || s === '6v6' || s === '7v7' || s === '11v11') return s;
+  return '6v6';
+}
+
+export function sanitizeMatchResult(raw: unknown): 'فوز' | 'تعادل' | 'خسارة' {
+  const s = String(raw ?? '').trim();
+  return VALID_MATCH_RESULTS.has(s) ? (s as 'فوز' | 'تعادل' | 'خسارة') : 'فوز';
 }
 
 export function computePeerAggregate(stat: { count?: number; totalScore?: number } | null | undefined): { avg: string; count: number } | null {
@@ -217,6 +276,8 @@ export function sanitizeBackupImport(raw: unknown): CleanBackupPayload {
         photoZoom: Math.round(clampNum(p.photoZoom, 90, 160, 105)),
         photoY: Math.round(clampNum(p.photoY, 0, 60, 18)),
         skills: sanitizeSkills(p.skills as Record<string, unknown> | undefined, 10),
+        ...(sanitizeStats6(p.stats6) ? { stats6: sanitizeStats6(p.stats6) } : {}),
+        roleOverride: sanitizeRoleOverride(p.roleOverride),
         top3Strengths: clampStr(p.top3Strengths, 200),
         weak3Points: clampStr(p.weak3Points, 200),
         seasonGoal: clampStr(p.seasonGoal, 200),
@@ -260,6 +321,9 @@ export function sanitizeBackupImport(raw: unknown): CleanBackupPayload {
       bestMoment: clampStr(r.bestMoment, 200),
       worstMoment: clampStr(r.worstMoment, 200),
       motmVote: clampStr(r.motmVote, 128),
+      pitchMode: sanitizePitchMode(r.pitchMode),
+      matchResult: sanitizeMatchResult(r.matchResult),
+      goalsConceded: Math.round(clampNum(r.goalsConceded, 0, 30, 0)),
     }));
 
   const attendance = (Array.isArray(obj.attendance) ? obj.attendance : [])
@@ -272,7 +336,7 @@ export function sanitizeBackupImport(raw: unknown): CleanBackupPayload {
       playerName: clampStr(a.playerName || 'لاعب', 80) || 'لاعب',
       date: sanitizeDateStr(a.date),
       type: clampStr(a.type || 'مباراة', 40) || 'مباراة',
-      status: a.status === 'ما فيني' ? 'ما فيني' : 'جاي',
+      status: a.status === 'ما فيني' ? 'ما فيني' : a.status === 'متردد' ? 'متردد' : 'جاي',
     }));
 
   const readiness = (Array.isArray(obj.readiness) ? obj.readiness : [])

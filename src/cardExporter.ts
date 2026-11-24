@@ -25,69 +25,171 @@ interface TierPalette {
   borderA: string;
   borderB: string;
   borderC: string;
+  borderD: string;
+  borderE: string;
+  innerStroke: string;
   bgTop: string;
   bgMid: string;
   bgBot: string;
   glow: string;
+  halo: string;
   accent: string;
   subText: string;
+  ovrTop: string;
+  ovrMid: string;
+  ovrBot: string;
+  vein: string;
+  facetLit: string;
+  facetMid: string;
+  facetEdge: string;
+  crysHi: string;
+  crysMid: string;
+  crysDeep: string;
+  crysEdge: string;
+  spark: string;
+  ray: string;
 }
 
 const TIER_PALETTES: Record<CardExportPayload['tierKey'], TierPalette> = {
   bronze: {
-    borderA: '#E7B587',
-    borderB: '#B47846',
-    borderC: '#5C3A1E',
-    bgTop: '#261911',
-    bgMid: '#0e0c0b',
-    bgBot: '#1f140d',
-    glow: 'rgba(217, 155, 102, 0.30)',
-    accent: '#E7B587',
-    subText: '#fed7aa',
+    borderA: '#FFF5E6',
+    borderB: '#E5984C',
+    borderC: '#6B2E0E',
+    borderD: '#FCD5A4',
+    borderE: '#9A481A',
+    innerStroke: 'rgba(252, 213, 164, 0.68)',
+    bgTop: '#2a180b',
+    bgMid: '#0a0706',
+    bgBot: '#211309',
+    glow: 'rgba(229, 152, 76, 0.44)',
+    halo: 'rgba(244, 178, 108, 0.44)',
+    accent: '#F4B878',
+    subText: '#FFEDD5',
+    ovrTop: '#FFF7ED',
+    ovrMid: '#E5984C',
+    ovrBot: '#7C3812',
+    vein: 'rgba(244, 184, 120, 0.44)',
+    facetLit: 'rgba(255, 245, 230, 0.16)',
+    facetMid: 'rgba(229, 152, 76, 0.20)',
+    facetEdge: 'rgba(244, 184, 120, 0.46)',
+    crysHi: '#FFF7ED',
+    crysMid: '#E5984C',
+    crysDeep: '#6B2E0E',
+    crysEdge: 'rgba(255, 237, 213, 0.85)',
+    spark: '#FFF7ED',
+    ray: 'rgba(235, 156, 82, 0.24)',
   },
   silver: {
-    borderA: '#F8FAFC',
+    borderA: '#FFFFFF',
     borderB: '#CBD5E1',
-    borderC: '#475569',
-    bgTop: '#1e242d',
-    bgMid: '#0c0e12',
-    bgBot: '#191e26',
-    glow: 'rgba(226, 232, 240, 0.28)',
+    borderC: '#334155',
+    borderD: '#F8FAFC',
+    borderE: '#64748B',
+    innerStroke: 'rgba(241, 245, 249, 0.68)',
+    bgTop: '#1c2738',
+    bgMid: '#070a0f',
+    bgBot: '#151e2c',
+    glow: 'rgba(203, 213, 225, 0.42)',
+    halo: 'rgba(226, 232, 240, 0.42)',
     accent: '#E2E8F0',
-    subText: '#f1f5f9',
+    subText: '#FFFFFF',
+    ovrTop: '#FFFFFF',
+    ovrMid: '#E2E8F0',
+    ovrBot: '#475569',
+    vein: 'rgba(226, 232, 240, 0.44)',
+    facetLit: 'rgba(255, 255, 255, 0.14)',
+    facetMid: 'rgba(203, 213, 225, 0.18)',
+    facetEdge: 'rgba(226, 232, 240, 0.46)',
+    crysHi: '#FFFFFF',
+    crysMid: '#CBD5E1',
+    crysDeep: '#334155',
+    crysEdge: 'rgba(255, 255, 255, 0.88)',
+    spark: '#FFFFFF',
+    ray: 'rgba(226, 232, 240, 0.22)',
   },
   gold: {
-    borderA: '#FEF08A',
+    borderA: '#FFFBEB',
     borderB: '#FACC15',
-    borderC: '#854D0E',
-    bgTop: '#241f0e',
-    bgMid: '#0d0e13',
-    bgBot: '#1e190b',
-    glow: 'rgba(250, 204, 21, 0.34)',
+    borderC: '#78350F',
+    borderD: '#FEF08A',
+    borderE: '#B45309',
+    innerStroke: 'rgba(254, 240, 138, 0.72)',
+    bgTop: '#221b09',
+    bgMid: '#060608',
+    bgBot: '#1a1508',
+    glow: 'rgba(250, 204, 21, 0.48)',
+    halo: 'rgba(250, 204, 21, 0.46)',
     accent: '#FACC15',
-    subText: '#fef08a',
+    subText: '#FEF08A',
+    ovrTop: '#FFFFFF',
+    ovrMid: '#FACC15',
+    ovrBot: '#92400E',
+    vein: 'rgba(250, 204, 21, 0.48)',
+    facetLit: 'rgba(255, 251, 235, 0.16)',
+    facetMid: 'rgba(250, 204, 21, 0.20)',
+    facetEdge: 'rgba(250, 204, 21, 0.48)',
+    crysHi: '#FFFBEB',
+    crysMid: '#FACC15',
+    crysDeep: '#78350F',
+    crysEdge: 'rgba(254, 240, 138, 0.9)',
+    spark: '#FFFBEB',
+    ray: 'rgba(250, 204, 21, 0.24)',
   },
   totw: {
-    borderA: '#FEF08A',
+    borderA: '#FFFFFF',
     borderB: '#FACC15',
-    borderC: '#18181b',
-    bgTop: '#181509',
-    bgMid: '#09090b',
-    bgBot: '#1c1808',
-    glow: 'rgba(250, 204, 21, 0.42)',
-    accent: '#FACC15',
-    subText: '#fef08a',
+    borderC: '#181409',
+    borderD: '#FDE047',
+    borderE: '#CA8A04',
+    innerStroke: 'rgba(250, 204, 21, 0.86)',
+    bgTop: '#120f05',
+    bgMid: '#030305',
+    bgBot: '#100d04',
+    glow: 'rgba(250, 204, 21, 0.56)',
+    halo: 'rgba(250, 204, 21, 0.54)',
+    accent: '#FDE047',
+    subText: '#FEF9C3',
+    ovrTop: '#FFFFFF',
+    ovrMid: '#FACC15',
+    ovrBot: '#A16207',
+    vein: 'rgba(250, 204, 21, 0.68)',
+    facetLit: 'rgba(255, 251, 235, 0.14)',
+    facetMid: 'rgba(250, 204, 21, 0.24)',
+    facetEdge: 'rgba(250, 204, 21, 0.58)',
+    crysHi: '#FFFBEB',
+    crysMid: '#FACC15',
+    crysDeep: '#1C1606',
+    crysEdge: 'rgba(253, 224, 71, 0.95)',
+    spark: '#FEF08A',
+    ray: 'rgba(250, 204, 21, 0.30)',
   },
   icon: {
     borderA: '#FFFFFF',
-    borderB: '#FEF08A',
-    borderC: '#D97706',
-    bgTop: '#2e2918',
-    bgMid: '#12110d',
-    bgBot: '#2b2412',
-    glow: 'rgba(254, 249, 195, 0.42)',
-    accent: '#FEF08A',
-    subText: '#fffbeb',
+    borderB: '#FEF9C3',
+    borderC: '#9A6B12',
+    borderD: '#FFFFFF',
+    borderE: '#D4A017',
+    innerStroke: 'rgba(255, 251, 235, 0.88)',
+    bgTop: '#2e2715',
+    bgMid: '#0c0a07',
+    bgBot: '#262011',
+    glow: 'rgba(254, 249, 195, 0.58)',
+    halo: 'rgba(255, 251, 235, 0.58)',
+    accent: '#FEF9C3',
+    subText: '#FFFFFF',
+    ovrTop: '#FFFFFF',
+    ovrMid: '#FDE68A',
+    ovrBot: '#A16207',
+    vein: 'rgba(254, 249, 195, 0.56)',
+    facetLit: 'rgba(255, 255, 255, 0.18)',
+    facetMid: 'rgba(254, 249, 195, 0.22)',
+    facetEdge: 'rgba(254, 249, 195, 0.56)',
+    crysHi: '#FFFFFF',
+    crysMid: '#FEF3C7',
+    crysDeep: '#92660A',
+    crysEdge: 'rgba(255, 255, 255, 0.96)',
+    spark: '#FFFFFF',
+    ray: 'rgba(254, 249, 195, 0.32)',
   },
 };
 
@@ -126,6 +228,247 @@ function drawRoundedRectPath(
   ctx.closePath();
 }
 
+function drawSculptedShieldPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  const pts: Array<[number, number]> = [
+    [0.50, 0.006],
+    [0.72, 0.032],
+    [0.90, 0.024],
+    [0.986, 0.084],
+    [0.986, 0.735],
+    [0.94, 0.832],
+    [0.75, 0.928],
+    [0.50, 0.994],
+    [0.25, 0.928],
+    [0.06, 0.832],
+    [0.014, 0.735],
+    [0.014, 0.084],
+    [0.10, 0.024],
+    [0.28, 0.032],
+  ];
+  ctx.beginPath();
+  pts.forEach(([px, py], i) => {
+    const cx = x + px * w;
+    const cy = y + py * h;
+    if (i === 0) ctx.moveTo(cx, cy);
+    else ctx.lineTo(cx, cy);
+  });
+  ctx.closePath();
+}
+
+function drawDiamondDivider(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  accent: string,
+  lineColor: string
+): void {
+  const cx = x + w / 2;
+  ctx.save();
+  const leftGrad = ctx.createLinearGradient(x, y, cx - 18, y);
+  leftGrad.addColorStop(0, 'rgba(250, 204, 21, 0)');
+  leftGrad.addColorStop(1, lineColor);
+  ctx.strokeStyle = leftGrad;
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(cx - 16, y);
+  ctx.stroke();
+
+  const rightGrad = ctx.createLinearGradient(cx + 18, y, x + w, y);
+  rightGrad.addColorStop(0, lineColor);
+  rightGrad.addColorStop(1, 'rgba(250, 204, 21, 0)');
+  ctx.strokeStyle = rightGrad;
+  ctx.beginPath();
+  ctx.moveTo(cx + 16, y);
+  ctx.lineTo(x + w, y);
+  ctx.stroke();
+
+  // Center crystal diamond (◆)
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.moveTo(cx, y - 6.5);
+  ctx.lineTo(cx + 6.5, y);
+  ctx.lineTo(cx, y + 6.5);
+  ctx.lineTo(cx - 6.5, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawStarFlare(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  color: string
+): void {
+  ctx.save();
+  const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, radius * 1.45);
+  glow.addColorStop(0, color);
+  glow.addColorStop(0.45, color);
+  glow.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * 1.45, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalAlpha = 0.96;
+  ctx.fillStyle = color;
+  const inner = radius * 0.22;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - radius);
+  ctx.lineTo(cx + inner, cy - inner);
+  ctx.lineTo(cx + radius, cy);
+  ctx.lineTo(cx + inner, cy + inner);
+  ctx.lineTo(cx, cy + radius);
+  ctx.lineTo(cx - inner, cy + inner);
+  ctx.lineTo(cx - radius, cy);
+  ctx.lineTo(cx - inner, cy - inner);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.max(2, radius * 0.18), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawProtrudingCrystals(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  pal: TierPalette
+): void {
+  // Exact coordinate transform matching DOM .shield-crystals-svg viewBox="0 0 376 572"
+  // where the shield spans [18..358, 36..536] (340 x 500)
+  const ox = sx - (18 / 340) * sw;
+  const oy = sy - (36 / 500) * sh;
+  const rx = sw / 340;
+  const ry = sh / 500;
+
+  const poly = (pts: Array<[number, number]>, fill: string, stroke?: string, lw = 1.2) => {
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => {
+      const px = ox + x * rx;
+      const py = oy + y * ry;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = lw;
+      ctx.stroke();
+    }
+  };
+
+  ctx.save();
+  ctx.shadowColor = pal.glow;
+  ctx.shadowBlur = 16;
+
+  // 1. TOP ROYAL CROWN CRYSTAL CLUSTER
+  // Outer-Left & Outer-Right Mini Shards
+  poly([[122, 22], [146, 44], [139, 47]], pal.crysHi, pal.crysEdge, 1.1);
+  poly([[122, 22], [152, 38], [146, 44]], pal.crysMid, pal.crysEdge, 0.9);
+  poly([[139, 47], [146, 44], [152, 38], [149, 49]], pal.crysDeep);
+
+  poly([[254, 22], [230, 44], [237, 47]], pal.crysMid, pal.crysEdge, 1.1);
+  poly([[254, 22], [224, 38], [230, 44]], pal.crysHi, pal.crysEdge, 0.9);
+  poly([[237, 47], [230, 44], [224, 38], [227, 49]], pal.crysDeep);
+
+  // Inner-Left & Inner-Right Crown Spires
+  poly([[151, 10], [169, 36], [157, 46]], pal.crysHi, pal.crysEdge, 1.3);
+  poly([[151, 10], [177, 39], [169, 36]], pal.crysMid, pal.crysEdge, 1.0);
+  poly([[157, 46], [169, 36], [177, 39], [171, 48]], pal.crysDeep);
+
+  poly([[225, 10], [207, 36], [219, 46]], pal.crysMid, pal.crysEdge, 1.3);
+  poly([[225, 10], [199, 39], [207, 36]], pal.crysHi, pal.crysEdge, 1.0);
+  poly([[219, 46], [207, 36], [199, 39], [205, 48]], pal.crysDeep);
+
+  // Center Tall Crown Obelisk Crystal
+  poly([[188, 2], [188, 36], [175, 26]], pal.crysHi, pal.crysEdge, 1.5);
+  poly([[188, 2], [201, 26], [188, 36]], pal.crysMid, pal.crysEdge, 1.5);
+  poly([[175, 26], [188, 36], [179, 45]], pal.crysMid);
+  poly([[201, 26], [188, 36], [197, 45]], pal.crysDeep);
+  poly([[179, 45], [188, 36], [197, 45], [188, 50]], pal.crysDeep, pal.crysEdge, 1.0);
+
+  // Embedded Center Crown Diamond Jewel
+  poly([[188, 25], [196, 35], [188, 45], [180, 35]], pal.crysHi, pal.crysEdge, 1.4);
+  poly([[188, 25], [196, 35], [188, 35]], '#FFFFFF');
+  poly([[188, 35], [196, 35], [188, 45]], pal.crysMid);
+
+  // 2. RIGHT SHOULDER PROTRUDING 3D CRYSTAL WINGS
+  poly([[373, 50], [347, 76], [333, 53]], pal.crysHi, pal.crysEdge, 1.4);
+  poly([[373, 50], [356, 88], [347, 76]], pal.crysMid, pal.crysEdge, 1.2);
+  poly([[333, 53], [347, 76], [356, 88], [346, 94]], pal.crysDeep);
+
+  poly([[370, 104], [353, 115], [352, 88]], pal.crysHi, pal.crysEdge, 1.3);
+  poly([[370, 104], [353, 134], [353, 115]], pal.crysMid, pal.crysEdge, 1.1);
+  poly([[352, 126], [353, 115], [353, 134], [348, 140]], pal.crysDeep);
+
+  poly([[364, 152], [352, 158], [353, 142]], pal.crysHi, pal.crysEdge, 1.0);
+  poly([[364, 152], [353, 167], [352, 158]], pal.crysDeep);
+
+  // 3. LEFT SHOULDER PROTRUDING 3D CRYSTAL WINGS
+  poly([[3, 50], [29, 76], [43, 53]], pal.crysHi, pal.crysEdge, 1.4);
+  poly([[3, 50], [20, 88], [29, 76]], pal.crysMid, pal.crysEdge, 1.2);
+  poly([[43, 53], [29, 76], [20, 88], [30, 94]], pal.crysDeep);
+
+  poly([[6, 104], [23, 115], [24, 88]], pal.crysHi, pal.crysEdge, 1.3);
+  poly([[6, 104], [23, 134], [23, 115]], pal.crysMid, pal.crysEdge, 1.1);
+  poly([[24, 126], [23, 115], [23, 134], [28, 140]], pal.crysDeep);
+
+  poly([[12, 152], [24, 158], [23, 142]], pal.crysHi, pal.crysEdge, 1.0);
+  poly([[12, 152], [23, 167], [24, 158]], pal.crysDeep);
+
+  // 4. LOWER FLANK 3D CRYSTAL SHARDS
+  poly([[366, 426], [347, 424], [353, 396]], pal.crysHi, pal.crysEdge, 1.3);
+  poly([[366, 426], [339, 450], [347, 424]], pal.crysMid, pal.crysEdge, 1.1);
+  poly([[339, 450], [347, 424], [335, 442]], pal.crysDeep);
+  poly([[338, 476], [318, 476], [332, 456]], pal.crysHi, pal.crysEdge, 1.1);
+  poly([[338, 476], [304, 487], [318, 476]], pal.crysDeep);
+
+  poly([[10, 426], [29, 424], [23, 396]], pal.crysHi, pal.crysEdge, 1.3);
+  poly([[10, 426], [37, 450], [29, 424]], pal.crysMid, pal.crysEdge, 1.1);
+  poly([[37, 450], [29, 424], [41, 442]], pal.crysDeep);
+  poly([[38, 476], [58, 476], [44, 456]], pal.crysHi, pal.crysEdge, 1.1);
+  poly([[38, 476], [72, 487], [58, 476]], pal.crysDeep);
+
+  // 5. BOTTOM CRYSTAL SPEARHEAD PINNACLE + FLANKING DIAMOND SPURS
+  poly([[154, 545], [174, 536], [169, 527]], pal.crysHi, pal.crysEdge, 1.1);
+  poly([[154, 545], [178, 543], [174, 536]], pal.crysDeep);
+  poly([[222, 545], [202, 536], [207, 527]], pal.crysMid, pal.crysEdge, 1.1);
+  poly([[222, 545], [198, 543], [202, 536]], pal.crysDeep);
+
+  poly([[188, 570], [176, 536], [188, 529]], pal.crysHi, pal.crysEdge, 1.5);
+  poly([[188, 570], [200, 536], [188, 529]], pal.crysMid, pal.crysEdge, 1.5);
+  poly([[176, 536], [188, 529], [182, 524]], pal.crysMid);
+  poly([[200, 536], [188, 529], [194, 524]], pal.crysDeep);
+
+  ctx.restore();
+
+  // 6. DIAMOND 4-POINT STAR FLARES (✦) ON CRYSTAL TIPS & OVR CORNER
+  drawStarFlare(ctx, ox + 188 * rx, oy + 7 * ry, 18, pal.spark);
+  drawStarFlare(ctx, ox + 368 * rx, oy + 50 * ry, 14, pal.spark);
+  drawStarFlare(ctx, ox + 8 * rx, oy + 50 * ry, 14, pal.spark);
+  drawStarFlare(ctx, ox + 332 * rx, oy + 85 * ry, 16, pal.spark);
+  drawStarFlare(ctx, ox + 13 * rx, oy + 425 * ry, 12, pal.spark);
+  drawStarFlare(ctx, ox + 188 * rx, oy + 566 * ry, 14, pal.spark);
+}
+
 export async function renderFifaCardToCanvas(
   payload: CardExportPayload
 ): Promise<{ dataUrl: string; blob: Blob | null }> {
@@ -141,7 +484,7 @@ export async function renderFifaCardToCanvas(
   const pal = TIER_PALETTES[payload.tierKey] || TIER_PALETTES.gold;
   const fontStack = 'system-ui, -apple-system, "Segoe UI", Tahoma, Arial, sans-serif';
 
-  // 1. Royal Obsidian Canvas Backdrop
+  // 1. Royal Obsidian Canvas Backdrop + Radiant Aura Behind Shield
   const backGrad = ctx.createLinearGradient(0, 0, W, H);
   backGrad.addColorStop(0, '#070709');
   backGrad.addColorStop(0.5, '#0e1017');
@@ -149,9 +492,16 @@ export async function renderFifaCardToCanvas(
   ctx.fillStyle = backGrad;
   ctx.fillRect(0, 0, W, H);
 
-  // Subtle intersecting royal gold beams on backdrop
+  const stageAura = ctx.createRadialGradient(W / 2, H * 0.48, 40, W / 2, H * 0.48, 460);
+  stageAura.addColorStop(0, pal.ray);
+  stageAura.addColorStop(1, 'transparent');
+  ctx.fillStyle = stageAura;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle intersecting royal gold crystal rays on backdrop
   ctx.save();
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.14)';
+  ctx.strokeStyle = pal.vein;
+  ctx.globalAlpha = 0.25;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(-40, 210);
@@ -170,103 +520,159 @@ export async function renderFifaCardToCanvas(
   ctx.textAlign = 'center';
   ctx.fillStyle = pal.accent;
   ctx.font = `900 28px ${fontStack}`;
-  ctx.fillText(payload.teamName || 'فريق السداسي', W / 2, 62);
+  ctx.fillText(payload.teamName || 'فريق السداسي', W / 2, 52);
   ctx.fillStyle = '#a1a1aa';
   ctx.font = `700 18px ${fontStack}`;
-  ctx.fillText(`${payload.appName || 'ميدان 6v6'} • البطاقة الملكية الرسمية`, W / 2, 92);
+  ctx.fillText(`${payload.appName || 'ميدان 6v6'} • درع ميدان الملكي`, W / 2, 82);
   ctx.restore();
 
   if (teamLogoImg) {
     ctx.save();
     ctx.beginPath();
-    ctx.arc(W - 76, 62, 28, 0, Math.PI * 2);
+    ctx.arc(W - 76, 58, 28, 0, Math.PI * 2);
     ctx.closePath();
     ctx.clip();
-    ctx.drawImage(teamLogoImg, W - 104, 34, 56, 56);
+    ctx.drawImage(teamLogoImg, W - 104, 30, 56, 56);
     ctx.restore();
     ctx.strokeStyle = pal.accent;
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.arc(W - 76, 62, 28, 0, Math.PI * 2);
+    ctx.arc(W - 76, 58, 28, 0, Math.PI * 2);
     ctx.stroke();
   }
 
-  // 3. Outer Metallic Shield Frame
-  const sx = 54;
-  const sy = 122;
-  const sw = W - 108;
-  const sh = 950;
+  // 3. True Sculpted Forged-Bevel Outer Shell (sized to leave generous room for protruding 3D crystals)
+  const sx = 72;
+  const sy = 144;
+  const sw = W - 144; // 616
+  const sh = 884;
 
   ctx.save();
   ctx.shadowColor = pal.glow;
-  ctx.shadowBlur = 46;
-  ctx.shadowOffsetY = 14;
-  drawRoundedRectPath(ctx, sx, sy, sw, sh, 54, 104);
+  ctx.shadowBlur = 54;
+  ctx.shadowOffsetY = 16;
+  drawSculptedShieldPath(ctx, sx, sy, sw, sh);
   const frameGrad = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh);
   frameGrad.addColorStop(0, pal.borderA);
-  frameGrad.addColorStop(0.38, pal.borderB);
-  frameGrad.addColorStop(0.72, pal.borderC);
+  frameGrad.addColorStop(0.22, pal.borderB);
+  frameGrad.addColorStop(0.44, pal.borderC);
+  frameGrad.addColorStop(0.64, pal.borderD);
+  frameGrad.addColorStop(0.84, pal.borderE);
   frameGrad.addColorStop(1, pal.borderA);
   ctx.fillStyle = frameGrad;
   ctx.fill();
   ctx.restore();
 
-  // Inner Shield Surface
-  const ix = sx + 7;
-  const iy = sy + 7;
-  const iw = sw - 14;
-  const ih = sh - 14;
+  // Dark carved bevel channel between outer rim and inner shield surface
+  ctx.save();
+  drawSculptedShieldPath(ctx, sx + 6, sy + 7, sw - 12, sh - 14);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.78)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.restore();
+
+  // Inner Sculpted Obsidian Shield Surface
+  const ix = sx + 9;
+  const iy = sy + 10;
+  const iw = sw - 18;
+  const ih = sh - 20;
 
   ctx.save();
-  drawRoundedRectPath(ctx, ix, iy, iw, ih, 48, 98);
+  drawSculptedShieldPath(ctx, ix, iy, iw, ih);
   ctx.clip();
 
   const innerGrad = ctx.createLinearGradient(ix, iy, ix + iw, iy + ih);
   innerGrad.addColorStop(0, pal.bgTop);
-  innerGrad.addColorStop(0.5, pal.bgMid);
+  innerGrad.addColorStop(0.46, pal.bgMid);
   innerGrad.addColorStop(1, pal.bgBot);
   ctx.fillStyle = innerGrad;
   ctx.fillRect(ix, iy, iw, ih);
 
-  // Radial crystal glow behind player portrait
-  const radGlow = ctx.createRadialGradient(ix + iw * 0.36, iy + 220, 20, ix + iw * 0.36, iy + 220, 320);
-  radGlow.addColorStop(0, pal.glow);
-  radGlow.addColorStop(1, 'transparent');
-  ctx.fillStyle = radGlow;
+  // Radiant Sunburst Core & Diagonal Light Rays Behind Player Portrait
+  const burstCx = ix + iw * 0.34;
+  const burstCy = iy + ih * 0.24;
+  const burstGlow = ctx.createRadialGradient(burstCx, burstCy, 14, burstCx, burstCy, 340);
+  burstGlow.addColorStop(0, pal.halo);
+  burstGlow.addColorStop(0.45, pal.ray);
+  burstGlow.addColorStop(1, 'transparent');
+  ctx.fillStyle = burstGlow;
   ctx.fillRect(ix, iy, iw, ih);
 
-  // Geometric Crystal Facets
-  const drawFacet = (pts: Array<[number, number]>, alpha: number, light = true) => {
+  const drawRay = (p1: [number, number], p2: [number, number], alpha: number) => {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = pal.ray;
     ctx.beginPath();
-    pts.forEach(([px, py], idx) => (idx === 0 ? ctx.moveTo(ix + px, iy + py) : ctx.lineTo(ix + px, iy + py)));
+    ctx.moveTo(burstCx, burstCy);
+    ctx.lineTo(ix + p1[0] * iw, iy + p1[1] * ih);
+    ctx.lineTo(ix + p2[0] * iw, iy + p2[1] * ih);
     ctx.closePath();
-    ctx.fillStyle = light ? `rgba(254, 240, 138, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
     ctx.fill();
+    ctx.restore();
   };
-  drawFacet([[0, 0], [280, 0], [150, 220]], 0.11, true);
-  drawFacet([[280, 0], [580, 0], [420, 190], [150, 220]], 0.06, false);
-  drawFacet([[420, 190], [iw, 280], [540, 500], [330, 410]], 0.08, true);
-  drawFacet([[70, 620], [320, 520], [570, 630], [320, 860]], 0.05, false);
+  drawRay([0.08, 0], [0.22, 0], 0.72);
+  drawRay([0.42, 0], [0.56, 0], 0.62);
+  drawRay([0.78, 0], [0.94, 0], 0.50);
+  drawRay([1.0, 0.12], [1.0, 0.22], 0.45);
+  drawRay([1.0, 0.36], [1.0, 0.46], 0.36);
+  drawRay([0.0, 0.15], [0.0, 0.25], 0.52);
+  drawRay([0.0, 0.40], [0.0, 0.50], 0.36);
 
-  // Diagonal crystal lines
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.20)';
-  ctx.lineWidth = 1.6;
+  // High-Contrast Obsidian Crystal Polygons with Illuminated Facet Edges
+  const drawFacet = (pts: Array<[number, number]>, fill: string) => {
+    ctx.beginPath();
+    pts.forEach(([px, py], idx) => (idx === 0 ? ctx.moveTo(ix + px * iw, iy + py * ih) : ctx.lineTo(ix + px * iw, iy + py * ih)));
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = pal.facetEdge;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  };
+  drawFacet([[0.50, 0.01], [0.83, 0.04], [0.63, 0.23], [0.34, 0.19]], pal.facetLit);
+  drawFacet([[0.0, 0.08], [0.34, 0.19], [0.18, 0.40], [0.0, 0.36]], pal.facetMid);
+  drawFacet([[0.83, 0.04], [1.0, 0.09], [1.0, 0.35], [0.63, 0.23]], pal.facetMid);
+  drawFacet([[0.34, 0.19], [0.63, 0.23], [0.76, 0.47], [0.41, 0.43]], 'rgba(0, 0, 0, 0.42)');
+  drawFacet([[0.63, 0.23], [1.0, 0.35], [0.90, 0.62], [0.76, 0.47]], pal.facetLit);
+  drawFacet([[0.0, 0.36], [0.18, 0.40], [0.33, 0.65], [0.0, 0.70]], 'rgba(0, 0, 0, 0.40)');
+  drawFacet([[0.10, 0.74], [0.50, 0.64], [0.90, 0.74], [0.50, 0.99]], pal.facetMid);
+  drawFacet([[0.50, 0.64], [0.90, 0.74], [0.75, 0.92], [0.50, 0.99]], pal.facetLit);
+
+  // Razor Diagonal Gold/Tier Lightning Veins
+  ctx.save();
+  ctx.strokeStyle = pal.vein;
+  ctx.lineWidth = 2.0;
   ctx.beginPath();
-  ctx.moveTo(ix, iy + 220);
-  ctx.lineTo(ix + iw, iy + 470);
-  ctx.moveTo(ix + iw, iy + 120);
-  ctx.lineTo(ix, iy + 440);
+  ctx.moveTo(ix, iy + ih * 0.25);
+  ctx.lineTo(ix + iw, iy + ih * 0.55);
+  ctx.moveTo(ix + iw, iy + ih * 0.14);
+  ctx.lineTo(ix, iy + ih * 0.49);
+  ctx.moveTo(ix + iw * 0.08, iy + ih * 0.75);
+  ctx.lineTo(ix + iw * 0.92, iy + ih * 0.45);
   ctx.stroke();
+  ctx.restore();
+
+  // Holographic Diagonal Glass Sheen Band across upper-mid shield
+  ctx.save();
+  const sheenGrad = ctx.createLinearGradient(ix + iw * 0.1, iy, ix + iw * 0.78, iy + ih * 0.68);
+  sheenGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+  sheenGrad.addColorStop(0.42, 'rgba(255, 255, 255, 0.02)');
+  sheenGrad.addColorStop(0.50, 'rgba(255, 255, 255, 0.14)');
+  sheenGrad.addColorStop(0.56, 'rgba(254, 240, 138, 0.09)');
+  sheenGrad.addColorStop(0.66, 'rgba(255, 255, 255, 0)');
+  sheenGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = sheenGrad;
+  ctx.fillRect(ix, iy, iw, ih);
+  ctx.restore();
 
   // 4. Seamless Player Portrait (Left Side of Shield Hero, matching RTL card)
   const photoImg = payload.photo ? await loadImageSafe(payload.photo) : null;
-  const pBoxX = ix + 34;
+  const pBoxX = ix + 24;
   const pBoxY = iy + 24;
-  const pBoxW = 360;
-  const pBoxH = 340;
+  const pBoxW = 342;
+  const pBoxH = 322;
 
   if (photoImg) {
-    // Draw portrait onto an offscreen canvas so we can apply a clean radial/bottom dissolve mask
     const off = document.createElement('canvas');
     off.width = pBoxW;
     off.height = pBoxH;
@@ -274,7 +680,6 @@ export async function renderFifaCardToCanvas(
     const zoom = Math.max(0.9, Math.min(1.6, Number(payload.photoZoom || 105) / 100));
     const yPct = Math.max(0, Math.min(60, Number(payload.photoY ?? 18))) / 100;
 
-    // Cover-fit calculation
     const imgRatio = photoImg.width / Math.max(1, photoImg.height);
     const boxRatio = pBoxW / pBoxH;
     let dw = pBoxW;
@@ -289,225 +694,327 @@ export async function renderFifaCardToCanvas(
     const dx = (pBoxW - dw) / 2;
     const dy = (pBoxH - dh) * yPct;
 
+    // Subtle lighting & contrast calibration to harmonize with dark obsidian/gold shield
+    octx.save();
+    if ('filter' in octx) {
+      octx.filter = 'brightness(0.94) contrast(1.09) saturate(1.04) sepia(0.08)';
+    }
     octx.drawImage(photoImg, dx, dy, dw, dh);
+    octx.restore();
 
-    // Soft elliptical + bottom dissolve alpha mask
-    octx.globalCompositeOperation = 'destination-in';
-    const maskGrad = octx.createRadialGradient(pBoxW * 0.5, pBoxH * 0.42, pBoxW * 0.14, pBoxW * 0.5, pBoxH * 0.46, pBoxW * 0.5);
-    maskGrad.addColorStop(0, 'rgba(0,0,0,1)');
-    maskGrad.addColorStop(0.68, 'rgba(0,0,0,0.92)');
-    maskGrad.addColorStop(1, 'rgba(0,0,0,0)');
-    octx.fillStyle = maskGrad;
+    // Soft obsidian/gold atmospheric shading along bottom & side edges
+    octx.save();
+    octx.globalCompositeOperation = 'source-atop';
+    const bottomObsidian = octx.createLinearGradient(0, pBoxH * 0.52, 0, pBoxH);
+    bottomObsidian.addColorStop(0, 'rgba(8, 9, 13, 0)');
+    bottomObsidian.addColorStop(0.58, 'rgba(11, 12, 17, 0.44)');
+    bottomObsidian.addColorStop(1, 'rgba(8, 9, 13, 0.90)');
+    octx.fillStyle = bottomObsidian;
     octx.fillRect(0, 0, pBoxW, pBoxH);
 
-    // Extra bottom smooth fade
-    const botFade = octx.createLinearGradient(0, pBoxH * 0.65, 0, pBoxH);
-    botFade.addColorStop(0, 'rgba(0,0,0,1)');
-    botFade.addColorStop(1, 'rgba(0,0,0,0)');
-    octx.fillStyle = botFade;
-    octx.fillRect(0, pBoxH * 0.65, pBoxW, pBoxH * 0.35);
+    const sideObsidian = octx.createLinearGradient(0, 0, pBoxW, 0);
+    sideObsidian.addColorStop(0, 'rgba(8, 9, 13, 0.72)');
+    sideObsidian.addColorStop(0.24, 'rgba(8, 9, 13, 0)');
+    sideObsidian.addColorStop(0.74, 'rgba(8, 9, 13, 0)');
+    sideObsidian.addColorStop(1, 'rgba(8, 9, 13, 0.78)');
+    octx.fillStyle = sideObsidian;
+    octx.fillRect(0, 0, pBoxW, pBoxH);
+
+    const warmSheen = octx.createRadialGradient(pBoxW * 0.5, pBoxH * 0.36, 12, pBoxW * 0.5, pBoxH * 0.42, pBoxW * 0.52);
+    warmSheen.addColorStop(0, 'rgba(250, 204, 21, 0.08)');
+    warmSheen.addColorStop(0.62, 'rgba(250, 204, 21, 0)');
+    warmSheen.addColorStop(1, 'rgba(7, 7, 9, 0.48)');
+    octx.fillStyle = warmSheen;
+    octx.fillRect(0, 0, pBoxW, pBoxH);
+    octx.restore();
+
+    // Multi-axis feathered alpha mask (guarantees 0 opacity at all 4 edges — zero rectangular cut)
+    octx.save();
+    octx.globalCompositeOperation = 'destination-in';
+
+    // 1) Horizontal soft side fade
+    const hMask = octx.createLinearGradient(0, 0, pBoxW, 0);
+    hMask.addColorStop(0, 'rgba(0,0,0,0)');
+    hMask.addColorStop(0.11, 'rgba(0,0,0,0.34)');
+    hMask.addColorStop(0.23, 'rgba(0,0,0,0.88)');
+    hMask.addColorStop(0.32, 'rgba(0,0,0,1)');
+    hMask.addColorStop(0.70, 'rgba(0,0,0,1)');
+    hMask.addColorStop(0.81, 'rgba(0,0,0,0.88)');
+    hMask.addColorStop(0.91, 'rgba(0,0,0,0.32)');
+    hMask.addColorStop(1, 'rgba(0,0,0,0)');
+    octx.fillStyle = hMask;
+    octx.fillRect(0, 0, pBoxW, pBoxH);
+
+    // 2) Vertical deep bottom dissolve + gentle top crown feather
+    const vMask = octx.createLinearGradient(0, 0, 0, pBoxH);
+    vMask.addColorStop(0, 'rgba(0,0,0,0)');
+    vMask.addColorStop(0.07, 'rgba(0,0,0,0.55)');
+    vMask.addColorStop(0.16, 'rgba(0,0,0,1)');
+    vMask.addColorStop(0.52, 'rgba(0,0,0,1)');
+    vMask.addColorStop(0.64, 'rgba(0,0,0,0.92)');
+    vMask.addColorStop(0.77, 'rgba(0,0,0,0.56)');
+    vMask.addColorStop(0.89, 'rgba(0,0,0,0.16)');
+    vMask.addColorStop(1, 'rgba(0,0,0,0)');
+    octx.fillStyle = vMask;
+    octx.fillRect(0, 0, pBoxW, pBoxH);
+
+    // 3) Soft elliptical radial feather centered on face/chest
+    octx.save();
+    octx.translate(pBoxW * 0.5, pBoxH * 0.42);
+    octx.scale(1, (pBoxH * 0.54) / (pBoxW * 0.49));
+    const rMask = octx.createRadialGradient(0, 0, pBoxW * 0.12, 0, 0, pBoxW * 0.49);
+    rMask.addColorStop(0, 'rgba(0,0,0,1)');
+    rMask.addColorStop(0.46, 'rgba(0,0,0,0.98)');
+    rMask.addColorStop(0.68, 'rgba(0,0,0,0.78)');
+    rMask.addColorStop(0.85, 'rgba(0,0,0,0.32)');
+    rMask.addColorStop(1, 'rgba(0,0,0,0)');
+    octx.fillStyle = rMask;
+    octx.fillRect(-pBoxW, -pBoxH, pBoxW * 2, pBoxH * 2);
+    octx.restore();
+
+    octx.restore();
 
     ctx.drawImage(off, pBoxX, pBoxY);
   } else {
-    // Royal Golden Silhouette
     ctx.save();
-    const silGrad = ctx.createLinearGradient(pBoxX, pBoxY + 30, pBoxX, pBoxY + pBoxH);
-    silGrad.addColorStop(0, 'rgba(250, 204, 21, 0.50)');
+    const silGrad = ctx.createLinearGradient(pBoxX, pBoxY + 26, pBoxX, pBoxY + pBoxH);
+    silGrad.addColorStop(0, pal.halo);
     silGrad.addColorStop(1, 'rgba(250, 204, 21, 0.04)');
     ctx.fillStyle = silGrad;
     ctx.beginPath();
-    ctx.arc(pBoxX + pBoxW * 0.5, pBoxY + 115, 58, 0, Math.PI * 2);
+    ctx.arc(pBoxX + pBoxW * 0.5, pBoxY + 108, 54, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(pBoxX + 75, pBoxY + 315);
-    ctx.bezierCurveTo(pBoxX + 82, pBoxY + 215, pBoxX + 135, pBoxY + 190, pBoxX + pBoxW * 0.5, pBoxY + 190);
-    ctx.bezierCurveTo(pBoxX + 225, pBoxY + 190, pBoxX + 278, pBoxY + 215, pBoxX + 285, pBoxY + 315);
+    ctx.moveTo(pBoxX + 68, pBoxY + 294);
+    ctx.bezierCurveTo(pBoxX + 75, pBoxY + 202, pBoxX + 124, pBoxY + 178, pBoxX + pBoxW * 0.5, pBoxY + 178);
+    ctx.bezierCurveTo(pBoxX + 206, pBoxY + 178, pBoxX + 255, pBoxY + 202, pBoxX + 262, pBoxY + 294);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
   }
 
-  // 5. Right Meta Pill (OVR, Pos, Jersey, Tier)
-  const metaW = 196;
-  const metaH = 264;
-  const metaX = ix + iw - metaW - 34;
-  const metaY = iy + 32;
+  // 5. Right Glass Meta Strip (Metallic Gradient OVR, Pos, Jersey, Tier)
+  const metaW = 186;
+  const metaH = 248;
+  const metaX = ix + iw - metaW - 32;
+  const metaY = iy + 44;
 
   ctx.save();
   drawRoundedRectPath(ctx, metaX, metaY, metaW, metaH, 26, 26);
-  ctx.fillStyle = 'rgba(7, 7, 9, 0.58)';
+  const glassGrad = ctx.createLinearGradient(metaX, metaY, metaX, metaY + metaH);
+  glassGrad.addColorStop(0, 'rgba(14, 15, 22, 0.80)');
+  glassGrad.addColorStop(1, 'rgba(7, 7, 9, 0.58)');
+  ctx.fillStyle = glassGrad;
   ctx.fill();
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.32)';
+  ctx.strokeStyle = pal.innerStroke;
   ctx.lineWidth = 2;
   ctx.stroke();
 
   ctx.direction = 'rtl';
   ctx.textAlign = 'center';
-  ctx.fillStyle = pal.accent;
-  ctx.font = `900 94px ${fontStack}`;
-  ctx.fillText(String(payload.ovr), metaX + metaW / 2, metaY + 98);
 
-  ctx.fillStyle = '#fef9c3';
-  ctx.font = `900 30px ${fontStack}`;
-  ctx.fillText(payload.posShort || 'MID', metaX + metaW / 2, metaY + 140);
+  // Metallic 24K Gradient OVR with deep shadow
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.94)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 5;
+  const ovrGrad = ctx.createLinearGradient(metaX, metaY + 18, metaX, metaY + 98);
+  ovrGrad.addColorStop(0, pal.ovrTop);
+  ovrGrad.addColorStop(0.52, pal.ovrMid);
+  ovrGrad.addColorStop(1, pal.ovrBot);
+  ctx.fillStyle = ovrGrad;
+  ctx.font = `900 90px ${fontStack}`;
+  ctx.fillText(String(payload.ovr), metaX + metaW / 2, metaY + 94);
+  ctx.restore();
+
+  ctx.fillStyle = pal.subText;
+  ctx.font = `900 28px ${fontStack}`;
+  ctx.fillText(payload.posShort || 'MID', metaX + metaW / 2, metaY + 134);
 
   // Jersey Pill
-  drawRoundedRectPath(ctx, metaX + 44, metaY + 158, metaW - 88, 42, 21, 21);
-  ctx.fillStyle = 'rgba(250, 204, 21, 0.18)';
+  drawRoundedRectPath(ctx, metaX + 42, metaY + 150, metaW - 84, 38, 19, 19);
+  ctx.fillStyle = 'rgba(250, 204, 21, 0.14)';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.45)';
+  ctx.strokeStyle = pal.innerStroke;
   ctx.lineWidth = 1.6;
   ctx.stroke();
   ctx.fillStyle = pal.accent;
-  ctx.font = `900 24px ${fontStack}`;
-  ctx.fillText(`#${payload.jersey}`, metaX + metaW / 2, metaY + 188);
+  ctx.font = `900 23px ${fontStack}`;
+  ctx.fillText(`#${payload.jersey}`, metaX + metaW / 2, metaY + 177);
 
   ctx.fillStyle = pal.subText;
-  ctx.font = `800 18px ${fontStack}`;
-  ctx.fillText(payload.tierLabel, metaX + metaW / 2, metaY + 236);
+  ctx.font = `800 17px ${fontStack}`;
+  ctx.fillText(payload.tierLabel, metaX + metaW / 2, metaY + 224);
   ctx.restore();
+
+  // Divider 1 (◆)
+  drawDiamondDivider(ctx, ix + 40, iy + 332, iw - 80, pal.accent, pal.innerStroke);
 
   // 6. Player Nameplate + Level + DNA + Global Twin Ribbon
   const npX = ix + 34;
-  const npY = iy + 342;
+  const npY = iy + 344;
   const npW = iw - 68;
-  const npH = 148;
+  const npH = 114;
 
   ctx.save();
-  drawRoundedRectPath(ctx, npX, npY, npW, npH, 24, 24);
-  ctx.fillStyle = 'rgba(9, 10, 14, 0.78)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.28)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
   ctx.direction = 'rtl';
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.88)';
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = '#FFFBEB';
   ctx.font = `900 42px ${fontStack}`;
-  ctx.fillText(payload.playerName || 'اللاعب', npX + npW / 2, npY + 54);
+  ctx.fillText(payload.playerName || 'اللاعب', npX + npW / 2, npY + 42);
+  ctx.shadowBlur = 0;
 
   ctx.fillStyle = pal.accent;
-  ctx.font = `800 21px ${fontStack}`;
-  ctx.fillText(`${payload.dnaTitle}  •  ${payload.levelText}`, npX + npW / 2, npY + 94);
+  ctx.font = `800 19px ${fontStack}`;
+  ctx.fillText(`${payload.dnaTitle}  •  ${payload.levelText}`, npX + npW / 2, npY + 76);
 
   if (payload.twinText) {
     ctx.fillStyle = '#e4e4e7';
-    ctx.font = `700 19px ${fontStack}`;
-    ctx.fillText(payload.twinText, npX + npW / 2, npY + 128);
+    ctx.font = `700 17px ${fontStack}`;
+    ctx.fillText(payload.twinText, npX + npW / 2, npY + 104);
   }
   ctx.restore();
 
-  // 7. Classic 6 FIFA Stats Grid (2 cols × 3 rows)
-  const stX = ix + 34;
-  const stY = npY + npH + 22;
-  const stW = iw - 68;
-  const stH = 186;
+  // Divider 2 (◆)
+  drawDiamondDivider(ctx, ix + 40, npY + npH + 10, iw - 80, pal.accent, pal.innerStroke);
+
+  // 7. 6 Core Stats Grid (2 cols × 3 rows)
+  const stX = ix + 36;
+  const stY = npY + npH + 24;
+  const stW = iw - 72;
+  const stH = 166;
 
   ctx.save();
-  drawRoundedRectPath(ctx, stX, stY, stW, stH, 24, 24);
-  ctx.fillStyle = 'rgba(8, 9, 13, 0.72)';
+  drawRoundedRectPath(ctx, stX, stY, stW, stH, 22, 22);
+  ctx.fillStyle = 'rgba(7, 7, 9, 0.68)';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.22)';
-  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = pal.facetEdge;
+  ctx.lineWidth = 1.6;
   ctx.stroke();
 
-  // Vertical center divider
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.16)';
+  // Tapered vertical center divider
+  const vDiv = ctx.createLinearGradient(0, stY + 16, 0, stY + stH - 16);
+  vDiv.addColorStop(0, 'rgba(250, 204, 21, 0)');
+  vDiv.addColorStop(0.5, pal.innerStroke);
+  vDiv.addColorStop(1, 'rgba(250, 204, 21, 0)');
+  ctx.strokeStyle = vDiv;
   ctx.beginPath();
-  ctx.moveTo(stX + stW / 2, stY + 20);
-  ctx.lineTo(stX + stW / 2, stY + stH - 20);
+  ctx.moveTo(stX + stW / 2, stY + 16);
+  ctx.lineTo(stX + stW / 2, stY + stH - 16);
   ctx.stroke();
 
   ctx.direction = 'rtl';
   const stats = payload.sixStats.slice(0, 6);
   for (let i = 0; i < stats.length; i++) {
-    const col = i % 2; // 0 = right column in RTL, 1 = left column
+    const col = i % 2;
     const row = Math.floor(i / 2);
-    const cellX = col === 0 ? stX + stW / 2 + 24 : stX + 24;
-    const cellW = stW / 2 - 48;
-    const cy = stY + 48 + row * 54;
+    const cellX = col === 0 ? stX + stW / 2 + 22 : stX + 22;
+    const cellW = stW / 2 - 44;
+    const cy = stY + 42 + row * 48;
 
     ctx.textAlign = 'right';
     ctx.fillStyle = pal.accent;
-    ctx.font = `900 32px ${fontStack}`;
+    ctx.font = `900 30px ${fontStack}`;
     ctx.fillText(String(stats[i].val), cellX + cellW, cy);
 
     ctx.textAlign = 'left';
     ctx.fillStyle = '#e4e4e7';
-    ctx.font = `800 22px ${fontStack}`;
+    ctx.font = `800 20px ${fontStack}`;
     ctx.fillText(stats[i].lbl, cellX, cy - 2);
   }
   ctx.restore();
 
+  // Divider 3 (◆)
+  drawDiamondDivider(ctx, ix + 52, stY + stH + 14, iw - 104, pal.accent, pal.innerStroke);
+
   // 8. PlayStyle+ Badges Row
-  const psY = stY + stH + 28;
+  const psY = stY + stH + 26;
   const badges = payload.playStyles.slice(0, 3);
   if (badges.length > 0) {
     ctx.save();
     ctx.direction = 'rtl';
-    ctx.font = `800 20px ${fontStack}`;
-    const gap = 14;
-    const pillWidths = badges.map((b) => Math.max(150, ctx.measureText(`${b.icon} ${b.name}`).width + 34));
+    ctx.font = `800 18px ${fontStack}`;
+    const gap = 10;
+    const pillWidths = badges.map((b) => Math.max(138, ctx.measureText(`${b.icon} ${b.name}`).width + 30));
     const totalW = pillWidths.reduce((a, b) => a + b, 0) + gap * (badges.length - 1);
-    let cursorX = ix + (iw - Math.min(iw - 48, totalW)) / 2;
+    let cursorX = ix + (iw - Math.min(iw - 76, totalW)) / 2;
 
     badges.forEach((b, idx) => {
-      const pw = Math.min(200, pillWidths[idx]);
-      drawRoundedRectPath(ctx, cursorX, psY, pw, 44, 22, 22);
+      const pw = Math.min(176, pillWidths[idx]);
+      drawRoundedRectPath(ctx, cursorX, psY, pw, 38, 19, 19);
       ctx.fillStyle = b.plus ? 'rgba(250, 204, 21, 0.22)' : 'rgba(255, 255, 255, 0.08)';
       ctx.fill();
-      ctx.strokeStyle = b.plus ? 'rgba(250, 204, 21, 0.65)' : 'rgba(255, 255, 255, 0.2)';
+      ctx.strokeStyle = b.plus ? pal.innerStroke : 'rgba(255, 255, 255, 0.22)';
       ctx.lineWidth = 1.6;
       ctx.stroke();
 
       ctx.textAlign = 'center';
-      ctx.fillStyle = b.plus ? '#fef08a' : '#f4f4f5';
-      ctx.font = `800 18px ${fontStack}`;
-      ctx.fillText(`${b.icon} ${b.name}`, cursorX + pw / 2, psY + 29);
+      ctx.fillStyle = b.plus ? pal.subText : '#f4f4f5';
+      ctx.font = `800 17px ${fontStack}`;
+      ctx.fillText(`${b.icon} ${b.name}`, cursorX + pw / 2, psY + 25);
       cursorX += pw + gap;
     });
     ctx.restore();
   }
 
-  // 9. Bottom Stats Row (Goals / Assists / Commitment)
-  const footY = psY + 76;
-  ctx.save();
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.24)';
-  ctx.lineWidth = 1.6;
-  ctx.beginPath();
-  ctx.moveTo(ix + 44, footY);
-  ctx.lineTo(ix + iw - 44, footY);
-  ctx.stroke();
+  // Divider 4 (◆) + 9. Bottom Stats Row (Goals / Assists / Commitment)
+  const footY = psY + 50;
+  drawDiamondDivider(ctx, ix + 104, footY, iw - 208, pal.accent, pal.innerStroke);
 
+  ctx.save();
   ctx.direction = 'rtl';
   ctx.textAlign = 'center';
   const cols = [
-    { lbl: 'أهداف', val: String(payload.goals), color: '#ffffff' },
-    { lbl: 'تمريرات', val: String(payload.assists), color: '#ffffff' },
+    { lbl: 'أهداف', val: String(payload.goals), color: '#FFFBEB' },
+    { lbl: 'تمريرات', val: String(payload.assists), color: '#FFFBEB' },
     { lbl: 'الالتزام', val: payload.commitment || '100%', color: pal.accent },
   ];
-  const colW = (iw - 88) / 3;
+  const colW = (iw - 196) / 3;
   cols.forEach((c, idx) => {
-    const cx = ix + iw - 44 - colW * idx - colW / 2;
+    const cx = ix + iw - 98 - colW * idx - colW / 2;
     ctx.fillStyle = '#a1a1aa';
-    ctx.font = `700 20px ${fontStack}`;
-    ctx.fillText(c.lbl, cx, footY + 34);
+    ctx.font = `700 17px ${fontStack}`;
+    ctx.fillText(c.lbl, cx, footY + 28);
     ctx.fillStyle = c.color;
-    ctx.font = `900 34px ${fontStack}`;
-    ctx.fillText(c.val, cx, footY + 76);
+    ctx.font = `900 30px ${fontStack}`;
+    ctx.fillText(c.val, cx, footY + 64);
   });
+  ctx.restore();
+
+  // Inner Specular Filigree Inset Border
+  ctx.save();
+  drawSculptedShieldPath(ctx, ix + 10, iy + 10, iw - 20, ih - 20);
+  ctx.strokeStyle = pal.innerStroke;
+  ctx.lineWidth = 2.2;
+  ctx.stroke();
+
+  // Bottom Inner Micro-Gem
+  const topJx = ix + iw / 2;
+  const botJy = iy + ih - 28;
+  ctx.fillStyle = pal.borderB;
+  ctx.beginPath();
+  ctx.moveTo(topJx, botJy - 8);
+  ctx.lineTo(topJx + 7, botJy);
+  ctx.lineTo(topJx, botJy + 8);
+  ctx.lineTo(topJx - 7, botJy);
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 
   ctx.restore(); // end shield clip
 
-  // 10. Royal Watermark Footer
+  // 10. PROTRUDING 3D FACETED CRYSTALS & 4-POINT DIAMOND STAR FLARES (OVER & OUTSIDE SHIELD RIM!)
+  drawProtrudingCrystals(ctx, sx, sy, sw, sh, pal);
+
+  // 11. Royal Watermark Footer
   ctx.save();
   ctx.direction = 'rtl';
   ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(250, 204, 21, 0.72)';
+  ctx.fillStyle = 'rgba(250, 204, 21, 0.8)';
   ctx.font = `800 19px ${fontStack}`;
-  ctx.fillText(`👑 ${payload.appName || 'ميدان 6v6'} — النسخة الملكية • درع ميدان عالي الدقة`, W / 2, H - 34);
+  ctx.fillText(`👑 ${payload.appName || 'ميدان 6v6'} — النسخة الملكية • درع ميدان عالي الدقة`, W / 2, H - 22);
   ctx.restore();
 
   const dataUrl = canvas.toDataURL('image/png');

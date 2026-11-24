@@ -15,8 +15,10 @@ import {
   type TacticalPhaseId,
   type TacticalKeyframe,
   type TacticalSequence,
+  type TacticalArrow,
   type RoleSpotlightInfo,
   type MinimalPlayer,
+  type MinimalReadinessLog,
 } from './tacticsData';
 import { escapeHtml, sanitizeImageDataUrl } from './security';
 
@@ -51,6 +53,7 @@ interface StudioPrefs {
 
 export interface StudioContext {
   getPlayers: () => MinimalPlayer[];
+  getReadiness?: () => MinimalReadinessLog[];
   getTactics: () => { formation: string; slots: Record<string, string> };
   setTactics: (next: { formation: string; slots: Record<string, string> }) => void;
   getTeamSettings: () => { teamName?: string; logo?: string };
@@ -720,11 +723,46 @@ class TacticsStudioController {
 
   // ==================== CUSTOM PLAN RECORDER ====================
 
+  private buildAutoArrowsFromPrev(prev: TacticalKeyframe | undefined): TacticalArrow[] {
+    if (!prev) return [];
+    const arrows: TacticalArrow[] = [];
+    // Ball movement arrow if ball moved significantly
+    if (Math.hypot(this.currentBall.x - prev.ball.x, this.currentBall.y - prev.ball.y) >= 4) {
+      arrows.push({
+        from: [prev.ball.x, prev.ball.y],
+        to: [this.currentBall.x, this.currentBall.y],
+        kind: 'ball',
+      });
+    }
+    // Player run arrows for players who moved meaningfully
+    this.currentOur.forEach((pt, idx) => {
+      const old = prev.ourPos[idx];
+      if (!old) return;
+      if (Math.hypot(pt.x - old.x, pt.y - old.y) >= 5) {
+        arrows.push({
+          from: [old.x, old.y],
+          to: [pt.x, pt.y],
+          kind: pt.y > old.y + 4 ? 'cover' : 'run',
+        });
+      }
+    });
+    return arrows;
+  }
+
   private captureCustomFrame(): void {
     const stepNo = this.recordedFrames.length + 1;
     const noteEl = document.getElementById('tacRecNote') as HTMLInputElement | null;
     const customNote = (noteEl?.value || '').trim();
     const narration = customNote || `لقطة مخصّصة رقم ${stepNo} — حرّك اللاعبين والكرة ثم أضف اللقطة التالية.`;
+    const prevFrame = this.recordedFrames[this.recordedFrames.length - 1];
+    const autoArrows = this.buildAutoArrowsFromPrev(prevFrame);
+    const movedIndices: number[] = [];
+    if (prevFrame) {
+      this.currentOur.forEach((pt, idx) => {
+        const old = prevFrame.ourPos[idx];
+        if (old && Math.hypot(pt.x - old.x, pt.y - old.y) >= 5) movedIndices.push(idx);
+      });
+    }
     this.recordedFrames.push({
       title: `لقطة ${stepNo}: ${customNote ? customNote.slice(0, 28) : 'حركة تكتيكية مخصّصة'}`,
       narration,
@@ -732,12 +770,22 @@ class TacticsStudioController {
       ourPos: this.currentOur.map((p) => ({ ...p })),
       oppPos: this.currentOpp.map((p) => ({ ...p })),
       ball: { ...this.currentBall },
-      activeIndices: [],
-      arrows: [],
+      activeIndices: movedIndices,
+      arrows: autoArrows,
     });
     if (noteEl) noteEl.value = '';
     this.renderRecorderPanel();
-    this.ctx?.toast(`تم التقاط اللقطة #${stepNo} 🎥`);
+    this.ctx?.toast(`تم التقاط اللقطة #${stepNo} 🎥${autoArrows.length ? ' (مع أسهم الحركة تلقائياً)' : ''}`);
+  }
+
+  private popCustomFrame(): void {
+    if (!this.recordedFrames.length) {
+      this.ctx?.toast('لا توجد لقطات لحذفها');
+      return;
+    }
+    this.recordedFrames.pop();
+    this.renderRecorderPanel();
+    this.ctx?.toast(`تم حذف آخر لقطة — المتبقي ${this.recordedFrames.length}`);
   }
 
   private playRecordedDraft(): void {
@@ -1130,6 +1178,7 @@ class TacticsStudioController {
     this.renderPitchShellClasses();
     this.renderActiveViewBody();
     this.renderNarrationAndTimeline();
+    this.renderScenarioGuideCard();
     this.renderSpotlightCard();
     this.renderRecorderPanel();
     this.renderScenariosSection();
@@ -1137,18 +1186,52 @@ class TacticsStudioController {
     this.renderSaveButton();
   }
 
+  private renderScenarioGuideCard(): void {
+    const box = document.getElementById('tacScenarioGuideBox');
+    if (!box) return;
+    const sc = this.activeScenarioId
+      ? TACTICAL_SCENARIOS_10.find((s) => s.id === this.activeScenarioId)
+      : null;
+    if (!sc || !sc.guide || this.viewMode !== 'studio') {
+      box.classList.add('hidden');
+      box.innerHTML = '';
+      return;
+    }
+    const g = sc.guide;
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <div class="row between" style="margin-bottom:6px;">
+        <strong style="font-size:0.82rem;color:var(--primary);">📋 دليل التطبيق العملي (7 نقاط) — ${escapeHtml(sc.title)}</strong>
+        <span class="badge">${escapeHtml(sc.category)}</span>
+      </div>
+      <div style="display:grid;gap:5px;font-size:0.77rem;line-height:1.55;color:#e4e4e7;">
+        <div><strong style="color:#fde68a;">1. ما الموقف؟</strong> ${escapeHtml(g.situation)}</div>
+        <div><strong style="color:#fde68a;">2. دور كل لاعب:</strong> ${escapeHtml(g.roles)}</div>
+        <div><strong style="color:#38bdf8;">3. أين يتحرك؟</strong> ${escapeHtml(g.whereMove)}</div>
+        <div><strong style="color:#38bdf8;">4. متى يتحرك؟</strong> ${escapeHtml(g.whenMove)}</div>
+        <div><strong style="color:#FACC15;">5. مسار الكرة:</strong> ${escapeHtml(g.ballPath)}</div>
+        <div><strong style="color:#4ade80;">6. الهدف من الحركة:</strong> ${escapeHtml(g.goal)}</div>
+        <div style="padding:6px 8px;border-radius:8px;background:rgba(244,63,94,0.1);border:1px solid rgba(244,63,94,0.35);color:#fecdd3;">
+          <strong>7. ⚠️ خطأ شائع يجب تجنبه:</strong> ${escapeHtml(g.commonMistake)}
+        </div>
+      </div>
+    `;
+  }
+
   private renderSaveButton(): void {
     if (!this.ctx) return;
     const saveBtn = document.getElementById('btnSaveTactics') as HTMLButtonElement | null;
     if (!saveBtn) return;
     const isAdmin = this.ctx.isAdmin();
-    const isFb = this.ctx.isFirebaseMode();
+    if (!isAdmin) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = '🔒 اعتماد وحفظ التشكيلة الرسمية متاح للكابتن فقط';
+      return;
+    }
+    saveBtn.disabled = false;
     if (this.prefs.size === '6v6') {
-      saveBtn.disabled = isFb && !isAdmin;
-      saveBtn.textContent =
-        isFb && !isAdmin ? 'حفظ التشكيلة للفريق (متاح للكابتن فقط)' : '💾 حفظ التشكيلة الرسمية للفريق (6v6)';
+      saveBtn.textContent = '💾 حفظ التشكيلة الرسمية للفريق (6v6)';
     } else {
-      saveBtn.disabled = false;
       saveBtn.textContent = `💾 حفظ لوحة ${this.prefs.size} محلياً`;
     }
   }
@@ -1705,34 +1788,40 @@ class TacticsStudioController {
     });
 
     const players = this.ctx.getPlayers();
+    const readinessLogs = this.ctx.getReadiness ? this.ctx.getReadiness() : [];
     const form = this.getCurrentFormation();
     const teamName = this.ctx.getTeamSettings().teamName || 'فريق السداسي';
+    const isAdmin = this.ctx.isAdmin();
 
     if (this.captainTab === 'smart') {
       const availCount = players.filter((p) => p.availableStatus !== 'unavailable').length;
       const unavail = players.filter((p) => p.availableStatus === 'unavailable');
+      const preview = suggestSmartLineup(players, form, readinessLogs);
       body.innerHTML = `
         <div class="item-box">
           <div style="font-weight:800;color:var(--primary);margin-bottom:4px;">🧠 مقترح التشكيلة الذكي (${escapeHtml(form.name)})</div>
-          <p class="muted" style="margin-bottom:10px;">يختار تلقائياً أنسب اللاعبين المتاحين لكل مركز حسب مركزهم الأساسي والثانوي وتقييمهم، ويستبعد غير المتاحين والمصابين تلقائياً.</p>
-          <div class="row between" style="margin-bottom:10px;">
+          <p class="muted" style="margin-bottom:8px;">يختار تلقائياً أنسب اللاعبين المتاحين لكل مركز حسب مركزهم الأساسي والثانوي وتقييمهم وجاهزيتهم البدنية، ويستبعد غير المتاحين تلقائياً.</p>
+          <div class="row between" style="margin-bottom:8px;flex-wrap:wrap;gap:6px;">
             <span class="badge">✅ متاحون: ${availCount}</span>
             <span class="badge" style="color:${unavail.length ? '#f43f5e' : '#22c55e'};">${unavail.length ? `⛔ مستبعدون: ${unavail.length}` : '✨ لا غيابات'}</span>
+            ${preview.fatiguedNames.length ? `<span class="badge" style="color:#fbbf24;">⚠️ إجهاد مسجّل: ${preview.fatiguedNames.length}</span>` : ''}
           </div>
-          <button type="button" id="btnApplySmartLineup" class="btn-primary" style="width:100%;">⚡ تطبيق التشكيلة الذكية الآن على الملعب</button>
+          ${preview.fatiguedNames.length ? `<p class="muted" style="font-size:0.74rem;color:#fde68a;margin-bottom:8px;">⚠️ لاعبون بإجهاد مرتفع (يفضّل إراحتهم أو تقليص دقائقهم): ${preview.fatiguedNames.map((n) => escapeHtml(n)).join('، ')}</p>` : ''}
+          <button type="button" id="btnApplySmartLineup" class="btn-primary" style="width:100%;" ${!isAdmin ? 'disabled' : ''}>${isAdmin ? '⚡ تطبيق الاقتراح على الملعب (قابل للتعديل)' : '🔒 تطبيق التشكيلة الرسمية متاح للكابتن فقط'}</button>
+          <p class="muted" style="margin-top:6px;font-size:0.71rem;">ℹ️ أداة مساعدة فقط — القرار النهائي بيد الكابتن ويمكن تعديل أي مركز يدوياً.</p>
         </div>
       `;
       document.getElementById('btnApplySmartLineup')?.addEventListener('click', () => {
-        if (!this.ctx) return;
+        if (!this.ctx || !this.ctx.isAdmin()) return;
         this.ctx.takeSnapshot();
-        const res = suggestSmartLineup(players, form);
+        const res = suggestSmartLineup(players, form, readinessLogs);
         Object.entries(res.slots).forEach(([key, pid]) => {
           const idx = Number(key.split('_').pop() || '0');
           this.setSlotPlayerId(form.id, idx, pid);
         });
         this.renderAll();
         this.ctx.toast(
-          `تم توزيع ${res.assignedCount} لاعبين بذكاء ✓${res.excludedCount ? ` (استُبعد ${res.excludedCount} غير متاح)` : ''}`,
+          `تم تطبيق الاقتراح على ${res.assignedCount} مراكز ✓${res.excludedCount ? ` (استُبعد ${res.excludedCount} غير متاح)` : ''}`,
           false,
           true
         );
@@ -1741,7 +1830,7 @@ class TacticsStudioController {
     }
 
     if (this.captainTab === 'split') {
-      const split = splitFairTeams(players, teamName);
+      const split = splitFairTeams(players, teamName, readinessLogs);
       body.innerHTML = `
         <div class="row between" style="margin-bottom:8px;">
           <span class="badge">📊 فارق القوة: ${split.diff} نقطة فقط</span>
@@ -1750,14 +1839,15 @@ class TacticsStudioController {
         <div class="grid-2" style="gap:8px;">
           <div class="item-box" style="margin:0;border-color:rgba(250,204,21,0.5);">
             <div style="font-weight:900;color:var(--primary);margin-bottom:6px;">🟡 الفريق الذهبي (${split.goldAvg})</div>
-            ${split.gold.map((p) => `<div style="font-size:0.78rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;"><span>${escapeHtml(p.name)}</span><strong style="color:var(--primary);">${p.ovr}</strong></div>`).join('') || '<span class="muted">—</span>'}
+            ${split.gold.map((p) => `<div style="font-size:0.78rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;"><span>${escapeHtml(p.name)}${p.fatigued ? ' ⚠️' : ''}</span><strong style="color:var(--primary);">${p.ovr}</strong></div>`).join('') || '<span class="muted">—</span>'}
           </div>
           <div class="item-box" style="margin:0;border-color:rgba(226,232,240,0.35);">
             <div style="font-weight:900;color:#e2e8f0;margin-bottom:6px;">⚪ الفريق الفضي (${split.silverAvg})</div>
-            ${split.silver.map((p) => `<div style="font-size:0.78rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;"><span>${escapeHtml(p.name)}</span><strong style="color:#e2e8f0;">${p.ovr}</strong></div>`).join('') || '<span class="muted">—</span>'}
+            ${split.silver.map((p) => `<div style="font-size:0.78rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;"><span>${escapeHtml(p.name)}${p.fatigued ? ' ⚠️' : ''}</span><strong style="color:#e2e8f0;">${p.ovr}</strong></div>`).join('') || '<span class="muted">—</span>'}
           </div>
         </div>
         ${split.excludedUnavailable.length ? `<p class="muted" style="margin-top:8px;">⛔ تم استبعاد غير المتاحين تلقائياً: ${split.excludedUnavailable.map((p) => escapeHtml(p.name)).join('، ')}</p>` : ''}
+        ${split.fatiguedNames.length ? `<p class="muted" style="margin-top:4px;color:#fde68a;">⚠️ علامة الإجهاد تشير إلى جاهزية منخفضة — يمكن للكابتن تعديل التقسيمة يدوياً.</p>` : ''}
       `;
       document.getElementById('btnCopySplitWa')?.addEventListener('click', () => {
         if (navigator.clipboard) {
@@ -1999,6 +2089,7 @@ class TacticsStudioController {
 
     // Recorder actions
     document.getElementById('btnTacRecAdd')?.addEventListener('click', () => this.captureCustomFrame());
+    document.getElementById('btnTacRecPop')?.addEventListener('click', () => this.popCustomFrame());
     document.getElementById('btnTacRecPlay')?.addEventListener('click', () => this.playRecordedDraft());
     document.getElementById('btnTacRecSave')?.addEventListener('click', () => this.saveRecordedPlan());
     document.getElementById('btnTacRecClear')?.addEventListener('click', () => {

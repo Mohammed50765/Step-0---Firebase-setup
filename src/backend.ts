@@ -5,6 +5,7 @@ import {
   type User,
 } from 'firebase/auth';
 import {
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -44,10 +45,15 @@ import {
   sanitizeHexColor,
   sanitizeImageDataUrl,
   sanitizeInviteCode,
+  sanitizeMatchResult,
+  sanitizePitchMode,
   sanitizePrimaryPos,
+  sanitizeRoleOverride,
   sanitizeSecondaryPos,
   sanitizeSkills,
   sanitizeStarId,
+  sanitizeStats6,
+  stats6ToLegacySkills,
   TEAM_ID,
 } from './security';
 import {
@@ -74,6 +80,10 @@ export interface BackendState {
   suggestions: Array<Record<string, unknown>>;
   pitchSession?: Record<string, unknown>;
   pitchPayments?: Array<Record<string, unknown>>;
+  matchSessions?: Array<Record<string, unknown>>;
+  matchVoteTallies?: Array<Record<string, unknown>>;
+  missionClaims?: Array<Record<string, unknown>>;
+  footballLibrary?: Array<Record<string, unknown>>;
 }
 
 function sanitizeTimeStr(raw: unknown, fallback = '20:30'): string {
@@ -395,6 +405,8 @@ class MaydanBackendService {
     name: string;
     jersey: number;
     primaryPos: string;
+    stats6?: Record<string, unknown>;
+    roleOverride?: string;
   }): Promise<{ joinedDirectly: boolean }> {
     const fbUser = auth.currentUser;
     if (!fbUser || !fbUser.emailVerified) {
@@ -419,19 +431,24 @@ class MaydanBackendService {
     const cleanName = clampStr(input.name || fbUser.displayName || 'لاعب جديد', 80) || 'لاعب جديد';
     const cleanJersey = Math.round(clampNum(input.jersey, 1, 99, 7));
     const cleanPos = sanitizePrimaryPos(input.primaryPos);
+    const cleanStats6 = sanitizeStats6(input.stats6);
+    const cleanRoleOverride = sanitizeRoleOverride(input.roleOverride);
 
     if (requireApproval) {
+      const jrDoc: Record<string, unknown> = {
+        uid: fbUser.uid,
+        name: cleanName,
+        jersey: cleanJersey,
+        primaryPos: cleanPos,
+        inviteCode: code,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      if (cleanStats6) jrDoc.stats6 = cleanStats6;
+      if (cleanRoleOverride) jrDoc.roleOverride = cleanRoleOverride;
       try {
-        await setDoc(doc(db, 'joinRequests', fbUser.uid), {
-          uid: fbUser.uid,
-          name: cleanName,
-          jersey: cleanJersey,
-          primaryPos: cleanPos,
-          inviteCode: code,
-          status: 'pending',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        await setDoc(doc(db, 'joinRequests', fbUser.uid), jrDoc);
       } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, `joinRequests/${fbUser.uid}`);
       }
@@ -440,7 +457,7 @@ class MaydanBackendService {
 
     // Direct join: atomic batch writing approved joinRequest + player doc
     const batch = writeBatch(db);
-    batch.set(doc(db, 'joinRequests', fbUser.uid), {
+    const jrApprovedDoc: Record<string, unknown> = {
       uid: fbUser.uid,
       name: cleanName,
       jersey: cleanJersey,
@@ -449,8 +466,12 @@ class MaydanBackendService {
       status: 'approved',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
-    batch.set(doc(db, 'players', fbUser.uid), {
+    };
+    if (cleanStats6) jrApprovedDoc.stats6 = cleanStats6;
+    if (cleanRoleOverride) jrApprovedDoc.roleOverride = cleanRoleOverride;
+    batch.set(doc(db, 'joinRequests', fbUser.uid), jrApprovedDoc);
+
+    const playerDoc: Record<string, unknown> = {
       id: fbUser.uid,
       teamId: TEAM_ID,
       ownerUid: fbUser.uid,
@@ -466,18 +487,20 @@ class MaydanBackendService {
       photoZoom: 105,
       photoY: 18,
       hasPhoto: false,
-      skills: sanitizeSkills({
-        speed: 7,
-        shooting: 6,
-        passing: 7,
-        dribbling: 6,
-        defending: 6,
-        stamina: 7,
-        vision: 6,
-        teamwork: 7,
-        control: 7,
-        positioning: 6,
-      }),
+      skills: cleanStats6
+        ? stats6ToLegacySkills(cleanStats6)
+        : sanitizeSkills({
+            speed: 7,
+            shooting: 6,
+            passing: 7,
+            dribbling: 6,
+            defending: 6,
+            stamina: 7,
+            vision: 6,
+            teamwork: 7,
+            control: 7,
+            positioning: 6,
+          }),
       top3Strengths: '',
       weak3Points: '',
       seasonGoal: '',
@@ -485,7 +508,10 @@ class MaydanBackendService {
       availableStatus: 'available',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (cleanStats6) playerDoc.stats6 = cleanStats6;
+    if (cleanRoleOverride) playerDoc.roleOverride = cleanRoleOverride;
+    batch.set(doc(db, 'players', fbUser.uid), playerDoc);
     try {
       await batch.commit();
     } catch (err) {
@@ -546,6 +572,102 @@ class MaydanBackendService {
         this.handleListenerError(err, OperationType.LIST, 'peerRatingStats', this.activeOnError);
       }
       return targetState.peerRatingStats || {};
+    }
+  }
+
+  /**
+   * One-shot non-realtime fetch of attendance records so FIFA Shield commitment %
+   * is accurate without adding a permanent core listener.
+   */
+  async refreshAttendance(state?: BackendState): Promise<void> {
+    const targetState = state || this.activeState;
+    if (!targetState) return;
+    try {
+      const snap = await getDocs(query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID)));
+      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+      targetState.attendance = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (this.activeOnUpdate) this.activeOnUpdate();
+    } catch {
+      // Non-fatal; ready tab also subscribes live when opened
+    }
+  }
+
+  /**
+   * One-shot non-realtime fetch of Captain official ratings (adminRatings)
+   * so the 3-layer rating transparency panel reflects Captain scores without an extra core listener.
+   */
+  async refreshAdminRatings(state?: BackendState): Promise<void> {
+    const targetState = state || this.activeState;
+    if (!targetState) return;
+    try {
+      const snap = await getDocs(query(collection(db, 'adminRatings'), where('teamId', '==', TEAM_ID)));
+      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+      targetState.adminRatings = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (this.activeOnUpdate) this.activeOnUpdate();
+    } catch {
+      // Non-fatal; stats and admin tabs subscribe live when opened
+    }
+  }
+
+  /**
+   * One-shot fetch of unlocked matchVoteTallies (only for verified sessions that reached >= 50% participation).
+   */
+  async refreshMatchVoteTallies(state?: BackendState): Promise<void> {
+    const targetState = state || this.activeState;
+    if (!targetState) return;
+    const sessions = Array.isArray(targetState.matchSessions) ? targetState.matchSessions : [];
+    const unlockedSessions = sessions.filter((s) => {
+      const parts = Array.isArray(s.participantIds) ? s.participantIds : [];
+      const voters = Array.isArray(s.voterUids) ? s.voterUids : [];
+      return s.status === 'verified' && parts.length >= 2 && voters.length * 2 >= parts.length;
+    });
+    if (!unlockedSessions.length) {
+      targetState.matchVoteTallies = [];
+      return;
+    }
+
+    const tallies: Array<Record<string, unknown>> = [];
+    for (const sess of unlockedSessions.slice(0, 6)) {
+      const sid = String(sess.id || '');
+      const parts = (Array.isArray(sess.participantIds) ? sess.participantIds : []) as string[];
+      const fetches = parts.map(async (pid) => {
+        try {
+          const snap = await getDoc(doc(db, 'matchVoteTallies', `${sid}__${pid}`));
+          quotaMonitor.recordReads('oneShot', 1);
+          if (snap.exists()) {
+            tallies.push({ id: snap.id, ...snap.data() });
+          }
+        } catch {
+          // Locked (count < 2) or not yet voted for this target — safely ignore
+        }
+      });
+      await Promise.all(fetches);
+    }
+    targetState.matchVoteTallies = tallies;
+    if (this.activeOnUpdate) this.activeOnUpdate();
+  }
+
+  /**
+   * One-shot non-realtime fetch of Global Football Library articles (0 permanent listeners).
+   * Non-captains query only published articles; gracefully no-ops if rules await deployment.
+   */
+  async refreshFootballLibrary(state?: BackendState): Promise<void> {
+    const targetState = state || this.activeState;
+    if (!targetState) return;
+    try {
+      const q = this.activeIsCaptain
+        ? query(collection(db, 'footballLibrary'), where('teamId', '==', TEAM_ID))
+        : query(
+            collection(db, 'footballLibrary'),
+            where('teamId', '==', TEAM_ID),
+            where('published', '==', true)
+          );
+      const snap = await getDocs(q);
+      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+      targetState.footballLibrary = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (this.activeOnUpdate) this.activeOnUpdate();
+    } catch {
+      // Non-fatal: starter 13-article educational catalog remains available even before rules deploy
     }
   }
 
@@ -786,15 +908,47 @@ class MaydanBackendService {
       );
     };
 
+    const subMatchSessions = () => {
+      this.tabUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'matchSessions'), where('teamId', '==', TEAM_ID)),
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.matchSessions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+            void this.refreshMatchVoteTallies(state);
+          },
+          handleErr(OperationType.LIST, 'matchSessions')
+        )
+      );
+    };
+
+    const subMissionClaims = () => {
+      this.tabUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'missionClaims'), where('teamId', '==', TEAM_ID)),
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.missionClaims = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'missionClaims')
+        )
+      );
+    };
+
     switch (tabId) {
       case 'fifa': {
         subReports();
-        // One-shot non-realtime fetch of aggregated peer stats on screen open
+        // One-shot non-realtime fetch of aggregated peer stats, attendance commitment & captain ratings on screen open
         void this.refreshPeerRatingStats(state);
+        void this.refreshAttendance(state);
+        void this.refreshAdminRatings(state);
         break;
       }
       case 'live': {
         subReports();
+        subMatchSessions();
         break;
       }
       case 'tactics': {
@@ -872,6 +1026,11 @@ class MaydanBackendService {
       }
       case 'social': {
         subSuggestions();
+        subMissionClaims();
+        break;
+      }
+      case 'library': {
+        void this.refreshFootballLibrary(state);
         break;
       }
       case 'admin': {
@@ -937,6 +1096,13 @@ class MaydanBackendService {
         };
         if (payload.skills && typeof payload.skills === 'object') {
           updateData.skills = sanitizeSkills(payload.skills as Record<string, unknown>, 10);
+        }
+        const cleanStats6 = sanitizeStats6(payload.stats6);
+        if (cleanStats6) {
+          updateData.stats6 = cleanStats6;
+        }
+        if ('roleOverride' in payload) {
+          updateData.roleOverride = sanitizeRoleOverride(payload.roleOverride);
         }
         if ('photo' in payload) {
           const cleanPhoto = sanitizeImageDataUrl(payload.photo, 250000);
@@ -1008,6 +1174,9 @@ class MaydanBackendService {
       }
 
       case 'addPlayer': {
+        if (!this.activeIsCaptain) {
+          throw new Error('إضافة لاعب للقائمة متاحة للكابتن فقط');
+        }
         const id = String(payload.id || makeId('p')).replace(/[^a-zA-Z0-9_-]/g, '');
         try {
           await setDoc(doc(db, 'players', id), {
@@ -1036,20 +1205,25 @@ class MaydanBackendService {
             updatedAt: serverTimestamp(),
           });
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `players/${id}`);
+          this.handleWriteError(err, OperationType.CREATE, `players/${id}`);
         }
         return;
       }
 
       case 'approvePlayer': {
+        if (!this.activeIsCaptain) {
+          throw new Error('قبول طلبات الانضمام متاح للكابتن فقط');
+        }
         const applicantUid = String(payload.uid || payload.id || '');
         if (!applicantUid) throw new Error('معرّف الطلب غير صالح');
+        const cleanStats6 = sanitizeStats6(payload.stats6);
+        const cleanRoleOverride = sanitizeRoleOverride(payload.roleOverride);
         const batch = writeBatch(db);
         batch.update(doc(db, 'joinRequests', applicantUid), {
           status: 'approved',
           updatedAt: serverTimestamp(),
         });
-        batch.set(doc(db, 'players', applicantUid), {
+        const newPlayerDoc: Record<string, unknown> = {
           id: applicantUid,
           teamId: TEAM_ID,
           ownerUid: applicantUid,
@@ -1065,18 +1239,20 @@ class MaydanBackendService {
           photoZoom: 105,
           photoY: 18,
           hasPhoto: false,
-          skills: sanitizeSkills({
-            speed: 7,
-            shooting: 6,
-            passing: 7,
-            dribbling: 6,
-            defending: 6,
-            stamina: 7,
-            vision: 6,
-            teamwork: 7,
-            control: 7,
-            positioning: 6,
-          }),
+          skills: cleanStats6
+            ? stats6ToLegacySkills(cleanStats6)
+            : sanitizeSkills({
+                speed: 7,
+                shooting: 6,
+                passing: 7,
+                dribbling: 6,
+                defending: 6,
+                stamina: 7,
+                vision: 6,
+                teamwork: 7,
+                control: 7,
+                positioning: 6,
+              }),
           top3Strengths: '',
           weak3Points: '',
           seasonGoal: '',
@@ -1084,7 +1260,10 @@ class MaydanBackendService {
           availableStatus: 'available',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        });
+        };
+        if (cleanStats6) newPlayerDoc.stats6 = cleanStats6;
+        if (cleanRoleOverride) newPlayerDoc.roleOverride = cleanRoleOverride;
+        batch.set(doc(db, 'players', applicantUid), newPlayerDoc);
         try {
           await batch.commit();
         } catch (err) {
@@ -1094,6 +1273,9 @@ class MaydanBackendService {
       }
 
       case 'rejectPlayer': {
+        if (!this.activeIsCaptain) {
+          throw new Error('رفض طلبات الانضمام متاح للكابتن فقط');
+        }
         const applicantUid = String(payload.id || payload.uid || '');
         if (!applicantUid) return;
         try {
@@ -1102,7 +1284,7 @@ class MaydanBackendService {
             updatedAt: serverTimestamp(),
           });
         } catch (err) {
-          handleFirestoreError(err, OperationType.UPDATE, `joinRequests/${applicantUid}`);
+          this.handleWriteError(err, OperationType.UPDATE, `joinRequests/${applicantUid}`);
         }
         return;
       }
@@ -1117,7 +1299,12 @@ class MaydanBackendService {
             playerName: clampStr(payload.playerName || currentUser.name, 80) || 'لاعب',
             date: sanitizeDateStr(payload.date),
             type: clampStr(payload.type || 'مباراة', 40) || 'مباراة',
-            status: payload.status === 'ما فيني' ? 'ما فيني' : 'جاي',
+            status:
+              payload.status === 'ما فيني'
+                ? 'ما فيني'
+                : payload.status === 'متردد'
+                  ? 'متردد'
+                  : 'جاي',
             createdAt: serverTimestamp(),
           });
         } catch (err) {
@@ -1175,7 +1362,23 @@ class MaydanBackendService {
         return;
       }
 
+      case 'recoverAvailable': {
+        const playerId = String(currentUser.id || uid);
+        try {
+          await updateDoc(doc(db, 'players', playerId), {
+            availableStatus: 'available',
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.UPDATE, `players/${playerId}`);
+        }
+        return;
+      }
+
       case 'match': {
+        if (!this.activeIsCaptain) {
+          throw new Error('تسجيل نتيجة المباراة الرسمية متاح للكابتن فقط');
+        }
         const id = String(payload.id || makeId('m')).replace(/[^a-zA-Z0-9_-]/g, '');
         const ourScore = Math.round(clampNum(payload.ourScore, 0, 99, 0));
         const oppScore = Math.round(clampNum(payload.oppScore, 0, 99, 0));
@@ -1191,31 +1394,37 @@ class MaydanBackendService {
             createdAt: serverTimestamp(),
           });
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `matches/${id}`);
+          this.handleWriteError(err, OperationType.CREATE, `matches/${id}`);
         }
         return;
       }
 
       case 'report': {
         const id = makeId('rep');
+        const reportDoc: Record<string, unknown> = {
+          teamId: TEAM_ID,
+          playerId: String(currentUser.id || uid),
+          ownerUid: uid,
+          opponent: clampStr(payload.opponent, 80) || 'خصم',
+          goals: Math.round(clampNum(payload.goals, 0, 30, 0)),
+          assists: Math.round(clampNum(payload.assists, 0, 30, 0)),
+          minutes: Math.round(clampNum(payload.minutes, 1, 180, 50)),
+          interceptions: Math.round(clampNum(payload.interceptions, 0, 60, 0)),
+          turnovers: Math.round(clampNum(payload.turnovers, 0, 60, 0)),
+          rating: Math.round(clampNum(payload.rating, 1, 10, 8)),
+          rpe: Math.round(clampNum(payload.rpe, 1, 10, 7)),
+          bestMoment: clampStr(payload.bestMoment, 200),
+          worstMoment: clampStr(payload.worstMoment, 200),
+          motmVote: clampStr(payload.motmVote, 128),
+          pitchMode: sanitizePitchMode(payload.pitchMode),
+          matchResult: sanitizeMatchResult(payload.matchResult),
+          goalsConceded: Math.round(clampNum(payload.goalsConceded, 0, 30, 0)),
+          createdAt: serverTimestamp(),
+        };
+        const sid = String(payload.matchSessionId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        if (sid) reportDoc.matchSessionId = sid;
         try {
-          await setDoc(doc(db, 'reports', id), {
-            teamId: TEAM_ID,
-            playerId: String(currentUser.id || uid),
-            ownerUid: uid,
-            opponent: clampStr(payload.opponent, 80) || 'خصم',
-            goals: Math.round(clampNum(payload.goals, 0, 30, 0)),
-            assists: Math.round(clampNum(payload.assists, 0, 30, 0)),
-            minutes: Math.round(clampNum(payload.minutes, 1, 180, 50)),
-            interceptions: Math.round(clampNum(payload.interceptions, 0, 60, 0)),
-            turnovers: Math.round(clampNum(payload.turnovers, 0, 60, 0)),
-            rating: Math.round(clampNum(payload.rating, 1, 10, 8)),
-            rpe: Math.round(clampNum(payload.rpe, 1, 10, 7)),
-            bestMoment: clampStr(payload.bestMoment, 200),
-            worstMoment: clampStr(payload.worstMoment, 200),
-            motmVote: clampStr(payload.motmVote, 128),
-            createdAt: serverTimestamp(),
-          });
+          await setDoc(doc(db, 'reports', id), reportDoc);
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, `reports/${id}`);
         }
@@ -1276,7 +1485,27 @@ class MaydanBackendService {
         try {
           await batch.commit();
         } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `peerRatings/${ballotId}`);
+          this.handleWriteError(err, OperationType.WRITE, `peerRatings/${ballotId}`);
+        }
+        return;
+      }
+
+      case 'adminRating': {
+        if (!this.activeIsCaptain) {
+          throw new Error('تقييم الكابتن الرسمي متاح للكابتن فقط');
+        }
+        const targetId = String(payload.targetId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        const score = Math.round(clampNum(payload.score, 1, 10, 7));
+        if (!targetId) throw new Error('اختر لاعباً لتسجيل تقييم الكابتن');
+        try {
+          await setDoc(doc(db, 'adminRatings', targetId), {
+            teamId: TEAM_ID,
+            targetId,
+            score,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.WRITE, `adminRatings/${targetId}`);
         }
         return;
       }
@@ -1298,6 +1527,9 @@ class MaydanBackendService {
       }
 
       case 'tactics': {
+        if (!this.activeIsCaptain) {
+          throw new Error('حفظ التشكيلة الرسمية متاح للكابتن فقط');
+        }
         const rawSlots = (payload.slots && typeof payload.slots === 'object'
           ? payload.slots
           : {}) as Record<string, unknown>;
@@ -1317,12 +1549,15 @@ class MaydanBackendService {
             updatedAt: serverTimestamp(),
           });
         } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, 'tactics/current');
+          this.handleWriteError(err, OperationType.WRITE, 'tactics/current');
         }
         return;
       }
 
       case 'settings': {
+        if (!this.activeIsCaptain) {
+          throw new Error('تعديل إعدادات وهوية الفريق متاح للكابتن فقط');
+        }
         const appName = clampStr(payload.appName || 'ميدان 6v6', 60) || 'ميدان 6v6';
         const teamName = clampStr(payload.teamName || 'فريق السداسي', 80) || 'فريق السداسي';
         const primaryColor = sanitizeHexColor(payload.primaryColor, ROYAL_PRIMARY);
@@ -1372,7 +1607,7 @@ class MaydanBackendService {
         try {
           await batch.commit();
         } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, 'settings/team');
+          this.handleWriteError(err, OperationType.WRITE, 'settings/team');
         }
         return;
       }
@@ -1404,12 +1639,15 @@ class MaydanBackendService {
         try {
           await batch.commit();
         } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `inviteCodes/${newCode}`);
+          this.handleWriteError(err, OperationType.WRITE, `inviteCodes/${newCode}`);
         }
         return { inviteCode: newCode };
       }
 
       case 'updateRole': {
+        if (!this.activeIsCaptain) {
+          throw new Error('تغيير صلاحيات اللاعبين متاح للكابتن فقط');
+        }
         const targetId = String(payload.id || '');
         const ownerUid = String(payload.ownerUid || '');
         const newRole = payload.role === 'admin' ? 'admin' : 'player';
@@ -1433,7 +1671,7 @@ class MaydanBackendService {
         try {
           await batch.commit();
         } catch (err) {
-          handleFirestoreError(err, OperationType.WRITE, `players/${targetId}`);
+          this.handleWriteError(err, OperationType.WRITE, `players/${targetId}`);
         }
         return;
       }
@@ -1514,6 +1752,288 @@ class MaydanBackendService {
         return;
       }
 
+      case 'createMatchSession': {
+        const id = String(payload.id || makeId('ms')).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        const rawParts = Array.isArray(payload.participantIds) ? payload.participantIds : [];
+        const participantIds = Array.from(
+          new Set([uid, ...rawParts.map((x) => String(x || '').replace(/[^a-zA-Z0-9_-]/g, ''))])
+        )
+          .filter(Boolean)
+          .slice(0, 22);
+        const ourScore = Math.round(clampNum(payload.ourScore, 0, 99, 0));
+        const oppScore = Math.round(clampNum(payload.oppScore, 0, 99, 0));
+        const result = ourScore > oppScore ? 'فوز' : ourScore < oppScore ? 'خسارة' : 'تعادل';
+        try {
+          await setDoc(doc(db, 'matchSessions', id), {
+            id,
+            teamId: TEAM_ID,
+            date: sanitizeDateStr(payload.date),
+            opponent: clampStr(payload.opponent, 80) || 'خصم',
+            pitchMode: sanitizePitchMode(payload.pitchMode),
+            ourScore,
+            oppScore,
+            result,
+            createdBy: uid,
+            participantIds,
+            confirmers: [uid],
+            status: 'draft',
+            votingOpen: false,
+            voterUids: [],
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.CREATE, `matchSessions/${id}`);
+        }
+        return;
+      }
+
+      case 'confirmMatchSession': {
+        const sessionId = String(payload.sessionId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        if (!sessionId) throw new Error('معرّف المباراة غير صالح');
+        const confirmers = Array.isArray(payload.confirmers)
+          ? payload.confirmers.map((x) => String(x || ''))
+          : [uid];
+        const status = payload.status === 'verified' ? 'verified' : 'draft';
+        const votingOpen = status === 'verified';
+        try {
+          await updateDoc(doc(db, 'matchSessions', sessionId), {
+            confirmers,
+            status,
+            votingOpen,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.UPDATE, `matchSessions/${sessionId}`);
+        }
+        return;
+      }
+
+      case 'submitSecretMatchVotes': {
+        const sessionId = String(payload.sessionId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        const eligibleCount = Math.round(clampNum(payload.eligibleCount, 2, 22, 6));
+        const rawBallots = Array.isArray(payload.ballots)
+          ? (payload.ballots as Array<{ targetId?: unknown; score?: unknown }>)
+          : [];
+        const validBallots: Array<{ targetId: string; score: number }> = [];
+        const seenTargets = new Set<string>();
+        for (const b of rawBallots) {
+          const targetId = String(b.targetId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+          if (!targetId || targetId === uid || seenTargets.has(targetId)) continue;
+          seenTargets.add(targetId);
+          validBallots.push({ targetId, score: Math.round(clampNum(b.score, 1, 10, 7)) });
+        }
+        if (!sessionId || !validBallots.length) return;
+
+        // Chunk atomic (ballot + tally) pairs into max 4 targets per writeBatch
+        // to stay strictly under Firestore's 20 document-access-per-batch security rule limit (even on 11v11).
+        const CHUNK_SIZE = 4;
+        try {
+          for (let i = 0; i < validBallots.length; i += CHUNK_SIZE) {
+            const chunk = validBallots.slice(i, i + CHUNK_SIZE);
+            const isLastChunk = i + CHUNK_SIZE >= validBallots.length;
+            const batch = writeBatch(db);
+            for (const { targetId, score } of chunk) {
+              const ballotId = `${sessionId}__${targetId}__${uid}`;
+              const tallyId = `${sessionId}__${targetId}`;
+
+              batch.set(doc(db, 'matchVoteBallots', ballotId), {
+                sessionId,
+                targetId,
+                voterUid: uid,
+                score,
+                createdAt: serverTimestamp(),
+              });
+              batch.set(
+                doc(db, 'matchVoteTallies', tallyId),
+                {
+                  teamId: TEAM_ID,
+                  sessionId,
+                  targetId,
+                  eligibleCount,
+                  count: increment(1),
+                  totalScore: increment(score),
+                  h1: increment(score === 1 ? 1 : 0),
+                  h2: increment(score === 2 ? 1 : 0),
+                  h3: increment(score === 3 ? 1 : 0),
+                  h4: increment(score === 4 ? 1 : 0),
+                  h5: increment(score === 5 ? 1 : 0),
+                  h6: increment(score === 6 ? 1 : 0),
+                  h7: increment(score === 7 ? 1 : 0),
+                  h8: increment(score === 8 ? 1 : 0),
+                  h9: increment(score === 9 ? 1 : 0),
+                  h10: increment(score === 10 ? 1 : 0),
+                  updatedAt: serverTimestamp(),
+                },
+                { merge: true }
+              );
+            }
+            if (isLastChunk) {
+              batch.update(doc(db, 'matchSessions', sessionId), {
+                voterUids: arrayUnion(uid),
+                updatedAt: serverTimestamp(),
+              });
+            }
+            await batch.commit();
+          }
+        } catch (err) {
+          this.handleWriteError(err, OperationType.WRITE, `matchVoteBallots/${sessionId}`);
+        }
+        return;
+      }
+
+      case 'createMissionClaim': {
+        const id = String(payload.id || makeId('mc')).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        const verifierUids = Array.isArray(payload.verifierUids)
+          ? payload.verifierUids.map((x) => String(x || '').replace(/[^a-zA-Z0-9_-]/g, '')).slice(0, 2)
+          : [];
+        if (verifierUids.length !== 2 || verifierUids[0] === verifierUids[1] || verifierUids.includes(uid)) {
+          throw new Error('يجب اختيار زميلين مختلفين غيرك للتحقق من المهمة');
+        }
+        try {
+          await setDoc(doc(db, 'missionClaims', id), {
+            id,
+            teamId: TEAM_ID,
+            missionId: String(payload.missionId || 'clean_sheet'),
+            missionTitle: clampStr(payload.missionTitle, 80) || 'مهمة الفريق',
+            xpReward: Math.round(clampNum(payload.xpReward, 10, 100, 30)),
+            claimantUid: uid,
+            claimantName: clampStr(payload.claimantName || currentUser.name, 80) || 'لاعب',
+            note: clampStr(payload.note, 200),
+            verifierUids,
+            approverUids: [],
+            rejectorUids: [],
+            status: 'pending',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.CREATE, `missionClaims/${id}`);
+        }
+        return;
+      }
+
+      case 'verifyMissionClaim': {
+        const claimId = String(payload.claimId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        if (!claimId) throw new Error('معرّف المهمة غير صالح');
+        const approverUids = Array.isArray(payload.approverUids)
+          ? payload.approverUids.map((x) => String(x || ''))
+          : [];
+        const rejectorUids = Array.isArray(payload.rejectorUids)
+          ? payload.rejectorUids.map((x) => String(x || ''))
+          : [];
+        const status =
+          payload.status === 'verified' || payload.status === 'rejected' ? payload.status : 'pending';
+        try {
+          await updateDoc(doc(db, 'missionClaims', claimId), {
+            approverUids,
+            rejectorUids,
+            status,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.UPDATE, `missionClaims/${claimId}`);
+        }
+        return;
+      }
+
+      case 'saveLibraryArticle': {
+        if (!this.activeIsCaptain) {
+          throw new Error('إدارة المكتبة الكروية العالمية متاحة للكابتن فقط');
+        }
+        const artId = String(payload.id || makeId('lib')).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+        if (!artId) throw new Error('معرّف المقال غير صالح');
+        const rawUrl = String(payload.sourceUrl || '').trim();
+        if (!/^https:\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+$/.test(rawUrl) || rawUrl.length > 300) {
+          throw new Error('رابط المصدر يجب أن يبدأ بـ https:// ويكون صالحاً');
+        }
+        const allowedCategories = new Set([
+          'التكتيكات والخطط',
+          'أساسيات المراكز والأدوار',
+          'مهارات المراوغة والتحكم',
+          'التمرير وصناعة اللعب',
+          'التسديد والإنهاء',
+          'التحركات بدون كرة',
+          'الضغط الجماعي',
+          'التدريب الفردي',
+          'اللياقة والتحمل',
+          'الإحماء والتعافي',
+          'تطوير الحراس',
+          'القواعد الكروية',
+          'الوقاية من الإصابات والإسعافات',
+        ]);
+        const category = allowedCategories.has(String(payload.category || ''))
+          ? String(payload.category)
+          : 'التكتيكات والخطط';
+        const level =
+          payload.level === 'مبتدئ' || payload.level === 'متقدم' ? String(payload.level) : 'متوسط';
+        const keyTakeawaysAr = Array.isArray(payload.keyTakeawaysAr)
+          ? payload.keyTakeawaysAr
+              .map((t) => clampStr(t, 200))
+              .filter(Boolean)
+              .slice(0, 6)
+          : [];
+        const terms = Array.isArray(payload.terms)
+          ? payload.terms
+              .slice(0, 8)
+              .map((t) => {
+                const obj = (t && typeof t === 'object' ? t : {}) as Record<string, unknown>;
+                return {
+                  en: clampStr(obj.en, 50),
+                  ar: clampStr(obj.ar, 60),
+                };
+              })
+              .filter((t) => t.en.length > 0 && t.ar.length > 0)
+          : [];
+        const docRef = doc(db, 'footballLibrary', artId);
+        try {
+          const existingSnap = await getDoc(docRef);
+          const createdAtVal = existingSnap.exists()
+            ? existingSnap.data().createdAt || serverTimestamp()
+            : serverTimestamp();
+          await setDoc(docRef, {
+            id: artId,
+            teamId: TEAM_ID,
+            titleAr: clampStr(payload.titleAr, 140) || 'ملخص كروي تعليمي',
+            originalLang: clampStr(payload.originalLang, 40) || 'الإنجليزية',
+            publisher: clampStr(payload.publisher, 100) || 'مصدر كروي دولي',
+            sourceUrl: rawUrl,
+            publishedAt: sanitizeDateStr(payload.publishedAt),
+            lastReviewed: sanitizeDateStr(payload.lastReviewed),
+            category,
+            level,
+            summaryAr: clampStr(payload.summaryAr, 1200) || 'ملخص تعليمي',
+            keyTakeawaysAr: keyTakeawaysAr.length ? keyTakeawaysAr : ['تطبيق عملي داخل الملعب.'],
+            terms: terms.length ? terms : [{ en: 'Tactics', ar: 'التكتيك' }],
+            originalExcerpt: clampStr(payload.originalExcerpt, 350),
+            published: payload.published !== false,
+            isCustom: Boolean(payload.isCustom),
+            updatedBy: uid,
+            createdAt: createdAtVal,
+            updatedAt: serverTimestamp(),
+          });
+          await this.refreshFootballLibrary();
+        } catch (err) {
+          this.handleWriteError(err, OperationType.WRITE, `footballLibrary/${artId}`);
+        }
+        return;
+      }
+
+      case 'deleteLibraryArticle': {
+        if (!this.activeIsCaptain) {
+          throw new Error('حذف المقالات متاح للكابتن فقط');
+        }
+        const artId = String(payload.id || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+        if (!artId) throw new Error('معرّف المقال غير صالح');
+        try {
+          await deleteDoc(doc(db, 'footballLibrary', artId));
+          await this.refreshFootballLibrary();
+        } catch (err) {
+          this.handleWriteError(err, OperationType.DELETE, `footballLibrary/${artId}`);
+        }
+        return;
+      }
+
       case 'wipeReset': {
         if (!this.activeIsCaptain) {
           throw new Error('مسح البيانات متاح للكابتن فقط');
@@ -1582,6 +2102,8 @@ class MaydanBackendService {
           photoY: p.photoY,
           hasPhoto: Boolean(photo),
           skills: p.skills,
+          ...(sanitizeStats6(p.stats6) ? { stats6: sanitizeStats6(p.stats6) } : {}),
+          roleOverride: sanitizeRoleOverride(p.roleOverride),
           top3Strengths: p.top3Strengths,
           weak3Points: p.weak3Points,
           seasonGoal: p.seasonGoal,
@@ -1637,6 +2159,9 @@ class MaydanBackendService {
           bestMoment: r.bestMoment,
           worstMoment: r.worstMoment,
           motmVote: r.motmVote,
+          pitchMode: sanitizePitchMode(r.pitchMode),
+          matchResult: sanitizeMatchResult(r.matchResult),
+          goalsConceded: Math.round(clampNum(r.goalsConceded, 0, 30, 0)),
           createdAt: serverTimestamp(),
         });
       });
@@ -1732,6 +2257,8 @@ class MaydanBackendService {
       'adminRatings',
       'peerRatingStats',
       'pitchPayments',
+      'matchSessions',
+      'missionClaims',
     ];
     for (const colName of colNames) {
       const snap = await getDocs(query(collection(db, colName), where('teamId', '==', TEAM_ID)));

@@ -290,4 +290,48 @@ describe('Maydan Realistic Anti-Inflation Rating Engine (Phase A)', () => {
     assert.ok(hugeTraining.trainingNote.includes('XP'));
     assert.equal(resolvePositionRole('صانع ألعاب'), 'CAM_WINGER');
   });
+
+  it('enforces 3-layer separation, single-match swing cap, captain rating separation, and respectful comparison', async () => {
+    const { buildRespectfulComparisonSummary } = await import('./ratingEngine.ts');
+    const baseStats: Stats6 = { PAC: 66, SHO: 68, DRI: 66, PAS: 54, DEF: 50, PHY: 56 };
+
+    // 1 single huge match must NEVER cause a big OVR swing (capped at +1)
+    const afterOneHugeMatch = computeRealisticCardRating({
+      stats6: baseStats,
+      primaryPos: 'مهاجم',
+      verifiedMatches: [
+        { goals: 6, assists: 4, matchResult: 'فوز', pitchMode: '11v11', peerVoteScore: 10, verified: true },
+      ],
+    });
+    assert.equal(afterOneHugeMatch.selfLayerOvr, afterOneHugeMatch.baseOvr);
+    assert.ok(afterOneHugeMatch.performanceLayerOvr !== null && afterOneHugeMatch.performanceLayerOvr > afterOneHugeMatch.selfLayerOvr);
+    assert.ok(afterOneHugeMatch.deltaFromMatches <= 1, 'Single match must cap delta at +1');
+    assert.equal(afterOneHugeMatch.sampleMaturity, 'early');
+    assert.ok(afterOneHugeMatch.explanationReasons.length >= 3);
+
+    // Optional Captain rating integrates transparently without overwriting Self layer
+    const withCaptain = computeRealisticCardRating({
+      stats6: baseStats,
+      primaryPos: 'مهاجم',
+      captainRatingScore: 9,
+      verifiedMatches: [
+        { goals: 1, assists: 1, matchResult: 'فوز', pitchMode: '6v6', peerVoteScore: 8, verified: true },
+        { goals: 1, assists: 0, matchResult: 'فوز', pitchMode: '6v6', peerVoteScore: 8, verified: true },
+      ],
+    });
+    assert.equal(withCaptain.selfLayerOvr, withCaptain.baseOvr);
+    assert.ok(withCaptain.captainRatingNormalized !== null && withCaptain.captainRatingNormalized > 85);
+    assert.ok(withCaptain.explanationReasons.some((r) => r.includes('تقييم الكابتن')));
+
+    // Respectful comparison detects different positions and early sample sizes
+    const cmp = buildRespectfulComparisonSummary(
+      { name: 'كريم', primaryPos: 'حارس مرمى', stats6: { DEF: 82, PHY: 80, PAS: 58, PAC: 50, DRI: 46, SHO: 44 }, matchesCount: 2 },
+      { name: 'زيد', primaryPos: 'مهاجم', stats6: { SHO: 82, PAC: 80, DRI: 74, PAS: 44, PHY: 40, DEF: 40 }, matchesCount: 6 }
+    );
+    assert.equal(cmp.samePosition, false);
+    assert.ok(cmp.contextNote.includes('مركزين مختلفين'));
+    assert.ok(cmp.sampleCaution.includes('مبكّرة'));
+    assert.equal(cmp.playerA.strengths.length, 2);
+    assert.equal(cmp.playerB.strengths.length, 2);
+  });
 });

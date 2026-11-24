@@ -188,7 +188,8 @@ async function seedTeamState(): Promise<void> {
 
 test.before(async () => {
   const { host, port } = parseEmulatorHost();
-  const rules = fs.readFileSync(path.resolve('firestore.rules'), 'utf8');
+  const rulesPath = process.env.RULES_FILE || 'firestore.rules';
+  const rules = fs.readFileSync(path.resolve(rulesPath), 'utf8');
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: { host, port, rules },
@@ -657,3 +658,485 @@ test('Step 5ب #14: team members can read pitchSessions/current aggregate only; 
     })
   );
 });
+
+// ==================== SECURITY FIX #15: IDOR Impersonation Blocked Across Reports/Attendance/Readiness/Injuries ====================
+test('Security Fix #15 (IDOR): non-captain cannot forge playerId of another player on create; own playerId succeeds', async () => {
+  const playerADb = testEnv
+    .authenticatedContext('player_a', { email_verified: true })
+    .firestore();
+
+  // Impersonating player_b in reports -> MUST fail
+  await assertFails(
+    setDoc(doc(playerADb, 'reports', 'rep_idor_1'), {
+      teamId: 'main',
+      playerId: 'player_b',
+      ownerUid: 'player_a',
+      opponent: 'النسور',
+      goals: 10,
+      assists: 5,
+      minutes: 50,
+      rating: 10,
+      pitchMode: '6v6',
+      matchResult: 'فوز',
+      goalsConceded: 1,
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // Impersonating player_b in attendance -> MUST fail
+  await assertFails(
+    setDoc(doc(playerADb, 'attendance', 'att_idor_1'), {
+      teamId: 'main',
+      playerId: 'player_b',
+      ownerUid: 'player_a',
+      playerName: 'لاعب ب',
+      date: '2026-11-24',
+      type: 'مباراة',
+      status: 'ما فيني',
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // Impersonating player_b in readiness -> MUST fail
+  await assertFails(
+    setDoc(doc(playerADb, 'readiness', 'rd_idor_1'), {
+      teamId: 'main',
+      playerId: 'player_b',
+      ownerUid: 'player_a',
+      date: '2026-11-24',
+      sleep: 3,
+      fatigue: 2,
+      mood: 2,
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // Impersonating player_b in injuries -> MUST fail
+  await assertFails(
+    setDoc(doc(playerADb, 'injuries', 'inj_idor_1'), {
+      teamId: 'main',
+      playerId: 'player_b',
+      ownerUid: 'player_a',
+      type: 'التواء الكاحل',
+      location: 'القدم',
+      severity: 'شديدة',
+      date: '2026-11-24',
+      expectedReturn: '2026-12-01',
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // Valid own-identity report with Phase A fields -> MUST succeed
+  await assertSucceeds(
+    setDoc(doc(playerADb, 'reports', 'rep_own_ok'), {
+      teamId: 'main',
+      playerId: 'player_a',
+      ownerUid: 'player_a',
+      opponent: 'النسور',
+      goals: 2,
+      assists: 1,
+      minutes: 50,
+      rating: 8,
+      pitchMode: '11v11',
+      matchResult: 'فوز',
+      goalsConceded: 1,
+      createdAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== PHASE A #16: 360-Point Budget & Role Override Validation ====================
+test('Phase A #16: stats6 enforces exact 360-point total (40-85 each) and lockSkills server-side', async () => {
+  const playerADb = testEnv
+    .authenticatedContext('player_a', { email_verified: true })
+    .firestore();
+
+  // Over-budget stats6 (sum = 380) -> MUST fail
+  await assertFails(
+    updateDoc(doc(playerADb, 'players', 'player_a'), {
+      stats6: { PAC: 70, SHO: 70, PAS: 60, DRI: 60, DEF: 60, PHY: 60 },
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Out-of-bounds single stat (90 > 85, even if sum = 360) -> MUST fail
+  await assertFails(
+    updateDoc(doc(playerADb, 'players', 'player_a'), {
+      stats6: { PAC: 90, SHO: 50, PAS: 55, DRI: 55, DEF: 55, PHY: 55 },
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Exact 360-point budget with valid roleOverride -> MUST succeed
+  await assertSucceeds(
+    updateDoc(doc(playerADb, 'players', 'player_a'), {
+      stats6: { PAC: 70, SHO: 65, PAS: 60, DRI: 65, DEF: 50, PHY: 50 },
+      roleOverride: 'CAM_WINGER',
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== PHASE B #17: Decentralized Match Verification (Draft -> Verified by 3 Participants) ====================
+test('Phase B #17: matchSession cannot skip draft, blocks duplicate confirmers, and verifies at 3rd distinct confirmer', async () => {
+  const playerADb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+  const playerBDb = testEnv.authenticatedContext('player_b', { email_verified: true }).firestore();
+  const playerCDb = testEnv.authenticatedContext('player_c', { email_verified: true }).firestore();
+
+  const participants = ['captain_uid', 'player_a', 'player_b', 'player_c'];
+
+  // Attempting to create directly as verified -> MUST fail
+  await assertFails(
+    setDoc(doc(playerADb, 'matchSessions', 'ms_skip_draft'), {
+      id: 'ms_skip_draft',
+      teamId: 'main',
+      date: '2026-11-24',
+      opponent: 'الأسود',
+      pitchMode: '6v6',
+      ourScore: 4,
+      oppScore: 2,
+      result: 'فوز',
+      createdBy: 'player_a',
+      participantIds: participants,
+      confirmers: ['player_a', 'player_b', 'player_c'],
+      status: 'verified',
+      votingOpen: true,
+      voterUids: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Create valid Draft (1/3) -> MUST succeed
+  await assertSucceeds(
+    setDoc(doc(playerADb, 'matchSessions', 'ms_1'), {
+      id: 'ms_1',
+      teamId: 'main',
+      date: '2026-11-24',
+      opponent: 'الأسود',
+      pitchMode: '6v6',
+      ourScore: 4,
+      oppScore: 2,
+      result: 'فوز',
+      createdBy: 'player_a',
+      participantIds: participants,
+      confirmers: ['player_a'],
+      status: 'draft',
+      votingOpen: false,
+      voterUids: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Duplicate confirmation by creator player_a -> MUST fail
+  await assertFails(
+    updateDoc(doc(playerADb, 'matchSessions', 'ms_1'), {
+      confirmers: ['player_a', 'player_a'],
+      status: 'draft',
+      votingOpen: false,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // 2nd distinct confirmer (player_b) keeps status draft -> MUST succeed
+  await assertSucceeds(
+    updateDoc(doc(playerBDb, 'matchSessions', 'ms_1'), {
+      confirmers: ['player_a', 'player_b'],
+      status: 'draft',
+      votingOpen: false,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // 3rd distinct confirmer (player_c) promotes to verified & opens voting -> MUST succeed
+  await assertSucceeds(
+    updateDoc(doc(playerCDb, 'matchSessions', 'ms_1'), {
+      confirmers: ['player_a', 'player_b', 'player_c'],
+      status: 'verified',
+      votingOpen: true,
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== PHASE B #18: Secret Voting Anti-Self-Vote & 50% Quorum Lock ====================
+test('Phase B #18: secret voting blocks self-votes, hides tallies below 50% quorum, and unlocks at >= 50%', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    const now = Timestamp.now();
+    await setDoc(doc(db, 'matchSessions', 'ms_vote'), {
+      id: 'ms_vote',
+      teamId: 'main',
+      date: '2026-11-24',
+      opponent: 'الأبطال',
+      pitchMode: '6v6',
+      ourScore: 5,
+      oppScore: 3,
+      result: 'فوز',
+      createdBy: 'player_a',
+      participantIds: ['captain_uid', 'player_a', 'player_b', 'player_c'],
+      confirmers: ['player_a', 'player_b', 'player_c'],
+      status: 'verified',
+      votingOpen: true,
+      voterUids: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  const playerADb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+  const playerBDb = testEnv.authenticatedContext('player_b', { email_verified: true }).firestore();
+
+  // Self-vote attempt by player_a -> MUST fail
+  const selfBatch = writeBatch(playerADb);
+  selfBatch.set(doc(playerADb, 'matchVoteBallots', 'ms_vote__player_a__player_a'), {
+    sessionId: 'ms_vote',
+    targetId: 'player_a',
+    voterUid: 'player_a',
+    score: 10,
+    createdAt: serverTimestamp(),
+  });
+  selfBatch.set(doc(playerADb, 'matchVoteTallies', 'ms_vote__player_a'), {
+    teamId: 'main',
+    sessionId: 'ms_vote',
+    targetId: 'player_a',
+    eligibleCount: 4,
+    count: 1,
+    totalScore: 10,
+    h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0, h7: 0, h8: 0, h9: 0, h10: 1,
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(selfBatch.commit());
+
+  // Voter #1 (player_a = 1/4 = 25% < 50%) casts secret ballot for player_c
+  const batchA = writeBatch(playerADb);
+  batchA.set(doc(playerADb, 'matchVoteBallots', 'ms_vote__player_c__player_a'), {
+    sessionId: 'ms_vote',
+    targetId: 'player_c',
+    voterUid: 'player_a',
+    score: 8,
+    createdAt: serverTimestamp(),
+  });
+  batchA.set(
+    doc(playerADb, 'matchVoteTallies', 'ms_vote__player_c'),
+    {
+      teamId: 'main',
+      sessionId: 'ms_vote',
+      targetId: 'player_c',
+      eligibleCount: 4,
+      count: increment(1),
+      totalScore: increment(8),
+      h1: increment(0), h2: increment(0), h3: increment(0), h4: increment(0), h5: increment(0),
+      h6: increment(0), h7: increment(0), h8: increment(1), h9: increment(0), h10: increment(0),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+  batchA.update(doc(playerADb, 'matchSessions', 'ms_vote'), {
+    voterUids: ['player_a'],
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(batchA.commit());
+
+  // Below 50% participation -> tally read MUST fail (locked!)
+  await assertFails(getDoc(doc(playerADb, 'matchVoteTallies', 'ms_vote__player_c')));
+
+  // Voter #2 (player_b = 2/4 = 50% >= 50%) casts secret ballot for player_c
+  const batchB = writeBatch(playerBDb);
+  batchB.set(doc(playerBDb, 'matchVoteBallots', 'ms_vote__player_c__player_b'), {
+    sessionId: 'ms_vote',
+    targetId: 'player_c',
+    voterUid: 'player_b',
+    score: 9,
+    createdAt: serverTimestamp(),
+  });
+  batchB.set(
+    doc(playerBDb, 'matchVoteTallies', 'ms_vote__player_c'),
+    {
+      teamId: 'main',
+      sessionId: 'ms_vote',
+      targetId: 'player_c',
+      eligibleCount: 4,
+      count: increment(1),
+      totalScore: increment(9),
+      h1: increment(0), h2: increment(0), h3: increment(0), h4: increment(0), h5: increment(0),
+      h6: increment(0), h7: increment(0), h8: increment(0), h9: increment(1), h10: increment(0),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+  batchB.update(doc(playerBDb, 'matchSessions', 'ms_vote'), {
+    voterUids: ['player_a', 'player_b'],
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(batchB.commit());
+
+  // At >= 50% participation & count >= 2 -> tally read MUST succeed, while raw ballots stay secret
+  await assertSucceeds(getDoc(doc(playerADb, 'matchVoteTallies', 'ms_vote__player_c')));
+  await assertFails(getDoc(doc(playerADb, 'matchVoteBallots', 'ms_vote__player_c__player_b')));
+});
+
+// ==================== PHASE B #19: 2-Teammate Random Peer Mission Verification ====================
+test('Phase B #19: missionClaim blocks self-verification and unassigned verifiers; 2 assigned verifiers complete claim', async () => {
+  const playerADb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+  const playerBDb = testEnv.authenticatedContext('player_b', { email_verified: true }).firestore();
+  const playerCDb = testEnv.authenticatedContext('player_c', { email_verified: true }).firestore();
+  const captainDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+
+  // Including self in verifierUids -> MUST fail
+  await assertFails(
+    setDoc(doc(playerADb, 'missionClaims', 'mc_self'), {
+      id: 'mc_self',
+      teamId: 'main',
+      missionId: 'clean_sheet',
+      missionTitle: 'تحدي نظافة الشباك',
+      xpReward: 50,
+      claimantUid: 'player_a',
+      claimantName: 'لاعب أ',
+      note: 'محاولة غش',
+      verifierUids: ['player_a', 'player_b'],
+      approverUids: [],
+      rejectorUids: [],
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Valid claim assigned to player_b & player_c -> MUST succeed
+  await assertSucceeds(
+    setDoc(doc(playerADb, 'missionClaims', 'mc_ok'), {
+      id: 'mc_ok',
+      teamId: 'main',
+      missionId: 'clean_sheet',
+      missionTitle: 'تحدي نظافة الشباك',
+      xpReward: 50,
+      claimantUid: 'player_a',
+      claimantName: 'لاعب أ',
+      note: 'مباراة الخميس',
+      verifierUids: ['player_b', 'player_c'],
+      approverUids: [],
+      rejectorUids: [],
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Claimant trying to approve own mission -> MUST fail
+  await assertFails(
+    updateDoc(doc(playerADb, 'missionClaims', 'mc_ok'), {
+      approverUids: ['player_a'],
+      status: 'pending',
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Unassigned user (captain_uid) trying to verify -> MUST fail
+  await assertFails(
+    updateDoc(doc(captainDb, 'missionClaims', 'mc_ok'), {
+      approverUids: ['captain_uid'],
+      status: 'pending',
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Assigned verifier #1 (player_b) approves -> remains pending (1/2)
+  await assertSucceeds(
+    updateDoc(doc(playerBDb, 'missionClaims', 'mc_ok'), {
+      approverUids: ['player_b'],
+      status: 'pending',
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Assigned verifier #2 (player_c) approves -> transitions to verified (2/2)
+  await assertSucceeds(
+    updateDoc(doc(playerCDb, 'missionClaims', 'mc_ok'), {
+      approverUids: ['player_b', 'player_c'],
+      status: 'verified',
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== BATCH 2 #20 & #21: Global Football Library RBAC, Draft Isolation & XSS Guard ====================
+test('Batch 2 #20-#21: footballLibrary blocks non-captain writes, hidden draft reads, javascript: URLs & shadow fields', async () => {
+  const playerADb = testEnv
+    .authenticatedContext('player_a', { email_verified: true })
+    .firestore();
+  const captainDb = testEnv
+    .authenticatedContext('captain_uid', { email_verified: true })
+    .firestore();
+
+  const validArticle = {
+    id: 'lib_test_1',
+    teamId: 'main',
+    titleAr: 'فخ الضغط الجانبي في السداسي',
+    originalLang: 'الإنجليزية',
+    publisher: 'UEFA Coaching & Technical',
+    sourceUrl: 'https://www.uefa.com/development/coaches/',
+    publishedAt: '2026-10-10',
+    lastReviewed: '2026-11-24',
+    category: 'الضغط الجماعي',
+    level: 'متقدم',
+    summaryAr: 'ملخص تطبيقي لكيفية توجيه الخصم نحو خط التماس لإغلاق زوايا التمرير.',
+    keyTakeawaysAr: ['اضغط بزاوية قوسية تغلق العمق.'],
+    terms: [{ en: 'Pressing Trap', ar: 'فخ الضغط' }],
+    originalExcerpt: 'A pressing trap invites a pass into a predetermined wide zone.',
+    published: false,
+    isCustom: true,
+    updatedBy: 'captain_uid',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  // Non-captain creating article -> MUST fail
+  await assertFails(
+    setDoc(doc(playerADb, 'footballLibrary', 'lib_player_fail'), {
+      ...validArticle,
+      id: 'lib_player_fail',
+      updatedBy: 'player_a',
+      published: true,
+    })
+  );
+
+  // Captain with javascript: XSS URL -> MUST fail
+  await assertFails(
+    setDoc(doc(captainDb, 'footballLibrary', 'lib_xss'), {
+      ...validArticle,
+      id: 'lib_xss',
+      sourceUrl: 'javascript:alert(1)',
+    })
+  );
+
+  // Captain with unexpected shadow field -> MUST fail
+  await assertFails(
+    setDoc(doc(captainDb, 'footballLibrary', 'lib_shadow'), {
+      ...validArticle,
+      id: 'lib_shadow',
+      shadowInject: true,
+    })
+  );
+
+  // Captain creates hidden draft -> MUST succeed
+  await assertSucceeds(setDoc(doc(captainDb, 'footballLibrary', 'lib_test_1'), validArticle));
+
+  // Regular player reading hidden draft -> MUST fail
+  await assertFails(getDoc(doc(playerADb, 'footballLibrary', 'lib_test_1')));
+
+  // Captain reads hidden draft and publishes it -> MUST succeed
+  await assertSucceeds(getDoc(doc(captainDb, 'footballLibrary', 'lib_test_1')));
+  await assertSucceeds(
+    updateDoc(doc(captainDb, 'footballLibrary', 'lib_test_1'), {
+      published: true,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Regular player reading published article -> MUST succeed
+  await assertSucceeds(getDoc(doc(playerADb, 'footballLibrary', 'lib_test_1')));
+});
+
+

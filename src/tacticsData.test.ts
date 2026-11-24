@@ -44,10 +44,17 @@ test('All pitch sizes (5v5, 6v6, 7v7, 11v11) contain exact required formations a
   }
 });
 
-test('10 tactical scenarios all have sequential keyframes with valid coordinates and Arabic narration', () => {
+test('10 tactical scenarios all have sequential keyframes, valid coordinates, Arabic narration, and complete 7-point guides', () => {
   assert.equal(TACTICAL_SCENARIOS_10.length, 10);
   for (const sc of TACTICAL_SCENARIOS_10) {
     assert.ok(sc.frames.length >= 3, `Scenario ${sc.id} needs >= 3 frames`);
+    assert.ok(sc.guide && sc.guide.situation.length > 10, `Scenario ${sc.id} missing situation`);
+    assert.ok(sc.guide.roles.length > 10, `Scenario ${sc.id} missing roles`);
+    assert.ok(sc.guide.whereMove.length > 10, `Scenario ${sc.id} missing whereMove`);
+    assert.ok(sc.guide.whenMove.length > 10, `Scenario ${sc.id} missing whenMove`);
+    assert.ok(sc.guide.ballPath.length > 10, `Scenario ${sc.id} missing ballPath`);
+    assert.ok(sc.guide.goal.length > 10, `Scenario ${sc.id} missing goal`);
+    assert.ok(sc.guide.commonMistake.length > 10, `Scenario ${sc.id} missing commonMistake`);
     for (const fr of sc.frames) {
       assert.equal(fr.ourPos.length, 6);
       assert.equal(fr.oppPos.length, 6);
@@ -58,15 +65,33 @@ test('10 tactical scenarios all have sequential keyframes with valid coordinates
   }
 });
 
-test('Formation 4 phases and Role Spotlight generate valid multi-step animations for 6v6 and 11v11', () => {
-  for (const phase of ['attack', 'defend', 'counter', 'gegenpress'] as const) {
+test('All 7 tactical phases and Role Spotlight generate valid multi-step animations for 5v5, 6v6, 7v7, and 11v11', () => {
+  const allPhases = [
+    'attack',
+    'defend',
+    'counter',
+    'gegenpress',
+    'highpress',
+    'possession',
+    'setpieces',
+  ] as const;
+
+  for (const phase of allPhases) {
     const seq = getFormationPhaseSequence('6v6', '2-1-2', phase);
-    assert.ok(seq.frames.length >= 3);
+    assert.ok(seq.frames.length >= 3, `Phase ${phase} needs >= 3 frames`);
     assert.equal(seq.offsideEnabled, false);
     assert.equal(seq.frames[0].ourPos.length, 6);
+
+    const seq5 = getFormationPhaseSequence('5v5', '1-2-1', phase);
+    assert.equal(seq5.frames[0].ourPos.length, 5);
+    assert.equal(seq5.offsideEnabled, false);
+
+    const seq7 = getFormationPhaseSequence('7v7', '2-3-1', phase);
+    assert.equal(seq7.frames[0].ourPos.length, 7);
+    assert.equal(seq7.offsideEnabled, false);
   }
 
-  const seq11 = getFormationPhaseSequence('11v11', '4-3-3', 'attack');
+  const seq11 = getFormationPhaseSequence('11v11', '4-3-3', 'highpress');
   assert.equal(seq11.offsideEnabled, true);
   assert.equal(seq11.frames[0].ourPos.length, 11);
 
@@ -77,23 +102,27 @@ test('Formation 4 phases and Role Spotlight generate valid multi-step animations
   assert.ok(spot.defenseDuties.length >= 2);
 });
 
-test('splitFairTeams balances available players and excludes unavailable players', () => {
-  const split = splitFairTeams(SAMPLE_SQUAD, 'فريق السداسي');
+test('splitFairTeams balances available players, excludes unavailable, and flags fatigued players', () => {
+  const readiness = [{ playerId: 'p4', date: '2026-11-24', sleep: 4, fatigue: 3, mood: 5 }];
+  const split = splitFairTeams(SAMPLE_SQUAD, 'فريق السداسي', readiness);
   assert.equal(split.excludedUnavailable.length, 1);
   assert.equal(split.gold.length + split.silver.length, 7);
   assert.ok(Math.abs(split.gold.length - split.silver.length) <= 1);
   assert.ok(split.diff <= 8);
+  assert.ok(split.fatiguedNames.includes('يمان المايسترو'));
   assert.ok(split.whatsappText.includes('الفريق الذهبي'));
   assert.ok(split.whatsappText.includes('الفريق الفضي'));
 });
 
-test('suggestSmartLineup excludes injured players and assigns GK to GK slot', () => {
+test('suggestSmartLineup excludes injured players, assigns GK, and flags fatigued players', () => {
   const form = FORMATIONS_CATALOG['6v6'][0]; // 2-2-1
-  const res = suggestSmartLineup(SAMPLE_SQUAD, form);
+  const readiness = [{ playerId: 'p5', date: '2026-11-24', sleep: 3, fatigue: 3, mood: 4 }];
+  const res = suggestSmartLineup(SAMPLE_SQUAD, form, readiness);
   assert.equal(res.excludedCount, 1);
   assert.equal(res.assignedCount, 6);
   assert.equal(res.slots['2-2-1_0'], 'p1'); // GK goes to GK slot
   assert.ok(!Object.values(res.slots).includes('p7')); // injured excluded
+  assert.ok(res.fatiguedNames.includes('زيد السريع'));
 });
 
 test('computeTeamChemistry and buildRotationPlan produce valid results', () => {

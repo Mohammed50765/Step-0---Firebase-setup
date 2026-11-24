@@ -1,0 +1,41 @@
+{
+  "id": "/",
+  "name": "ميدان 6v6 — النسخة الملكية",
+  "short_name": "ميدان 6v6",
+  "description": "تطبيق إدارة فريق كرة قدم سداسي (6 ضد 6) مع درع ميدان الملكي، وضع المباراة المباشر، لوحة التكتيك، الجاهزية والحضور، الإصابات والتوعية، ولوحة الكابتن.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#070709",
+  "background_color": "#070709",
+  "categories": ["sports", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

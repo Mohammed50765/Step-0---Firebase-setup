@@ -1,7 +1,14 @@
 import { SKILL_KEYS } from './security';
 
 export type PitchSizeId = '5v5' | '6v6' | '7v7' | '11v11';
-export type TacticalPhaseId = 'attack' | 'defend' | 'counter' | 'gegenpress';
+export type TacticalPhaseId =
+  | 'attack'
+  | 'defend'
+  | 'counter'
+  | 'gegenpress'
+  | 'highpress'
+  | 'possession'
+  | 'setpieces';
 export type RoleGroup = 'gk' | 'def' | 'mid' | 'wing' | 'fwd';
 
 export interface FormationSlotDef {
@@ -59,6 +66,16 @@ export interface TacticalSequence {
   frames: TacticalKeyframe[];
 }
 
+export interface ScenarioPracticalGuide {
+  situation: string;      // 1. ما الموقف؟
+  roles: string;          // 2. ما دور كل لاعب؟
+  whereMove: string;      // 3. أين يتحرك؟
+  whenMove: string;       // 4. متى يتحرك؟
+  ballPath: string;       // 5. أين تذهب الكرة؟
+  goal: string;           // 6. ما الهدف من الحركة؟
+  commonMistake: string;  // 7. ما الخطأ الشائع الذي يجب تجنبه؟
+}
+
 export interface ScenarioDef {
   id: string;
   index: number;
@@ -66,6 +83,7 @@ export interface ScenarioDef {
   title: string;
   category: 'هجومي' | 'دفاعي' | 'كرات ثابتة' | 'مواقف حاسمة';
   summary: string;
+  guide: ScenarioPracticalGuide;
   frames: TacticalKeyframe[];
 }
 
@@ -737,6 +755,227 @@ export function getFormationPhaseSequence(
     };
   }
 
+  if (phase === 'highpress') {
+    const pressLineOur = base.map((p, i) =>
+      i === 0 ? { x: 50, y: 78 } : { x: p.x, y: clampCoord(p.y - 18, 16, 62) }
+    );
+    const trapOur = pressLineOur.map((p, i) =>
+      i === fwdIdx
+        ? { x: 62, y: 22 }
+        : i === supportIdx
+        ? { x: 80, y: 28 }
+        : i === creatorIdx
+        ? { x: 64, y: 38 }
+        : i === defIdx
+        ? { x: 70, y: 50 }
+        : { ...p }
+    );
+    const winOur = trapOur.map((p, i) =>
+      i === supportIdx ? { x: 76, y: 24 } : i === fwdIdx ? { x: 52, y: 18 } : { ...p }
+    );
+    const oppDeep = opp.map((o, i) => (i === 0 ? o : { x: o.x, y: clampCoord(o.y - 6, 14, 52) }));
+    return {
+      id: `${size}_${form.id}_highpress`,
+      title: `خطة ${form.name} — الضغط العالي المنظم (High Press)`,
+      subtitle: 'توجيه بناء الخصم نحو الخط الجانبي وإغلاق زوايا العمق لاستعادة الكرة أمام مرماهم',
+      size,
+      offsideEnabled: offside,
+      frames: [
+        {
+          title: 'المرحلة 1: إشارة البدء وتضييق العمق من المهاجم',
+          narration: 'عندما تمرّر الكرة لمدافع الخصم، يركض المهاجم بقوس يغلق التمرير للعمق ويجبر الخصم على اللعب نحو الخط الجانبي.',
+          durationMs: 2600,
+          ourPos: pressLineOur,
+          oppPos: oppDeep,
+          ball: { x: 68, y: 24 },
+          activeIndices: [fwdIdx, supportIdx],
+          arrows: [
+            { from: [base[fwdIdx].x, base[fwdIdx].y], to: [pressLineOur[fwdIdx].x, pressLineOur[fwdIdx].y], kind: 'run' },
+          ],
+          zones: [{ x: 76, y: 26, r: 12, label: 'توجيه للخط', color: 'gold' }],
+        },
+        {
+          title: 'المرحلة 2: إغلاق فخ الضغط (Pressing Trap) على الطرف',
+          narration: 'بمجرد وصول الكرة للطرف، ينقض الجناح ويقترب صانع اللعب لغلق الممر القريب، بينما يتقدم الدفاع لمراقبة أي كرة طويلة.',
+          durationMs: 2700,
+          ourPos: trapOur,
+          oppPos: oppDeep.map((o, i) => (i === 2 ? { x: 82, y: 28 } : o)),
+          ball: { x: 82, y: 28 },
+          activeIndices: [fwdIdx, supportIdx, creatorIdx, defIdx],
+          arrows: [
+            { from: [pressLineOur[supportIdx].x, pressLineOur[supportIdx].y], to: [trapOur[supportIdx].x, trapOur[supportIdx].y], kind: 'run' },
+            { from: [pressLineOur[creatorIdx].x, pressLineOur[creatorIdx].y], to: [trapOur[creatorIdx].x, trapOur[creatorIdx].y], kind: 'cover' },
+          ],
+          triangles: [[fwdIdx, supportIdx, creatorIdx]],
+          zones: [{ x: 78, y: 28, r: 11, label: 'فخ الضغط!', color: 'rose' }],
+        },
+        {
+          title: 'المرحلة 3: خطف الكرة والإنهاء المباشر في الثلث الأخير',
+          narration: 'تُقطع الكرة على الطرف وتُمرّر فوراً للمهاجم أمام المرمى قبل أن يرتب الخصم صفوفه!',
+          durationMs: 2600,
+          ourPos: winOur,
+          oppPos: oppDeep,
+          ball: { x: 52, y: 15 },
+          activeIndices: [supportIdx, fwdIdx],
+          arrows: [
+            { from: [76, 24], to: [52, 18], kind: 'ball' },
+            { from: [52, 18], to: [50, 10], kind: 'ball' },
+          ],
+          zones: [{ x: 52, y: 18, r: 10, label: 'استخلاص عالٍ ✓', color: 'emerald' }],
+        },
+      ],
+    };
+  }
+
+  if (phase === 'possession') {
+    const spreadOur = base.map((p, i) => {
+      if (i === 0) return { x: 50, y: 88 };
+      const wideX = p.x > 50 ? clampCoord(p.x + 8, 14, 88) : p.x < 50 ? clampCoord(p.x - 8, 12, 86) : 50;
+      return { x: wideX, y: clampCoord(p.y - 3, 20, 82) };
+    });
+    const rotateOur = spreadOur.map((p, i) =>
+      i === creatorIdx
+        ? { x: 52, y: 50 }
+        : i === defIdx
+        ? { x: 76, y: 66 }
+        : i === def2Idx
+        ? { x: 24, y: 66 }
+        : { ...p }
+    );
+    const switchOur = rotateOur.map((p, i) =>
+      i === supportIdx
+        ? { x: 20, y: 34 }
+        : i === fwdIdx
+        ? { x: 46, y: 24 }
+        : { ...p }
+    );
+    return {
+      id: `${size}_${form.id}_possession`,
+      title: `خطة ${form.name} — الاستحواذ وتدوير الكرة`,
+      subtitle: 'فتح عرض الملعب، اللعب من لمستين، وتغيير الجهة لخلق مساحات دون مخاطرة',
+      size,
+      offsideEnabled: offside,
+      frames: [
+        {
+          title: 'المرحلة 1: توسيع الملعب وصناعة مثلثات التمرير',
+          narration: 'يتباعد اللاعبون لفتح الملعب أفقياً، بحيث يملك حامل الكرة دائماً خيارين آمنين على الأقل (تمرير قصير أو خلفي).',
+          durationMs: 2600,
+          ourPos: spreadOur,
+          oppPos: opp,
+          ball: { x: spreadOur[defIdx].x, y: spreadOur[defIdx].y - 2 },
+          activeIndices: [gkIdx, defIdx, creatorIdx],
+          arrows: [
+            { from: [spreadOur[defIdx].x, spreadOur[defIdx].y], to: [spreadOur[creatorIdx].x, spreadOur[creatorIdx].y], kind: 'ball' },
+          ],
+          triangles: [[gkIdx, defIdx, creatorIdx]],
+          zones: [{ x: 50, y: 54, r: 14, label: 'مثلث استحواذ', color: 'cyan' }],
+        },
+        {
+          title: 'المرحلة 2: سحب الخصم لجهة ثم تدوير الكرة للقلب',
+          narration: 'نجذب ضغط الخصم نحو اليمين بلمستين قصيرتين ثم نمرر لصانع اللعب في القلب لفتح الجهة العكسية تماماً.',
+          durationMs: 2700,
+          ourPos: rotateOur,
+          oppPos: opp.map((o, i) => (i === 0 ? o : { x: clampCoord(o.x + 10, 18, 86), y: o.y })),
+          ball: { x: rotateOur[creatorIdx].x, y: rotateOur[creatorIdx].y },
+          activeIndices: [defIdx, creatorIdx, def2Idx],
+          arrows: [
+            { from: [rotateOur[defIdx].x, rotateOur[defIdx].y], to: [rotateOur[creatorIdx].x, rotateOur[creatorIdx].y], kind: 'ball' },
+            { from: [rotateOur[creatorIdx].x, rotateOur[creatorIdx].y], to: [rotateOur[def2Idx].x, rotateOur[def2Idx].y], kind: 'ball' },
+          ],
+          triangles: [[defIdx, creatorIdx, def2Idx]],
+        },
+        {
+          title: 'المرحلة 3: تحويل الجهة (Switch of Play) واختراق الطرف الحر',
+          narration: 'بمجرد ميل دفاع الخصم، نغيّر اللعب سريعاً للطرف الأيسر الحر لنخترق بهدوء وتحكّم كامل بالرتم.',
+          durationMs: 2700,
+          ourPos: switchOur,
+          oppPos: opp.map((o, i) => (i === 0 ? o : { x: clampCoord(o.x + 8, 18, 86), y: o.y })),
+          ball: { x: switchOur[supportIdx].x, y: switchOur[supportIdx].y },
+          activeIndices: [def2Idx, supportIdx, fwdIdx],
+          arrows: [
+            { from: [rotateOur[def2Idx].x, rotateOur[def2Idx].y], to: [switchOur[supportIdx].x, switchOur[supportIdx].y], kind: 'ball' },
+            { from: [rotateOur[fwdIdx].x, rotateOur[fwdIdx].y], to: [switchOur[fwdIdx].x, switchOur[fwdIdx].y], kind: 'run' },
+          ],
+          zones: [{ x: switchOur[supportIdx].x, y: switchOur[supportIdx].y, r: 12, label: 'جهة حرة ✓', color: 'emerald' }],
+        },
+      ],
+    };
+  }
+
+  if (phase === 'setpieces') {
+    const setupOur = base.map((p, i) => {
+      if (i === gkIdx) return { x: 50, y: 88 };
+      if (i === defIdx) return { x: 52, y: 58 };
+      if (i === def2Idx) return { x: 34, y: 50 };
+      if (i === supportIdx) return { x: 92, y: 10 };
+      if (i === creatorIdx) return { x: 52, y: 34 };
+      if (i === fwdIdx) return { x: 64, y: 20 };
+      return { x: clampCoord(36 + (i % 3) * 14, 24, 76), y: clampCoord(26 + (i % 2) * 12, 18, 52) };
+    });
+    const decoyOur = setupOur.map((p, i) =>
+      i === fwdIdx
+        ? { x: 72, y: 14 }
+        : i === creatorIdx
+        ? { x: 53, y: 22 }
+        : { ...p }
+    );
+    const oppBox = opp.map((o, i) =>
+      i === 0
+        ? { x: 52, y: 11 }
+        : { x: clampCoord(40 + (i % 4) * 9, 34, 72), y: clampCoord(17 + Math.floor(i / 4) * 11, 16, 44) }
+    );
+    return {
+      id: `${size}_${form.id}_setpieces`,
+      title: `خطة ${form.name} — الكرات الثابتة والركنيات`,
+      subtitle: 'توزيع ذكي: منفّذ + سحب القائم القريب + مسدّد من الخلف + ثنائي تأمين المرتدة',
+      size,
+      offsideEnabled: offside,
+      frames: [
+        {
+          title: 'المرحلة 1: الوقفة النظامية وتأمين العمق قبل التنفيذ',
+          narration: 'ممنوع صعود كل الفريق! يبقى ثنائي التأمين عند المنتصف لإيقاف أي مرتدة، بينما يتمركز المهاجم عند القائم القريب والمسدّد عند القوس.',
+          durationMs: 2600,
+          ourPos: setupOur,
+          oppPos: oppBox,
+          ball: { x: 93, y: 9 },
+          activeIndices: [supportIdx, fwdIdx, creatorIdx, defIdx],
+          arrows: [],
+          zones: [
+            { x: 53, y: 22, r: 10, label: 'نقطة التسديد', color: 'gold' },
+            { x: 46, y: 55, r: 11, label: 'تأمين المرتدة', color: 'cyan' },
+          ],
+        },
+        {
+          title: 'المرحلة 2: جري تمويهي للقائم القريب وتفريغ قلب الصندوق',
+          narration: 'يندفع المهاجم بسرعة نحو القائم القريب ليسحب الرقابة، وفي نفس الثانية يتسلل المسدّد نحو نقطة الجزاء الخالية.',
+          durationMs: 2700,
+          ourPos: decoyOur,
+          oppPos: oppBox.map((o, i) => (i === 0 ? o : { x: clampCoord(o.x + 5, 36, 76), y: clampCoord(o.y - 2, 14, 42) })),
+          ball: { x: 93, y: 9 },
+          activeIndices: [fwdIdx, creatorIdx],
+          arrows: [
+            { from: [setupOur[fwdIdx].x, setupOur[fwdIdx].y], to: [decoyOur[fwdIdx].x, decoyOur[fwdIdx].y], kind: 'run' },
+            { from: [setupOur[creatorIdx].x, setupOur[creatorIdx].y], to: [decoyOur[creatorIdx].x, decoyOur[creatorIdx].y], kind: 'run' },
+          ],
+        },
+        {
+          title: 'المرحلة 3: كرة أرضية سريعة للقادم من الخلف وإنهاء مباشر',
+          narration: 'تمريرة أرضية قوية نحو نقطة الجزاء ليسدّد القادم من الخلف بلمسة واحدة قبل تدخّل المدافعين!',
+          durationMs: 2700,
+          ourPos: decoyOur,
+          oppPos: oppBox,
+          ball: { x: 49, y: 9 },
+          activeIndices: [supportIdx, creatorIdx],
+          arrows: [
+            { from: [92, 10], to: [decoyOur[creatorIdx].x, decoyOur[creatorIdx].y], kind: 'ball' },
+            { from: [decoyOur[creatorIdx].x, decoyOur[creatorIdx].y], to: [49, 9], kind: 'ball' },
+          ],
+          zones: [{ x: 50, y: 12, r: 10, label: 'هدف ثابتة ✓', color: 'emerald' }],
+        },
+      ],
+    };
+  }
+
   // gegenpress (الضغط العكسي)
   const highOur = base.map((p, i) => (i === 0 ? p : { x: p.x, y: clampCoord(p.y - 12, 18, 74) }));
   const pressOur = highOur.map((p, i) =>
@@ -959,6 +1198,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'البناء من الخلف (مع الحارس)',
     category: 'هجومي',
     summary: 'كسر ضغط الخصم العالي باستخدام الحارس كاللاعب السادس',
+    guide: {
+      situation: 'الخصم يضغط عالياً على منطقة جزائنا عند بدء اللعب من الحارس.',
+      roles: 'الحارس يبدأ البناء بهدوء، المدافعان يفتحان عرض الملعب، ولاعب الوسط يهبط للقلب.',
+      whereMove: 'المدافعان نحو الخطين الجانبيين، وصانع اللعب ينزل للمساحة الفارغة في العمق.',
+      whenMove: 'فور استلام الحارس للكرة وقبل وصول مهاجمي الخصم.',
+      ballPath: 'من الحارس → المدافع الأيمن → صانع اللعب في القلب → الجناح المنطلق.',
+      goal: 'كسر الخط الأول للضغط والوصول لملعب الخصم بتفوق عددي.',
+      commonMistake: 'تمرير كرة مترددة بالعمق أمام مرمانا أو وقوف المدافعين بجانب بعضهما داخل الصندوق.',
+    },
     frames: [
       {
         title: '1. توسّع المدافعين لفتح زاوية للحارس',
@@ -1012,6 +1260,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'الهجوم المنظم وكسر الدفاع المتكتل',
     category: 'هجومي',
     summary: 'تدوير سريع من طرف لطرف مع جملة «خذ وهات» لكسر التكتل',
+    guide: {
+      situation: 'الخصم متكتل بـ 5 لاعبين أمام مرماه ويغلق عمق الملعب بالكامل.',
+      roles: 'الجناح الأيمن يسحب الدفاع، المدافع يحوّل جهة اللعب، الجناح الأيسر والمهاجم ينفذان «خذ وهات».',
+      whereMove: 'الجناح الأيسر يبقى مفتوحاً على الخط ثم يخترق قطرياً للعمق بعد تمريرته للمهاجم.',
+      whenMove: 'في اللحظة التي يميل فيها كامل دفاع الخصم نحو الجهة اليمنى.',
+      ballPath: 'الطرف الأيمن → قلب الدفاع → تحويل مباشر للطرف الأيسر → المهاجم المحطة → عمق الصندوق.',
+      goal: 'تفكيك التكتل الدفاعي وفتح زاوية تسديد واضحة داخل المنطقة.',
+      commonMistake: 'المراوغة الفردية في الزحام أو التسديد العشوائي في أجساد المدافعين بدل تدوير الكرة.',
+    },
     frames: [
       {
         title: '1. جذب الدفاع المتكتل نحو الجهة اليمنى',
@@ -1062,6 +1319,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'الدفاع الجماعي المتكتل (الكل ينزل يدافع)',
     category: 'دفاعي',
     summary: 'بناء كتلة دفاعية متماسكة من 5 لاعبين تغلق كل الممرات',
+    guide: {
+      situation: 'الخصم يستحوذ على الكرة في نصف ملعبنا ويبحث عن تمريرة بينية للعمق.',
+      roles: 'المهاجم يغلق المحور، الوسط يضغط على حامل الكرة، والمدافعان يغطيان الظهر والقائم البعيد.',
+      whereMove: 'كل الفريق يتحرك ككتلة متقاربة نحو جهة الكرة مع ترك مسافة قصيرة بين الخطوط.',
+      whenMove: 'فور فقدان الكرة أو عبور الخصم لدائرة المنتصف.',
+      ballPath: 'إجبار الخصم على التمرير الجانبي البطيء أو التسديد من بعيد حتى نقطع الكرة.',
+      goal: 'حرمان الخصم من أي تمريرة عمودية خطيرة واستعادة الكرة بأمان.',
+      commonMistake: 'اندفاع مدافع واحد للخارج تاركاً فجوة خلفه أو بقاء المهاجم واقفاً بدون مساندة.',
+    },
     frames: [
       {
         title: '1. نزول المهاجم لإغلاق محور الخصم',
@@ -1111,6 +1377,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'ركنيات لنا (جملة تكتيكية جاهزة)',
     category: 'كرات ثابتة',
     summary: 'تمويه القائم القريب + تسديدة القادم من الخلف مع تأمين المرتدة',
+    guide: {
+      situation: 'ركلة ركنية لصالح فريقنا من الجهة اليمنى في ملعب 6v6.',
+      roles: 'المنفّذ عند الزاوية، المهاجم يسحب القائم القريب، لاعب الوسط يسدّد من القوس، ومدافعان يؤمّنان الخلف.',
+      whereMove: 'المهاجم يندفع للقائم القريب، والمسدّد يتسلل لنقطة الجزاء الخالية.',
+      whenMove: 'مع رفع المنفّذ يده كإشارة قبل تنفيذ الركنية بثانية واحدة.',
+      ballPath: 'تمريرة أرضية قوية وحادة من الزاوية إلى نقطة الجزاء → تسديدة مباشرة بلمسة واحدة.',
+      goal: 'خداع رقابة الخصم وخلق تسديدة نظيفة بدون مضايقة مع منع أي مرتدة.',
+      commonMistake: 'تقدّم جميع اللاعبين للصندوق وترك مرمانا مكشوفاً أو رفع كرة بطيئة عالية يلتقطها الحارس.',
+    },
     frames: [
       {
         title: '1. توزيع المراكز قبل تنفيذ الركنية',
@@ -1159,6 +1434,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'الدفاع ضد ركنيات الخصم (توزيع الرقابة)',
     category: 'كرات ثابتة',
     summary: 'حراسة القائم القريب + رقابة رجل لرجل + لاعب جاهز للمرتدة',
+    guide: {
+      situation: 'ركلة ركنية للخصم تشكل خطورة مباشرة على مرمانا.',
+      roles: 'مدافع يحمي القائم القريب، مدافعان برقابة لصيقة رجل لرجل، وسط يغلق القوس، ومهاجم عند المنتصف.',
+      whereMove: 'المدافعون يبقون بين الخصم والمرمى، وفور الإبعاد ينطلق المهاجم والجناح للهجوم.',
+      whenMove: 'الالتصاق بالخصم قبل التنفيذ، والانطلاق للمرتدة لحظة تشتيت الكرة للجانب.',
+      ballPath: 'إبعاد الكرة نحو الخط الجانبي أو للمهاجم الحر عند خط المنتصف وليس لقلب القوس.',
+      goal: 'منع التسديد السهل داخل الصندوق وتحويل الركنية لمرتدة سريعة لصالحنا.',
+      commonMistake: 'النظر للكرة فقط ونسيان الخصم خلف الظهر، أو تشتيت الكرة بضعف نحو قوس الجزاء.',
+    },
     frames: [
       {
         title: '1. توزيع أدوار الرقابة الصارمة داخل الصندوق',
@@ -1207,6 +1491,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'الضربات الحرة القريبة',
     category: 'كرات ثابتة',
     summary: 'خدعة الجدار بالتمريرة الجانبية القصيرة لفتح زاوية تسديد مفتوحة',
+    guide: {
+      situation: 'ضربة حرة مباشرة قريبة من منطقة جزاء الخصم مع وجود جدار دفاعي يغلق الزاوية القريبة.',
+      roles: 'المنفّذ الأول يمرّر لمسة جانبية، المسدّد الثاني يتحرّك للزاوية المفتوحة، والمهاجم يتابع المرتدة.',
+      whereMove: 'المسدّد يخطو جانباً خارج ظل الجدار، والمهاجم يتحرك نحو القائم البعيد.',
+      whenMove: 'فور إطلاق الصافرة وبإيقاع سريع يفاجئ الجدار قبل تحركه.',
+      ballPath: 'لمسة قصيرة جانبية → تسديدة قوية نحو الزاوية البعيدة مع متابعة المهاجم.',
+      goal: 'إلغاء أثر جدار الخصم بالكامل وفتح رؤية كاملة للمرمى.',
+      commonMistake: 'التسديد المتكرر والمكشوف في وسط الجدار أو التباطؤ حتى يخرج مدافع لصد الكرة.',
+    },
     frames: [
       {
         title: '1. قراءة جدار الخصم وتموضع المموّه',
@@ -1253,6 +1546,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'موقف 1 ضد 1 (دفاعياً وهجومياً)',
     category: 'مواقف حاسمة',
     summary: 'كيف يدافع اللاعب بدون اندفاع، وكيف يحسم المهاجم بالتمويه',
+    guide: {
+      situation: 'مواجهة مباشرة 1 ضد 1 على الطرف أو مشارف الصندوق.',
+      roles: 'المدافع يغلق العمق بوضعية جانبية متزنة؛ المهاجم يغيّر الإيقاع ويموّه بالكتف.',
+      whereMove: 'المدافع يوجّه المهاجم نحو الخط الجانبي؛ المهاجم يخترق المساحة المفتوحة نحو الداخل.',
+      whenMove: 'المدافع يصبر حتى يخطئ المهاجم في اللمسة؛ المهاجم ينطلق لحظة ثقل قدم المدافع.',
+      ballPath: 'هجومياً: تمريرة للداخل أو تسديدة فورية في الزاوية قبل وصول التغطية.',
+      goal: 'دفاعياً: تعطيل الهجمة دون خطأ؛ هجومياً: كسب التفوق والإنهاء السريع.',
+      commonMistake: 'اندفاع المدافع بكامل جسمه للكرة فيُراوغ بسهولة، أو إكثار المهاجم من المراوغة بعد المرور.',
+    },
     frames: [
       {
         title: '1. القاعدة الدفاعية: التوجيه نحو الخط وليس القلب',
@@ -1303,6 +1605,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'التفوق العددي 2 ضد 1 (التمرير أو الاختراق)',
     category: 'هجومي',
     summary: 'سحب المدافع الأخير بالكرة ثم التمرير في اللحظة المثالية',
+    guide: {
+      situation: 'مرتدة سريعة يواجه فيها اثنان من فريقنا مدافعاً واحداً فقط قبل الحارس.',
+      roles: 'حامل الكرة يسحب المدافع نحو نفسه، والزميل المساند يفتح زاوية تمرير واسعة دون تداخل.',
+      whereMove: 'حامل الكرة يتجه نحو قلب المدافع، والزميل ينطلق في الممر المعاكس بعيداً عنه.',
+      whenMove: 'التمريرة تخرج في اللحظة التي يلتزم فيها المدافع بالخروج نحو حامل الكرة.',
+      ballPath: 'تقدّم بالكرة → تمريرة عرضية أرضية حاسمة → تسديدة بلمسة واحدة أمام الحارس.',
+      goal: 'تحويل التفوق العددي 2 ضد 1 إلى انفراد شبه مضمون بالمرمى.',
+      commonMistake: 'التمرير المبكر جداً قبل سحب المدافع، أو الأنانية والتسديد بزاوية ضيقة والزميل حر تماماً.',
+    },
     frames: [
       {
         title: '1. المهاجم بالكرة يتقدم مباشرة نحو المدافع الأخير',
@@ -1349,6 +1660,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'آخر 3 دقائق — ونحن فائزين',
     category: 'مواقف حاسمة',
     summary: 'قتل الرتم بالاستحواذ الآمن في مثلثات الزاوية وتأمين العمق',
+    guide: {
+      situation: 'نحن متقدمون بالنتيجة وتبقّت 3 دقائق فقط مع ضغط متهور من الخصم.',
+      roles: 'ثلاثي المقدمة يصنع مثلث استحواذ قرب زاوية الخصم، والمدافعان والحارس يؤمّنون العمق.',
+      whereMove: 'حماية الكرة قرب الخطوط وتدويرها للخلف عند الحاجة دون ترك فراغات بالوسط.',
+      whenMove: 'بمجرد استلام الكرة في الدقائق الأخيرة مع الحفاظ على هدوء الأعصاب.',
+      ballPath: 'تمريرات قصيرة آمنة بين المثلث ← إعادة هادئة للمدافع أو الحارس لتغيير الجهة.',
+      goal: 'استهلاك الوقت بأمان ومنع الخصم من بناء هجمة منظمة للتعادل.',
+      commonMistake: 'التشتيت العشوائي السريع الذي يعيد الكرة فوراً للخصم، أو التقدّم الهجومي المبالغ فيه.',
+    },
     frames: [
       {
         title: '1. الاحتفاظ بالكرة في ملعب الخصم بدون مخاطرة',
@@ -1395,6 +1715,15 @@ export const TACTICAL_SCENARIOS_10: ScenarioDef[] = [
     title: 'آخر 3 دقائق — ونحن خاسرين',
     category: 'مواقف حاسمة',
     summary: 'ضغط عالٍ شامل وتقدّم الحارس للمنتصف لخلق تفوق 6 ضد 5',
+    guide: {
+      situation: 'نحن متأخرون بالنتيجة في آخر 3 دقائق ونحتاج هدف التعادل بأسرع وقت.',
+      roles: 'كل لاعب يراقب خصمه رجل لرجل، والحارس يتقدم حتى المنتصف كصانع ألعاب سادس (Power Play).',
+      whereMove: 'انتشار كامل في نصف ملعب الخصم مع تواجد 3 لاعبين قرب منطقة الجزاء.',
+      whenMove: 'عند الدخول في الدقائق الثلاث الأخيرة وبإشارة واضحة من الكابتن.',
+      ballPath: 'الحارس السادس ← تمريرة سريعة للطرف ← عرضية أرضية حاسمة أمام المرمى.',
+      goal: 'إرباك دفاع الخصم بزيادة عددية 6 ضد 5 وخطف هدف التعادل.',
+      commonMistake: 'التسديد العشوائي من مسافة بعيدة فيتحول لمرتدة على مرمى خالٍ بدل خلق فرصة محققة.',
+    },
     frames: [
       {
         title: '1. ضغط رجل لرجل على كل لاعبي الخصم',
@@ -1455,6 +1784,34 @@ export interface MinimalPlayer {
   skills?: Record<string, number>;
 }
 
+export interface MinimalReadinessLog {
+  playerId: string;
+  date?: string;
+  sleep?: number;
+  fatigue?: number;
+  mood?: number;
+}
+
+export function getLatestReadinessScore(
+  playerId: string,
+  readinessLogs?: MinimalReadinessLog[]
+): { score: number; fatigued: boolean } | null {
+  if (!readinessLogs || !readinessLogs.length) return null;
+  let latest: MinimalReadinessLog | null = null;
+  for (const r of readinessLogs) {
+    if (r.playerId !== playerId) continue;
+    if (!latest || String(r.date || '') >= String(latest.date || '')) {
+      latest = r;
+    }
+  }
+  if (!latest) return null;
+  const sleep = Number(latest.sleep ?? 7);
+  const fatigue = Number(latest.fatigue ?? 7);
+  const mood = Number(latest.mood ?? 7);
+  const score = Number(((sleep + fatigue + mood) / 3).toFixed(1));
+  return { score, fatigued: fatigue <= 4 || score < 5.5 };
+}
+
 export function computePlayerOvr(player: MinimalPlayer | undefined): number {
   if (!player || !player.skills) return 65;
   const vals = SKILL_KEYS.map((k) => {
@@ -1510,28 +1867,38 @@ export function computeTeamChemistry(
 }
 
 export interface FairSplitResult {
-  gold: Array<MinimalPlayer & { ovr: number }>;
-  silver: Array<MinimalPlayer & { ovr: number }>;
+  gold: Array<MinimalPlayer & { ovr: number; fatigued?: boolean }>;
+  silver: Array<MinimalPlayer & { ovr: number; fatigued?: boolean }>;
   goldAvg: number;
   silverAvg: number;
   diff: number;
   excludedUnavailable: MinimalPlayer[];
+  fatiguedNames: string[];
   whatsappText: string;
 }
 
-export function splitFairTeams(players: MinimalPlayer[], teamName = 'فريق السداسي'): FairSplitResult {
+export function splitFairTeams(
+  players: MinimalPlayer[],
+  teamName = 'فريق السداسي',
+  readinessLogs?: MinimalReadinessLog[]
+): FairSplitResult {
   const excludedUnavailable = players.filter((p) => p.availableStatus === 'unavailable');
+  const fatiguedNames: string[] = [];
   const pool = players
     .filter((p) => p.availableStatus !== 'unavailable')
-    .map((p) => ({ ...p, ovr: computePlayerOvr(p) }));
+    .map((p) => {
+      const rd = getLatestReadinessScore(p.id, readinessLogs);
+      if (rd?.fatigued) fatiguedNames.push(p.name);
+      return { ...p, ovr: computePlayerOvr(p), fatigued: Boolean(rd?.fatigued) };
+    });
 
   // Separate GKs first so each side gets a GK when >= 2 exist, then sort remaining by OVR descending
   const gks = pool.filter((p) => p.primaryPos === 'حارس مرمى').sort((a, b) => b.ovr - a.ovr);
   const outfield = pool.filter((p) => p.primaryPos !== 'حارس مرمى').sort((a, b) => b.ovr - a.ovr);
   const ordered = [...gks, ...outfield];
 
-  const gold: Array<MinimalPlayer & { ovr: number }> = [];
-  const silver: Array<MinimalPlayer & { ovr: number }> = [];
+  const gold: Array<MinimalPlayer & { ovr: number; fatigued?: boolean }> = [];
+  const silver: Array<MinimalPlayer & { ovr: number; fatigued?: boolean }> = [];
   let goldSum = 0;
   let silverSum = 0;
 
@@ -1558,12 +1925,12 @@ export function splitFairTeams(players: MinimalPlayer[], teamName = 'فريق ا
   const whatsappText =
     `⚖️ *تقسيمة عادلة — ${teamName}*\n\n` +
     `🟡 *الفريق الذهبي* (متوسط ${goldAvg}):\n` +
-    (gold.map((p, i) => `${i + 1}. ${p.name} (${p.primaryPos || 'لاعب'} • ${p.ovr})`).join('\n') || '—') +
+    (gold.map((p, i) => `${i + 1}. ${p.name} (${p.primaryPos || 'لاعب'} • ${p.ovr}${p.fatigued ? ' ⚠️ إجهاد' : ''})`).join('\n') || '—') +
     `\n\n⚪ *الفريق الفضي* (متوسط ${silverAvg}):\n` +
-    (silver.map((p, i) => `${i + 1}. ${p.name} (${p.primaryPos || 'لاعب'} • ${p.ovr})`).join('\n') || '—') +
+    (silver.map((p, i) => `${i + 1}. ${p.name} (${p.primaryPos || 'لاعب'} • ${p.ovr}${p.fatigued ? ' ⚠️ إجهاد' : ''})`).join('\n') || '—') +
     `\n\n📊 فارق القوة: ${diff} نقطة فقط — بالتوفيق للجميع! ⚽👑`;
 
-  return { gold, silver, goldAvg, silverAvg, diff, excludedUnavailable, whatsappText };
+  return { gold, silver, goldAvg, silverAvg, diff, excludedUnavailable, fatiguedNames, whatsappText };
 }
 
 function slotGroupMatchesPos(group: RoleGroup, pos?: string): number {
@@ -1579,22 +1946,34 @@ function slotGroupMatchesPos(group: RoleGroup, pos?: string): number {
 
 export function suggestSmartLineup(
   players: MinimalPlayer[],
-  form: FormationDef
-): { slots: Record<string, string>; excludedCount: number; assignedCount: number } {
+  form: FormationDef,
+  readinessLogs?: MinimalReadinessLog[]
+): { slots: Record<string, string>; excludedCount: number; assignedCount: number; fatiguedNames: string[] } {
   const available = players.filter((p) => p.availableStatus !== 'unavailable');
   const excludedCount = players.length - available.length;
+  const fatiguedNames: string[] = [];
+  const fatigueMap = new Map<string, boolean>();
+  for (const p of available) {
+    const rd = getLatestReadinessScore(p.id, readinessLogs);
+    if (rd?.fatigued) {
+      fatiguedNames.push(p.name);
+      fatigueMap.set(p.id, true);
+    }
+  }
   const remaining = [...available];
   const slots: Record<string, string> = {};
 
   form.slots.forEach((slotDef, idx) => {
     if (!remaining.length) return;
     let bestIdx = 0;
-    let bestScore = -1;
+    let bestScore = -100;
     remaining.forEach((p, pIdx) => {
       const prim = slotGroupMatchesPos(slotDef.roleGroup, p.primaryPos);
       const sec = slotGroupMatchesPos(slotDef.roleGroup, p.secondaryPos) * 0.65;
       const ovrBonus = computePlayerOvr(p) / 25;
-      const total = Math.max(prim, sec) + ovrBonus;
+      // Gentle fatigue preference so rested teammates start first when options exist
+      const fatiguePenalty = fatigueMap.get(p.id) ? 2.5 : 0;
+      const total = Math.max(prim, sec) + ovrBonus - fatiguePenalty;
       if (total > bestScore) {
         bestScore = total;
         bestIdx = pIdx;
@@ -1604,7 +1983,7 @@ export function suggestSmartLineup(
     slots[`${form.id}_${idx}`] = picked.id;
   });
 
-  return { slots, excludedCount, assignedCount: Object.keys(slots).length };
+  return { slots, excludedCount, assignedCount: Object.keys(slots).length, fatiguedNames };
 }
 
 export interface RotationPlan {

@@ -141,14 +141,38 @@ export interface RealisticCardRatingInput {
   primaryPos?: string;
   roleOverride?: PositionRole | '' | null;
   verifiedMatches?: VerifiedMatchInput[] | null;
+  /** Optional official Captain rating (1–10 scale from adminRatings), clearly separated from Self & Peer. */
+  captainRatingScore?: number | null;
   /** Explicitly accepted and ignored in OVR math to prove training isolation. */
   trainingXp?: number;
   trainingStreak?: number;
 }
 
+export type SampleMaturity = 'none' | 'early' | 'developing' | 'stable';
+
+export interface RatingHistoryEntry {
+  date: string;
+  selfOvr: number;
+  performanceOvr: number | null;
+  finalOvr: number;
+  matchesCount: number;
+  reason: string;
+}
+
 export interface RealisticCardRatingResult {
   baseOvr: number;
   finalOvr: number;
+  /** Layer 1: Initial / Self-rated position-weighted OVR */
+  selfLayerOvr: number;
+  /** Layer 2: Field performance OVR (verified matches + peer votes + optional captain rating) */
+  performanceLayerOvr: number | null;
+  /** Normalized Captain rating (40–99) if provided */
+  captainRatingNormalized: number | null;
+  /** Sample-size maturity indicator */
+  sampleMaturity: SampleMaturity;
+  sampleMaturityLabel: string;
+  /** Clear, auditable Arabic reasons explaining why the card moved or stayed steady */
+  explanationReasons: string[];
   deltaFromMatches: number;
   declineApplied: boolean;
   declineDelta: number;
@@ -600,15 +624,62 @@ export function computeRealisticCardRating(
         )
       : null;
 
+  // Optional official Captain rating (1–10 -> 40–99), transparently separated from Self & Peer
+  const rawCaptain = input.captainRatingScore;
+  const hasCaptainRating =
+    rawCaptain !== null &&
+    rawCaptain !== undefined &&
+    Number.isFinite(Number(rawCaptain)) &&
+    Number(rawCaptain) >= 1 &&
+    Number(rawCaptain) <= 10;
+  const captainRatingNormalized = hasCaptainRating
+    ? Number(clamp(40 + ((Number(rawCaptain) - 1) / 9) * 59, OVR_MIN, OVR_MAX).toFixed(1))
+    : null;
+
+  // Layer 2: Performance OVR (85% rolling verified matches + 15% Captain rating when both exist)
+  const performanceLayerOvr: number | null =
+    rollingAvgPerformance !== null && captainRatingNormalized !== null
+      ? Math.round(clamp(rollingAvgPerformance * 0.85 + captainRatingNormalized * 0.15, OVR_MIN, OVR_MAX))
+      : rollingAvgPerformance !== null
+        ? Math.round(clamp(rollingAvgPerformance, OVR_MIN, OVR_MAX))
+        : captainRatingNormalized !== null
+          ? Math.round(clamp(captainRatingNormalized, OVR_MIN, OVR_MAX))
+          : null;
+
   // Maturity weight ramps smoothly from 1..5 matches, full weight at 5..8 matches
   const maturityWeight = windowCount > 0 ? Math.min(1, safeDivide(windowCount, ROLLING_WINDOW_MIN, 0)) : 0;
 
+  let sampleMaturity: SampleMaturity = 'none';
+  let sampleMaturityLabel = 'تقييم أولي فقط — لم تُوثّق مباريات بعد';
+  if (windowCount >= ROLLING_WINDOW_MIN) {
+    sampleMaturity = 'stable';
+    sampleMaturityLabel = `عيّنة مستقرة (${windowCount}/${ROLLING_WINDOW_MAX} مباريات موثّقة)`;
+  } else if (windowCount >= 3) {
+    sampleMaturity = 'developing';
+    sampleMaturityLabel = `عيّنة قيد الاستقرار (${windowCount}/${ROLLING_WINDOW_MIN} مباريات)`;
+  } else if (windowCount >= 1) {
+    sampleMaturity = 'early';
+    sampleMaturityLabel = `عيّنة مبكّرة (${windowCount}/${ROLLING_WINDOW_MIN} — قفزات محدودة لحماية العدالة)`;
+  }
+
   let deltaFromMatches = 0;
-  if (rollingAvgPerformance !== null) {
-    const rawGap = rollingAvgPerformance - baseOvr;
+  const effectivePerfSource =
+    rollingAvgPerformance !== null && captainRatingNormalized !== null
+      ? rollingAvgPerformance * 0.85 + captainRatingNormalized * 0.15
+      : rollingAvgPerformance;
+
+  if (effectivePerfSource !== null) {
+    const rawGap = effectivePerfSource - baseOvr;
+    // Anti-single-match-spike cap: 1 match -> max +1, 2 matches -> max +2
+    const samplePosCap =
+      windowCount <= 1
+        ? 1
+        : windowCount === 2
+          ? Math.min(2, diminishing.maxPositiveDelta)
+          : diminishing.maxPositiveDelta;
     if (rawGap > 0) {
       const scaled = rawGap * diminishing.positiveFactor * maturityWeight;
-      deltaFromMatches = Math.round(Math.min(diminishing.maxPositiveDelta, scaled));
+      deltaFromMatches = Math.round(Math.min(samplePosCap, scaled));
     } else if (rawGap < -6 && windowCount >= ROLLING_WINDOW_MIN) {
       // Mild negative pressure if sustained over a full rolling window
       deltaFromMatches = Math.max(-2, Math.round((rawGap + 6) * 0.15 * maturityWeight));
@@ -657,9 +728,56 @@ export function computeRealisticCardRating(
     }
   }
 
+  // Transparent, auditable Arabic explanations for every card state
+  const explanationReasons: string[] = [];
+  explanationReasons.push(
+    `الطبقة 1 (الذاتي الأساسي ${baseOvr}): موزون بمركز ${roleInfo.labelAr} (70% أساسي + 30% ثانوي) من ميزانية 360 نقطة.`
+  );
+  if (windowCount === 0) {
+    explanationReasons.push(
+      'الطبقة 2 (الأداء الميداني): بانتظار تسجيل مباريات موثّقة — التقييم الذاتي الأولي نقطة بداية فقط.'
+    );
+  } else {
+    const peerUsedCount = matchBreakdowns.filter((b) => b.usedPeerVote).length;
+    const peerNote = peerUsedCount > 0 ? ' + تصويت زملاء جماعي (30%)' : '';
+    const capNote = captainRatingNormalized !== null ? ` + تقييم الكابتن (${Number(rawCaptain)}/10)` : '';
+    explanationReasons.push(
+      `الطبقة 2 (الأداء ${performanceLayerOvr}): معدّل آخر ${windowCount} مباريات موثّقة (${rollingAvgPerformance})${peerNote}${capNote}.`
+    );
+  }
+  if (deltaFromMatches > 0) {
+    explanationReasons.push(
+      `ارتفاع تدريجي (+${deltaFromMatches}) بعد تطبيق منحنى تناقص العائد (${diminishing.bracket}) وحماية استقرار العيّنة.`
+    );
+  } else if (deltaFromMatches < 0) {
+    explanationReasons.push(
+      `انخفاض تدريجي (${deltaFromMatches}) لأن الأداء الميداني في النافذة المتحرّكة أقل من التقييم الأساسي.`
+    );
+  } else if (windowCount > 0 && !declineApplied) {
+    explanationReasons.push(
+      'ثبات البطاقة (±0): أداؤك الميداني متوافق مع مستواك الحالي أو لم تتكوّن بعد نافذة كافية لتغيير كبير.'
+    );
+  }
+  if (declineApplied) {
+    explanationReasons.push(
+      'تراجع واقعي (-1): آخر 3 مباريات موثّقة متتالية كانت أقل بوضوح من مستواك الحالي.'
+    );
+  }
+  if (windowCount > 0 && windowCount < ROLLING_WINDOW_MIN) {
+    explanationReasons.push(
+      `ملاحظة العيّنة: لعبت ${windowCount} من أصل ${ROLLING_WINDOW_MIN} مباريات لازمة للاستقرار الكامل، لذلك التغيّر محكوم بسقف تدريجي لمنع القفزات من مباراة واحدة.`
+    );
+  }
+
   return {
     baseOvr,
     finalOvr,
+    selfLayerOvr: baseOvr,
+    performanceLayerOvr,
+    captainRatingNormalized,
+    sampleMaturity,
+    sampleMaturityLabel,
+    explanationReasons,
     deltaFromMatches,
     declineApplied,
     declineDelta,
@@ -691,6 +809,7 @@ export interface PlayerRatingMeta {
   stats6?: Stats6;
   roleOverride?: PositionRole | '';
   legacySkillsBackup?: Record<string, number>;
+  ratingHistory?: RatingHistoryEntry[];
   updatedAt?: number;
 }
 
@@ -750,6 +869,109 @@ export function savePlayerRatingMeta(playerId: string, meta: PlayerRatingMeta): 
     updatedAt: Date.now(),
   };
   saveRatingSidecar(store);
+}
+
+export function appendPlayerRatingHistory(
+  playerId: string,
+  entry: RatingHistoryEntry,
+  maxEntries = 15
+): RatingHistoryEntry[] {
+  if (!playerId) return [];
+  const store = loadRatingSidecar();
+  const prev = store.players[playerId] || {};
+  const list = Array.isArray(prev.ratingHistory) ? [...prev.ratingHistory] : [];
+  const last = list[list.length - 1];
+  const isSameSnapshot =
+    last &&
+    last.finalOvr === entry.finalOvr &&
+    last.selfOvr === entry.selfOvr &&
+    last.matchesCount === entry.matchesCount &&
+    last.reason === entry.reason;
+  if (!isSameSnapshot) {
+    list.push({
+      date: String(entry.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
+      selfOvr: Math.round(clamp(safeNum(entry.selfOvr, 60), OVR_MIN, OVR_MAX)),
+      performanceOvr:
+        entry.performanceOvr === null
+          ? null
+          : Math.round(clamp(safeNum(entry.performanceOvr, 60), OVR_MIN, OVR_MAX)),
+      finalOvr: Math.round(clamp(safeNum(entry.finalOvr, 60), OVR_MIN, OVR_MAX)),
+      matchesCount: Math.max(0, Math.round(safeNum(entry.matchesCount, 0))),
+      reason: String(entry.reason || 'تحديث البطاقة').slice(0, 120),
+    });
+  }
+  const trimmed = list.slice(-Math.max(5, maxEntries));
+  store.players[playerId] = {
+    ...prev,
+    ratingHistory: trimmed,
+    updatedAt: Date.now(),
+  };
+  saveRatingSidecar(store);
+  return trimmed;
+}
+
+export interface ComparisonPlayerSummary {
+  name: string;
+  primaryPos: string;
+  matchesCount: number;
+  strengths: Array<{ key: Stat6Key; labelAr: string; val: number }>;
+  focusArea: { key: Stat6Key; labelAr: string; val: number };
+}
+
+export interface RespectfulComparisonResult {
+  playerA: ComparisonPlayerSummary;
+  playerB: ComparisonPlayerSummary;
+  samePosition: boolean;
+  contextNote: string;
+  sampleCaution: string;
+}
+
+export function buildRespectfulComparisonSummary(
+  pA: { name?: string; primaryPos?: string; stats6?: Partial<Stats6> | null; legacySkills?: Record<string, number> | null; matchesCount?: number },
+  pB: { name?: string; primaryPos?: string; stats6?: Partial<Stats6> | null; legacySkills?: Record<string, number> | null; matchesCount?: number }
+): RespectfulComparisonResult {
+  const summarize = (p: typeof pA): ComparisonPlayerSummary => {
+    const s6 = hasExplicitStats6(p.stats6)
+      ? {
+          PAC: Math.round(clamp(safeNum(p.stats6?.PAC, 60), OVR_MIN, OVR_MAX)),
+          SHO: Math.round(clamp(safeNum(p.stats6?.SHO, 60), OVR_MIN, OVR_MAX)),
+          PAS: Math.round(clamp(safeNum(p.stats6?.PAS, 60), OVR_MIN, OVR_MAX)),
+          DRI: Math.round(clamp(safeNum(p.stats6?.DRI, 60), OVR_MIN, OVR_MAX)),
+          DEF: Math.round(clamp(safeNum(p.stats6?.DEF, 60), OVR_MIN, OVR_MAX)),
+          PHY: Math.round(clamp(safeNum(p.stats6?.PHY, 60), OVR_MIN, OVR_MAX)),
+        }
+      : deriveStats6FromLegacySkills(p.legacySkills);
+    const ranked = STAT6_KEYS.map((k) => ({
+      key: k,
+      labelAr: STAT6_META[k].labelAr,
+      val: s6[k],
+    })).sort((a, b) => b.val - a.val);
+    return {
+      name: String(p.name || 'لاعب'),
+      primaryPos: String(p.primaryPos || 'لاعب وسط'),
+      matchesCount: Math.max(0, Math.round(safeNum(p.matchesCount, 0))),
+      strengths: ranked.slice(0, 2),
+      focusArea: ranked[ranked.length - 1],
+    };
+  };
+
+  const playerA = summarize(pA);
+  const playerB = summarize(pB);
+  const samePosition = playerA.primaryPos === playerB.primaryPos;
+  const contextNote = samePosition
+    ? `مقارنة مباشرة ضمن نفس المركز (${playerA.primaryPos}) — تساعد على إبراز نقاط التميّز وفرص التطوير المتبادل.`
+    : `مقارنة بين مركزين مختلفين (${playerA.primaryPos} مقابل ${playerB.primaryPos}) — لكل مركز دور مختلف في السداسي، فتفوّق مهارة يعكس طبيعة الدور لا الأفضلية المطلقة.`;
+
+  const minMatches = Math.min(playerA.matchesCount, playerB.matchesCount);
+  const diffMatches = Math.abs(playerA.matchesCount - playerB.matchesCount);
+  let sampleCaution = 'حجم العيّنة مناسب لقراءة متوازنة بين اللاعبين.';
+  if (minMatches < ROLLING_WINDOW_MIN) {
+    sampleCaution = `تنبيه عيّنة مبكّرة: أحد اللاعبين لعب أقل من ${ROLLING_WINDOW_MIN} مباريات موثّقة، لذا تعتمد القراءة بدرجة أكبر على التوزيع الأولي.`;
+  } else if (diffMatches >= 4) {
+    sampleCaution = `يوجد فرق في عدد المباريات الموثّقة (${playerA.matchesCount} مقابل ${playerB.matchesCount})، يُنصح بمراعاة ذلك عند القراءة.`;
+  }
+
+  return { playerA, playerB, samePosition, contextNote, sampleCaution };
 }
 
 export function getReportKey(rep: { id?: string; playerId?: string; opponent?: string; goals?: number; assists?: number; minutes?: number }): string {
@@ -828,6 +1050,8 @@ const MaydanRatingApi = {
   loadRatingSidecar,
   getPlayerRatingMeta,
   savePlayerRatingMeta,
+  appendPlayerRatingHistory,
+  buildRespectfulComparisonSummary,
   getReportKey,
   getReportRatingMeta,
   saveReportRatingMeta,
