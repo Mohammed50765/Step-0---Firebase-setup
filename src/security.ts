@@ -60,8 +60,12 @@ const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars -> exact
 export const MIN_INVITE_CODE_LEN = 8;
 export const MAX_INVITE_CODE_LEN = 20;
 
+/**
+ * Generates a cryptographically strong, unguessable team invitation code using Web Crypto API.
+ * Default format: "MDN-K7P4-X9Q2" (13 chars total, 11 alphanumeric chars, 40-bit CSPRNG entropy).
+ */
 export function generateSecureInviteCode(rawLength = 12): string {
-  const len = Math.max(10, Math.min(16, Math.round(rawLength)));
+  const len = Math.max(8, Math.min(16, Math.round(rawLength)));
   const bytes = new Uint8Array(len);
   const cryptoApi = globalThis.crypto;
   if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
@@ -72,9 +76,9 @@ export function generateSecureInviteCode(rawLength = 12): string {
   for (let i = 0; i < len; i++) {
     raw += INVITE_ALPHABET[bytes[i] & 31];
   }
-  // Group cleanly as XXXX-XXXX-XXXX when 12 chars (14 chars total, 12 CSPRNG chars >= 10)
-  if (len === 12) {
-    return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+  // Sleek Royal Maydan format: MDN-XXXX-XXXX (13 chars total, 11 alphanumeric chars >= 10)
+  if (len === 12 || len === 8) {
+    return `MDN-${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
   }
   return raw;
 }

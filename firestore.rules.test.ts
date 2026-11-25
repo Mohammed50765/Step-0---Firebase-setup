@@ -1139,4 +1139,130 @@ test('Batch 2 #20-#21: footballLibrary blocks non-captain writes, hidden draft r
   await assertSucceeds(getDoc(doc(playerADb, 'footballLibrary', 'lib_test_1')));
 });
 
+// ==================== SMART INVITATIONS #22: Captain-Only Creation/Listing, Atomic Usage Quota & Expiry ====================
+test('Smart Invitations #22: enforces Captain-only create/list/revoke, atomic quota increment, and rejects expired/revoked/completed codes', async () => {
+  const captainDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+  const playerADb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+  const outsider1Db = testEnv.authenticatedContext('outsider_1', { email_verified: true }).firestore();
+  const outsider2Db = testEnv.authenticatedContext('outsider_2', { email_verified: true }).firestore();
+
+  const smartCode = 'MDN-K7P4-X9Q2';
+  const nowMs = Date.now();
+
+  // Non-captain cannot create or list inviteCodes
+  await assertFails(
+    setDoc(doc(playerADb, 'inviteCodes', smartCode), {
+      code: smartCode,
+      active: true,
+      requireApproval: true,
+      usageType: 'single',
+      maxUses: 1,
+      usedCount: 0,
+      durationDays: 7,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 7 * 86400000,
+      status: 'active',
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertFails(getDocs(collection(playerADb, 'inviteCodes')));
+  await assertFails(getDocs(collection(outsider1Db, 'inviteCodes')));
+
+  // Captain creates single-use Smart Invite and lists invitations log
+  await assertSucceeds(
+    setDoc(doc(captainDb, 'inviteCodes', smartCode), {
+      code: smartCode,
+      active: true,
+      requireApproval: true,
+      teamId: 'main',
+      teamName: 'فريق السداسي',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'single',
+      maxUses: 1,
+      usedCount: 0,
+      durationDays: 7,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 7 * 86400000,
+      status: 'active',
+      createdBy: 'captain_uid',
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(getDocs(collection(captainDb, 'inviteCodes')));
+
+  // Existing team member (player_a) cannot submit a duplicate joinRequest
+  await assertFails(
+    setDoc(doc(playerADb, 'joinRequests', 'player_a'), {
+      uid: 'player_a',
+      name: 'لاعب أ',
+      jersey: 7,
+      primaryPos: 'مهاجم',
+      inviteCode: ACTIVE_INVITE_CODE,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Outsider #1 cannot bypass quota increment when maxUses is present on invite doc
+  await assertFails(
+    setDoc(doc(outsider1Db, 'joinRequests', 'outsider_1'), {
+      uid: 'outsider_1',
+      name: 'لاعب جديد ١',
+      jersey: 11,
+      primaryPos: 'مهاجم',
+      inviteCode: smartCode,
+      referredBy: 'REF-AB12CD',
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Outsider #1 atomically consumes the single-use invite (usedCount 0 -> 1, active -> false, status -> completed)
+  const joinBatch1 = writeBatch(outsider1Db);
+  joinBatch1.set(doc(outsider1Db, 'joinRequests', 'outsider_1'), {
+    uid: 'outsider_1',
+    name: 'لاعب جديد ١',
+    jersey: 11,
+    primaryPos: 'مهاجم',
+    inviteCode: smartCode,
+    referredBy: 'REF-AB12CD',
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  joinBatch1.update(doc(outsider1Db, 'inviteCodes', smartCode), {
+    usedCount: 1,
+    active: false,
+    status: 'completed',
+    lastUsedBy: 'outsider_1',
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(joinBatch1.commit());
+
+  // Outsider #2 attempting to reuse the completed single-use invite MUST fail
+  const joinBatch2 = writeBatch(outsider2Db);
+  joinBatch2.set(doc(outsider2Db, 'joinRequests', 'outsider_2'), {
+    uid: 'outsider_2',
+    name: 'لاعب جديد ٢',
+    jersey: 12,
+    primaryPos: 'مدافع',
+    inviteCode: smartCode,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  joinBatch2.update(doc(outsider2Db, 'inviteCodes', smartCode), {
+    usedCount: 2,
+    active: false,
+    status: 'completed',
+    lastUsedBy: 'outsider_2',
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(joinBatch2.commit());
+});
+
+
 

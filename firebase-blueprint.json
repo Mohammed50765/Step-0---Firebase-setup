@@ -35,12 +35,25 @@
     },
     "InviteCode": {
       "title": "InviteCode",
-      "description": "Active team invite code verified by document ID without exposing list access.",
+      "description": "Smart team invite code verified by document ID with single/multi usage quota, expiration, revocation status, and team branding preview.",
       "type": "object",
       "properties": {
         "code": { "type": "string", "pattern": "^[A-Z0-9\\-]{8,20}$", "minLength": 8, "maxLength": 20 },
         "active": { "type": "boolean" },
         "requireApproval": { "type": "boolean" },
+        "teamId": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$", "maxLength": 32 },
+        "teamName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "appName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "primaryColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "maxLength": 7 },
+        "usageType": { "type": "string", "enum": ["single", "multi"] },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "durationDays": { "type": "number" },
+        "createdAtMs": { "type": "number" },
+        "expiresAtMs": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "revoked", "expired", "completed"] },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "lastUsedBy": { "type": "string", "maxLength": 128 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["code", "active", "requireApproval", "updatedAt"]
@@ -85,6 +98,7 @@
         "availability": { "type": "string", "maxLength": 120 },
         "availableStatus": { "type": "string", "enum": ["available", "unavailable"] },
         "roleModelStarId": { "type": "string", "pattern": "^[a-z0-9_]*$", "maxLength": 40 },
+        "referredBy": { "type": "string", "pattern": "^(REF-[A-Z0-9]{4,16})?$", "maxLength": 32 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -117,6 +131,7 @@
         "stats6": { "type": "object" },
         "roleOverride": { "type": "string", "enum": ["", "ST", "CAM_WINGER", "CM", "DEF_CB", "GK"] },
         "inviteCode": { "type": "string", "pattern": "^[A-Z0-9\\-]{8,20}$", "minLength": 8, "maxLength": 20 },
+        "referredBy": { "type": "string", "pattern": "^(REF-[A-Z0-9]{4,16})?$", "maxLength": 32 },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }

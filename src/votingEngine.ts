@@ -1141,10 +1141,13 @@ class MaydanVotingHubUI {
             <strong style="font-size:0.78rem;color:#fef08a;display:block;margin-bottom:6px;">🔔 تم اختيارك عشوائياً للتحقق من مهام زملائك:</strong>
             ${pendingForMe
               .map(
-                (c) => `
+                (c) => {
+                  const claimantLive = players.find((p) => String(p.id) === c.claimantUid || String(p.ownerUid) === c.claimantUid);
+                  const claimantDisplay = (claimantLive && String(claimantLive.name || '').trim()) || c.claimantName;
+                  return `
               <div class="row between" style="gap:6px;padding:6px 0;border-top:1px solid rgba(255,255,255,0.08);">
                 <div>
-                  <strong style="font-size:0.8rem;">${escapeHtml(c.claimantName)}</strong>
+                  <strong style="font-size:0.8rem;">${escapeHtml(claimantDisplay)}</strong>
                   <div class="muted" style="font-size:0.72rem;">${escapeHtml(c.missionTitle)} (+${c.xpReward} XP)${c.note ? ` • ${escapeHtml(c.note)}` : ''}</div>
                 </div>
                 <div class="row" style="gap:5px;">
@@ -1152,7 +1155,8 @@ class MaydanVotingHubUI {
                   <button type="button" data-mc-act="rejected" data-mc-id="${escapeHtml(c.id)}" class="btn-rose" style="padding:5px 9px;min-height:30px;font-size:0.72rem;">❌ رفض</button>
                 </div>
               </div>
-            `
+            `;
+                }
               )
               .join('')}
           </div>
@@ -1166,6 +1170,8 @@ class MaydanVotingHubUI {
               ? recentClaims
                   .map((c) => {
                     const verNames = (c.verifierUids || []).map((v) => this.getPlayerName(players, v)).join(' و ');
+                    const claimantLive = players.find((p) => String(p.id) === c.claimantUid || String(p.ownerUid) === c.claimantUid);
+                    const claimantDisplay = (claimantLive && String(claimantLive.name || '').trim()) || c.claimantName;
                     const stBadge =
                       c.status === 'verified'
                         ? `<span class="badge" style="color:#86efac;">✅ موثّقة (+${c.xpReward} XP)</span>`
@@ -1178,7 +1184,7 @@ class MaydanVotingHubUI {
                     return `
                       <div class="item-box" style="margin-bottom:6px;padding:9px 10px;">
                         <div class="row between" style="gap:6px;">
-                          <strong style="font-size:0.8rem;">${escapeHtml(c.claimantName)} — ${escapeHtml(c.missionTitle)}</strong>
+                          <strong style="font-size:0.8rem;">${escapeHtml(claimantDisplay)} — ${escapeHtml(c.missionTitle)}</strong>
                           ${stBadge}
                         </div>
                         <div class="muted" style="font-size:0.71rem;margin-top:3px;">

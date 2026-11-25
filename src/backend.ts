@@ -14,6 +14,7 @@ import {
   increment,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -57,10 +58,19 @@ import {
   TEAM_ID,
 } from './security';
 import {
+  computeInviteStatus,
+  createSmartInvitationRecord,
+  normalizeInviteRecord,
+  sanitizeReferralCode,
+  validateInviteForJoin,
+  type SmartInviteRecord,
+} from './invitations';
+import {
   isQuotaExceededError,
   QUOTA_EXCEEDED_ARABIC_MSG,
   quotaMonitor,
 } from './quotaMonitor';
+import { resolveEffectivePlayerName, sanitizePlayerDisplayName } from './authFlow';
 
 const TEAM_CACHE_KEY = 'maydan_team_cache_v1';
 
@@ -68,6 +78,7 @@ export interface BackendState {
   settings: Record<string, unknown>;
   players: Array<Record<string, unknown>>;
   pendingPlayers: Array<Record<string, unknown>>;
+  inviteCodes?: Array<Record<string, unknown>>;
   matches: Array<Record<string, unknown>>;
   reports: Array<Record<string, unknown>>;
   readiness: Array<Record<string, unknown>>;
@@ -249,32 +260,52 @@ class MaydanBackendService {
   async resolveSession(fbUser: User): Promise<{
     status: 'ready' | 'pending' | 'rejected' | 'needs_join';
     isCaptain: boolean;
+    captainDiagnostic: {
+      code: 'verified' | 'not_found' | 'email_unverified' | 'error';
+      detail?: string;
+    };
     branding?: Record<string, unknown>;
     joinRequest?: Record<string, unknown>;
   }> {
     this.clearSessionData();
     this.activeUid = fbUser.uid;
     let isCaptain = false;
+    let captainDiagnostic: {
+      code: 'verified' | 'not_found' | 'email_unverified' | 'error';
+      detail?: string;
+    } = { code: 'not_found' };
 
     // Captain identity is strictly verified via trusted admins/{uid} document ONLY
-    if (fbUser.emailVerified) {
+    if (!fbUser.emailVerified) {
+      captainDiagnostic = {
+        code: 'email_unverified',
+        detail: 'البريد الإلكتروني للحساب غير موثّق (emailVerified=false)، فتمنع القواعد قراءة admins/{uid}.',
+      };
+    } else {
       try {
         const admSnap = await getDoc(doc(db, 'admins', fbUser.uid));
         quotaMonitor.recordReads('session', 1);
         isCaptain = admSnap.exists();
+        captainDiagnostic = { code: isCaptain ? 'verified' : 'not_found' };
       } catch (err) {
         if (isQuotaExceededError(err)) {
           quotaMonitor.markQuotaExceeded(true);
           throw new Error(QUOTA_EXCEEDED_ARABIC_MSG);
         }
         isCaptain = false;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn('Captain admins/{uid} verification error:', errMsg);
+        captainDiagnostic = {
+          code: 'error',
+          detail: errMsg,
+        };
       }
     }
     this.activeIsCaptain = isCaptain;
 
     if (isCaptain) {
       await this.bootstrapCaptainWorkspace(fbUser);
-      return { status: 'ready', isCaptain: true };
+      return { status: 'ready', isCaptain: true, captainDiagnostic };
     }
 
     // Check if player profile already exists for this Google UID
@@ -287,7 +318,7 @@ class MaydanBackendService {
     }
 
     if (playerSnap.exists()) {
-      return { status: 'ready', isCaptain: false };
+      return { status: 'ready', isCaptain: false, captainDiagnostic };
     }
 
     // Fetch public branding for join/pending screens
@@ -305,17 +336,17 @@ class MaydanBackendService {
       if (jrSnap.exists()) {
         const jr = jrSnap.data();
         if (jr.status === 'pending') {
-          return { status: 'pending', isCaptain: false, branding, joinRequest: jr };
+          return { status: 'pending', isCaptain: false, captainDiagnostic, branding, joinRequest: jr };
         }
         if (jr.status === 'rejected') {
-          return { status: 'rejected', isCaptain: false, branding, joinRequest: jr };
+          return { status: 'rejected', isCaptain: false, captainDiagnostic, branding, joinRequest: jr };
         }
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.GET, `joinRequests/${fbUser.uid}`);
     }
 
-    return { status: 'needs_join', isCaptain: false, branding };
+    return { status: 'needs_join', isCaptain: false, captainDiagnostic, branding };
   }
 
   private async bootstrapCaptainWorkspace(fbUser: User): Promise<void> {
@@ -328,7 +359,19 @@ class MaydanBackendService {
     }
 
     if (!settingsSnap.exists()) {
-      const initialCode = generateSecureInviteCode(12);
+      const initialRec = createSmartInvitationRecord({
+        isCaptain: true,
+        createdBy: fbUser.uid,
+        teamId: TEAM_ID,
+        teamName: 'فريق السداسي',
+        appName: 'ميدان 6v6',
+        primaryColor: ROYAL_PRIMARY,
+        requireApproval: true,
+        usageType: 'single',
+        maxUses: 1,
+        durationDays: 7,
+      });
+      const initialCode = initialRec.code;
       const batch = writeBatch(db);
       batch.set(settingsRef, {
         teamId: TEAM_ID,
@@ -355,6 +398,18 @@ class MaydanBackendService {
         code: initialCode,
         active: true,
         requireApproval: true,
+        teamId: TEAM_ID,
+        teamName: 'فريق السداسي',
+        appName: 'ميدان 6v6',
+        primaryColor: ROYAL_PRIMARY,
+        usageType: initialRec.usageType,
+        maxUses: initialRec.maxUses,
+        usedCount: 0,
+        durationDays: initialRec.durationDays,
+        createdAtMs: initialRec.createdAtMs,
+        expiresAtMs: initialRec.expiresAtMs,
+        status: 'active',
+        createdBy: fbUser.uid,
         updatedAt: serverTimestamp(),
       });
       batch.set(doc(db, 'tactics', 'current'), {
@@ -379,7 +434,12 @@ class MaydanBackendService {
     }
 
     if (!capSnap.exists()) {
-      const displayName = clampStr(fbUser.displayName || 'الكابتن', 80) || 'الكابتن';
+      const { name: displayName } = resolveEffectivePlayerName({
+        savedName: '',
+        googleDisplayName: fbUser.displayName,
+        email: fbUser.email,
+        fallback: 'الكابتن',
+      });
       try {
         await setDoc(captainPlayerRef, {
           id: fbUser.uid,
@@ -423,6 +483,70 @@ class MaydanBackendService {
     }
   }
 
+  /**
+   * Look up a single invitation document by exact CSPRNG code to preview
+   * Team Name, Identity, Join Mode, and Remaining Quota before confirming join.
+   */
+  async inspectInviteCode(rawCode: string): Promise<{
+    exists: boolean;
+    valid: boolean;
+    errorAr?: string;
+    record?: SmartInviteRecord;
+    statusInfo?: ReturnType<typeof computeInviteStatus>;
+  }> {
+    const code = sanitizeInviteCode(rawCode);
+    if (!code) {
+      return {
+        exists: false,
+        valid: false,
+        errorAr: 'كود الدعوة غير صالح (يجب أن يكون بالصيغة MDN-XXXX-XXXX)',
+      };
+    }
+
+    const fbUser = auth.currentUser;
+    if (!fbUser || !fbUser.emailVerified) {
+      return {
+        exists: false,
+        valid: false,
+        errorAr: 'يرجى تسجيل الدخول بحساب Google أولاً للتحقق من كود الدعوة',
+      };
+    }
+
+    try {
+      const snap = await getDoc(doc(db, 'inviteCodes', code));
+      quotaMonitor.recordReads('oneShot', 1);
+      if (!snap.exists()) {
+        return {
+          exists: false,
+          valid: false,
+          errorAr: 'كود الدعوة غير صحيح أو غير موجود',
+        };
+      }
+      const record = normalizeInviteRecord({ code, ...snap.data() });
+      if (!record) {
+        return {
+          exists: false,
+          valid: false,
+          errorAr: 'كود الدعوة غير صالح',
+        };
+      }
+      const statusInfo = computeInviteStatus(record);
+      return {
+        exists: true,
+        valid: statusInfo.status === 'active',
+        errorAr: statusInfo.status === 'active' ? undefined : statusInfo.reasonAr,
+        record,
+        statusInfo,
+      };
+    } catch {
+      return {
+        exists: false,
+        valid: false,
+        errorAr: 'تعذّر التحقق من كود الدعوة حالياً',
+      };
+    }
+  }
+
   async submitJoinWithCode(input: {
     inviteCode: string;
     name: string;
@@ -430,7 +554,10 @@ class MaydanBackendService {
     primaryPos: string;
     stats6?: Record<string, unknown>;
     roleOverride?: string;
-  }): Promise<{ joinedDirectly: boolean }> {
+    referredBy?: string;
+    hasExistingPersonalTeam?: boolean;
+    confirmedTeamSwitch?: boolean;
+  }): Promise<{ joinedDirectly: boolean; teamName?: string }> {
     const fbUser = auth.currentUser;
     if (!fbUser || !fbUser.emailVerified) {
       throw new Error('يرجى تسجيل الدخول بحساب Google أولاً');
@@ -439,108 +566,144 @@ class MaydanBackendService {
     const code = sanitizeInviteCode(input.inviteCode);
     if (!code) throw new Error('كود الدعوة غير صالح (يجب أن يكون 8 خانات على الأقل)');
 
-    let codeSnap;
-    try {
-      codeSnap = await getDoc(doc(db, 'inviteCodes', code));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `inviteCodes/${code}`);
-    }
-
-    if (!codeSnap.exists() || !codeSnap.data().active) {
-      throw new Error('كود الدعوة غير صحيح أو منتهي الصلاحية');
-    }
-
-    const requireApproval = Boolean(codeSnap.data().requireApproval);
     const cleanName = clampStr(input.name || fbUser.displayName || 'لاعب جديد', 80) || 'لاعب جديد';
     const cleanJersey = Math.round(clampNum(input.jersey, 1, 99, 7));
     const cleanPos = sanitizePrimaryPos(input.primaryPos);
     const cleanStats6 = sanitizeStats6(input.stats6);
     const cleanRoleOverride = sanitizeRoleOverride(input.roleOverride);
+    const cleanReferredBy = sanitizeReferralCode(input.referredBy);
 
-    if (requireApproval) {
-      const jrDoc: Record<string, unknown> = {
-        uid: fbUser.uid,
-        name: cleanName,
-        jersey: cleanJersey,
-        primaryPos: cleanPos,
-        inviteCode: code,
-        status: 'pending',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      if (cleanStats6) jrDoc.stats6 = cleanStats6;
-      if (cleanRoleOverride) jrDoc.roleOverride = cleanRoleOverride;
-      try {
-        await setDoc(doc(db, 'joinRequests', fbUser.uid), jrDoc);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `joinRequests/${fbUser.uid}`);
-      }
-      return { joinedDirectly: false };
-    }
-
-    // Direct join: atomic batch writing approved joinRequest + player doc
-    const batch = writeBatch(db);
-    const jrApprovedDoc: Record<string, unknown> = {
-      uid: fbUser.uid,
-      name: cleanName,
-      jersey: cleanJersey,
-      primaryPos: cleanPos,
-      inviteCode: code,
-      status: 'approved',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-    if (cleanStats6) jrApprovedDoc.stats6 = cleanStats6;
-    if (cleanRoleOverride) jrApprovedDoc.roleOverride = cleanRoleOverride;
-    batch.set(doc(db, 'joinRequests', fbUser.uid), jrApprovedDoc);
-
-    const playerDoc: Record<string, unknown> = {
-      id: fbUser.uid,
-      teamId: TEAM_ID,
-      ownerUid: fbUser.uid,
-      name: cleanName,
-      role: 'player',
-      jersey: cleanJersey,
-      age: 18,
-      height: 175,
-      weight: 70,
-      foot: 'يمين',
-      primaryPos: cleanPos,
-      secondaryPos: 'لا يوجد',
-      photoZoom: 105,
-      photoY: 18,
-      hasPhoto: false,
-      skills: cleanStats6
-        ? stats6ToLegacySkills(cleanStats6)
-        : sanitizeSkills({
-            speed: 7,
-            shooting: 6,
-            passing: 7,
-            dribbling: 6,
-            defending: 6,
-            stamina: 7,
-            vision: 6,
-            teamwork: 7,
-            control: 7,
-            positioning: 6,
-          }),
-      top3Strengths: '',
-      weak3Points: '',
-      seasonGoal: '',
-      availability: '',
-      availableStatus: 'available',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-    if (cleanStats6) playerDoc.stats6 = cleanStats6;
-    if (cleanRoleOverride) playerDoc.roleOverride = cleanRoleOverride;
-    batch.set(doc(db, 'players', fbUser.uid), playerDoc);
     try {
-      await batch.commit();
+      return await runTransaction(db, async (tx) => {
+        const inviteRef = doc(db, 'inviteCodes', code);
+        const playerRef = doc(db, 'players', fbUser.uid);
+        const jrRef = doc(db, 'joinRequests', fbUser.uid);
+
+        const [inviteSnap, playerSnap, jrSnap] = await Promise.all([
+          tx.get(inviteRef),
+          tx.get(playerRef),
+          tx.get(jrRef),
+        ]);
+
+        const rawInvite = inviteSnap.exists() ? { code, ...inviteSnap.data() } : null;
+        const hasPendingRequest = jrSnap.exists() && jrSnap.data().status === 'pending';
+
+        const validation = validateInviteForJoin({
+          invite: rawInvite,
+          applicantUid: fbUser.uid,
+          alreadyMember: playerSnap.exists(),
+          hasPendingRequest,
+          hasExistingPersonalTeam: Boolean(input.hasExistingPersonalTeam),
+          confirmedTeamSwitch: Boolean(input.confirmedTeamSwitch),
+        });
+
+        if (!validation.ok || !validation.invite) {
+          throw new Error(validation.errorAr || 'كود الدعوة غير صالح أو منتهي الصلاحية');
+        }
+
+        const inviteData = inviteSnap.data() || {};
+        const requireApproval = Boolean(inviteData.requireApproval);
+        const teamName = clampStr(inviteData.teamName || 'فريق السداسي', 80) || 'فريق السداسي';
+
+        // Atomically consume +1 from the invitation quota when smart quota fields exist on the doc
+        if ('maxUses' in inviteData && 'usedCount' in inviteData) {
+          const maxUses = Math.max(1, Number(inviteData.maxUses || 1));
+          const nextUsedCount = Math.max(0, Number(inviteData.usedCount || 0)) + 1;
+          const nextActive = nextUsedCount < maxUses;
+          const nextStatus = nextUsedCount >= maxUses ? 'completed' : 'active';
+          tx.update(inviteRef, {
+            usedCount: nextUsedCount,
+            active: nextActive,
+            status: nextStatus,
+            lastUsedBy: fbUser.uid,
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        if (requireApproval) {
+          const jrDoc: Record<string, unknown> = {
+            uid: fbUser.uid,
+            name: cleanName,
+            jersey: cleanJersey,
+            primaryPos: cleanPos,
+            inviteCode: code,
+            status: 'pending',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          };
+          if (cleanStats6) jrDoc.stats6 = cleanStats6;
+          if (cleanRoleOverride) jrDoc.roleOverride = cleanRoleOverride;
+          if (cleanReferredBy) jrDoc.referredBy = cleanReferredBy;
+          tx.set(jrRef, jrDoc);
+          return { joinedDirectly: false, teamName };
+        }
+
+        const jrApprovedDoc: Record<string, unknown> = {
+          uid: fbUser.uid,
+          name: cleanName,
+          jersey: cleanJersey,
+          primaryPos: cleanPos,
+          inviteCode: code,
+          status: 'approved',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (cleanStats6) jrApprovedDoc.stats6 = cleanStats6;
+        if (cleanRoleOverride) jrApprovedDoc.roleOverride = cleanRoleOverride;
+        if (cleanReferredBy) jrApprovedDoc.referredBy = cleanReferredBy;
+        tx.set(jrRef, jrApprovedDoc);
+
+        const playerDoc: Record<string, unknown> = {
+          id: fbUser.uid,
+          teamId: TEAM_ID,
+          ownerUid: fbUser.uid,
+          name: cleanName,
+          role: 'player',
+          jersey: cleanJersey,
+          age: 18,
+          height: 175,
+          weight: 70,
+          foot: 'يمين',
+          primaryPos: cleanPos,
+          secondaryPos: 'لا يوجد',
+          photoZoom: 105,
+          photoY: 18,
+          hasPhoto: false,
+          skills: cleanStats6
+            ? stats6ToLegacySkills(cleanStats6)
+            : sanitizeSkills({
+                speed: 7,
+                shooting: 6,
+                passing: 7,
+                dribbling: 6,
+                defending: 6,
+                stamina: 7,
+                vision: 6,
+                teamwork: 7,
+                control: 7,
+                positioning: 6,
+              }),
+          top3Strengths: '',
+          weak3Points: '',
+          seasonGoal: '',
+          availability: '',
+          availableStatus: 'available',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (cleanStats6) playerDoc.stats6 = cleanStats6;
+        if (cleanRoleOverride) playerDoc.roleOverride = cleanRoleOverride;
+        if (cleanReferredBy) playerDoc.referredBy = cleanReferredBy;
+        tx.set(playerRef, playerDoc);
+
+        return { joinedDirectly: true, teamName };
+      });
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `players/${fbUser.uid}`);
+      if (err instanceof Error && !err.message.includes('Missing or insufficient permissions')) {
+        throw err;
+      }
+      this.handleWriteError(err, OperationType.WRITE, `joinRequests/${fbUser.uid}`);
     }
-    return { joinedDirectly: true };
   }
 
   private mergePhotosIntoPlayers(state: BackendState): void {
@@ -737,7 +900,11 @@ class MaydanBackendService {
           quotaMonitor.recordReads('core', 1);
           quotaMonitor.markQuotaExceeded(false);
           if (snap.exists()) {
-            state.settings = { ...snap.data() };
+            const nextSettings = { ...snap.data() };
+            if (!this.activeIsCaptain) {
+              delete nextSettings.inviteCode;
+            }
+            state.settings = nextSettings;
             this.saveTeamSnapshotCache(state);
             onUpdate();
           }
@@ -1071,6 +1238,19 @@ class MaydanBackendService {
               handleErr(OperationType.LIST, 'joinRequests')
             )
           );
+          this.tabUnsubs.push(
+            onSnapshot(
+              collection(db, 'inviteCodes'),
+              (snap) => {
+                quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+                state.inviteCodes = snap.docs
+                  .map((d) => ({ code: d.id, ...d.data() }))
+                  .sort((a, b) => Number((b as Record<string, unknown>).createdAtMs || 0) - Number((a as Record<string, unknown>).createdAtMs || 0));
+                onUpdate();
+              },
+              handleErr(OperationType.LIST, 'inviteCodes')
+            )
+          );
           subMatches();
           subReadiness();
           subInjuries();
@@ -1095,11 +1275,32 @@ class MaydanBackendService {
     if (!uid) throw new Error('يرجى تسجيل الدخول أولاً');
 
     switch (action) {
+      case 'displayName': {
+        const playerId = String(currentUser.id || uid);
+        const check = sanitizePlayerDisplayName(payload.name);
+        if (!check.valid) {
+          throw new Error(check.errorAr || 'أدخل الاسم الظاهر في الملعب (حرفان على الأقل)');
+        }
+        try {
+          await updateDoc(doc(db, 'players', playerId), {
+            name: check.name,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.UPDATE, `players/${playerId}`);
+        }
+        return { name: check.name };
+      }
+
       case 'profile': {
         const playerId = String(currentUser.id || uid);
         const ref = doc(db, 'players', playerId);
+        const nameCheck = sanitizePlayerDisplayName(payload.name ?? currentUser.name);
+        const safeName = nameCheck.valid
+          ? nameCheck.name
+          : clampStr(currentUser.name, 80) || 'لاعب';
         const updateData: Record<string, unknown> = {
-          name: clampStr(payload.name ?? currentUser.name, 80) || 'لاعب',
+          name: safeName,
           jersey: Math.round(clampNum(payload.jersey ?? currentUser.jersey, 0, 99, 10)),
           age: Math.round(clampNum(payload.age ?? currentUser.age, 10, 70, 18)),
           height: Math.round(clampNum(payload.height ?? currentUser.height, 100, 230, 175)),
@@ -1241,6 +1442,7 @@ class MaydanBackendService {
         if (!applicantUid) throw new Error('معرّف الطلب غير صالح');
         const cleanStats6 = sanitizeStats6(payload.stats6);
         const cleanRoleOverride = sanitizeRoleOverride(payload.roleOverride);
+        const cleanReferredBy = sanitizeReferralCode(payload.referredBy);
         const batch = writeBatch(db);
         batch.update(doc(db, 'joinRequests', applicantUid), {
           status: 'approved',
@@ -1286,6 +1488,7 @@ class MaydanBackendService {
         };
         if (cleanStats6) newPlayerDoc.stats6 = cleanStats6;
         if (cleanRoleOverride) newPlayerDoc.roleOverride = cleanRoleOverride;
+        if (cleanReferredBy) newPlayerDoc.referredBy = cleanReferredBy;
         batch.set(doc(db, 'players', applicantUid), newPlayerDoc);
         try {
           await batch.commit();
@@ -1592,9 +1795,6 @@ class MaydanBackendService {
         }
         const requireApproval = payload.requireApproval !== false;
         const lockSkills = Boolean(payload.lockSkills);
-        const prevCode = payload.prevInviteCode
-          ? sanitizeInviteCode(payload.prevInviteCode)
-          : '';
 
         const batch = writeBatch(db);
         batch.set(doc(db, 'settings', 'team'), {
@@ -1618,15 +1818,20 @@ class MaydanBackendService {
           logo,
           updatedAt: serverTimestamp(),
         });
-        batch.set(doc(db, 'inviteCodes', inviteCode), {
-          code: inviteCode,
-          active: true,
-          requireApproval,
-          updatedAt: serverTimestamp(),
-        });
-        if (prevCode && prevCode !== inviteCode) {
-          batch.delete(doc(db, 'inviteCodes', prevCode));
-        }
+        batch.set(
+          doc(db, 'inviteCodes', inviteCode),
+          {
+            code: inviteCode,
+            active: true,
+            requireApproval,
+            teamId: TEAM_ID,
+            teamName,
+            appName,
+            primaryColor,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
         try {
           await batch.commit();
         } catch (err) {
@@ -1635,15 +1840,38 @@ class MaydanBackendService {
         return;
       }
 
+      case 'createSmartInvite':
       case 'rotateInviteCode': {
         if (!this.activeIsCaptain) {
-          throw new Error('تدوير كود الدعوة متاح للكابتن فقط');
+          throw new Error('إنشاء وتدوير دعوات الفريق متاح للكابتن فقط');
         }
-        const newCode = generateSecureInviteCode(12);
-        const prevCode = payload.prevInviteCode
-          ? sanitizeInviteCode(payload.prevInviteCode)
-          : '';
-        const requireApproval = payload.requireApproval !== false;
+        const currSettings = (this.activeState?.settings || {}) as Record<string, unknown>;
+        const requireApproval =
+          typeof payload.requireApproval === 'boolean'
+            ? payload.requireApproval
+            : currSettings.requireApproval !== false;
+        const teamName = clampStr(payload.teamName || currSettings.teamName || 'فريق السداسي', 80) || 'فريق السداسي';
+        const appName = clampStr(payload.appName || currSettings.appName || 'ميدان 6v6', 60) || 'ميدان 6v6';
+        const primaryColor = sanitizeHexColor(payload.primaryColor || currSettings.primaryColor, ROYAL_PRIMARY);
+
+        const smartRec = createSmartInvitationRecord({
+          isCaptain: this.activeIsCaptain,
+          createdBy: uid,
+          teamId: TEAM_ID,
+          teamName,
+          appName,
+          primaryColor,
+          requireApproval,
+          usageType: payload.usageType,
+          maxUses: payload.maxUses,
+          durationDays: payload.durationDays,
+        });
+
+        const newCode = smartRec.code;
+        const prevCode =
+          payload.revokePrevious && payload.prevInviteCode
+            ? sanitizeInviteCode(payload.prevInviteCode)
+            : '';
 
         const batch = writeBatch(db);
         batch.update(doc(db, 'settings', 'team'), {
@@ -1653,18 +1881,58 @@ class MaydanBackendService {
         batch.set(doc(db, 'inviteCodes', newCode), {
           code: newCode,
           active: true,
-          requireApproval,
+          requireApproval: smartRec.requireApproval,
+          teamId: TEAM_ID,
+          teamName: smartRec.teamName,
+          appName: smartRec.appName,
+          primaryColor: smartRec.primaryColor,
+          usageType: smartRec.usageType,
+          maxUses: smartRec.maxUses,
+          usedCount: 0,
+          durationDays: smartRec.durationDays,
+          createdAtMs: smartRec.createdAtMs,
+          expiresAtMs: smartRec.expiresAtMs,
+          status: 'active',
+          createdBy: uid,
           updatedAt: serverTimestamp(),
         });
         if (prevCode && prevCode !== newCode) {
-          batch.delete(doc(db, 'inviteCodes', prevCode));
+          batch.set(
+            doc(db, 'inviteCodes', prevCode),
+            {
+              code: prevCode,
+              active: false,
+              requireApproval: smartRec.requireApproval,
+              status: 'revoked',
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
         }
         try {
           await batch.commit();
         } catch (err) {
           this.handleWriteError(err, OperationType.WRITE, `inviteCodes/${newCode}`);
         }
-        return { inviteCode: newCode };
+        return { inviteCode: newCode, invite: smartRec };
+      }
+
+      case 'revokeSmartInvite': {
+        if (!this.activeIsCaptain) {
+          throw new Error('إلغاء دعوات الفريق متاح للكابتن فقط');
+        }
+        const targetCode = sanitizeInviteCode(payload.code || payload.inviteCode);
+        if (!targetCode) throw new Error('كود الدعوة غير صالح');
+        try {
+          await updateDoc(doc(db, 'inviteCodes', targetCode), {
+            active: false,
+            status: 'revoked',
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.UPDATE, `inviteCodes/${targetCode}`);
+        }
+        return { revokedCode: targetCode };
       }
 
       case 'updateRole': {

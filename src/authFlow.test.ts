@@ -4,9 +4,15 @@ import {
   buildDefaultGooglePlayerProfile,
   buildGoogleLocalStorageKey,
   createCleanSessionFlags,
+  evaluateWipeGuard,
   isCaptainAuthorized,
+  isFriendsModeEnabled,
+  resolveEffectivePlayerName,
+  resolveLivePlayerName,
   resolvePostAuthRoute,
   sanitizePersonalTeamInput,
+  sanitizePlayerDisplayName,
+  switchTabGuard,
 } from './authFlow';
 import { validateCardCreationBudget } from './ratingEngine';
 
@@ -253,3 +259,155 @@ test('Sequential same-page transition (Captain -> Sign-out -> Player) clears all
     false
   );
 });
+
+test('isFriendsModeEnabled defaults to true unless explicitly disabled', () => {
+  assert.equal(isFriendsModeEnabled(null), true);
+  assert.equal(isFriendsModeEnabled(undefined), true);
+  assert.equal(isFriendsModeEnabled({}), true);
+  assert.equal(isFriendsModeEnabled({ friendsMode: true }), true);
+  assert.equal(isFriendsModeEnabled({ friendsMode: false }), false);
+});
+
+test('switchTabGuard redirects admin tab to fifa when session is not verified Captain', () => {
+  const blockedLocal = switchTabGuard('admin', {
+    isFirebaseMode: false,
+    isCaptainSession: false,
+    localPlayerRole: 'admin',
+  });
+  assert.deepEqual(blockedLocal, { tab: 'fifa', blockedAdmin: true });
+
+  const blockedCloudPlayer = switchTabGuard('admin', {
+    isFirebaseMode: true,
+    isCaptainSession: false,
+    localPlayerRole: 'admin',
+  });
+  assert.deepEqual(blockedCloudPlayer, { tab: 'fifa', blockedAdmin: true });
+
+  const allowedCaptain = switchTabGuard('admin', {
+    isFirebaseMode: true,
+    isCaptainSession: true,
+    localPlayerRole: 'player',
+  });
+  assert.deepEqual(allowedCaptain, { tab: 'admin', blockedAdmin: false });
+
+  const allowedStats = switchTabGuard('stats', {
+    isFirebaseMode: false,
+    isCaptainSession: false,
+  });
+  assert.deepEqual(allowedStats, { tab: 'stats', blockedAdmin: false });
+});
+
+test('evaluateWipeGuard enforces verified Captain, session backup download, double-confirm checkbox, and word حذف', () => {
+  assert.equal(
+    evaluateWipeGuard({
+      isFirebaseMode: true,
+      isCaptainSession: false,
+      localPlayerRole: 'admin',
+      backupDownloaded: true,
+      secondConfirmed: true,
+      confirmText: 'حذف',
+    }).missingStep,
+    'unauthorized'
+  );
+
+  assert.equal(
+    evaluateWipeGuard({
+      isFirebaseMode: true,
+      isCaptainSession: true,
+      backupDownloaded: false,
+      secondConfirmed: true,
+      confirmText: 'حذف',
+    }).missingStep,
+    'backup'
+  );
+
+  assert.equal(
+    evaluateWipeGuard({
+      isFirebaseMode: true,
+      isCaptainSession: true,
+      backupDownloaded: true,
+      secondConfirmed: false,
+      confirmText: 'حذف',
+    }).missingStep,
+    'double_confirm'
+  );
+
+  assert.equal(
+    evaluateWipeGuard({
+      isFirebaseMode: true,
+      isCaptainSession: true,
+      backupDownloaded: true,
+      secondConfirmed: true,
+      confirmText: 'delete',
+    }).missingStep,
+    'confirm_word'
+  );
+
+  const ok = evaluateWipeGuard({
+    isFirebaseMode: true,
+    isCaptainSession: true,
+    backupDownloaded: true,
+    secondConfirmed: true,
+    confirmText: ' حذف ',
+  });
+  assert.deepEqual(ok, { canWipe: true, missingStep: null, missingStepAr: '' });
+});
+
+test('sanitizePlayerDisplayName validates, trims, collapses whitespace, and clamps length', () => {
+  assert.equal(sanitizePlayerDisplayName('').valid, false);
+  assert.equal(sanitizePlayerDisplayName('   ').valid, false);
+  assert.equal(sanitizePlayerDisplayName('أ').valid, false);
+
+  const ok = sanitizePlayerDisplayName('  أبو   فهد  ');
+  assert.equal(ok.valid, true);
+  assert.equal(ok.name, 'أبو فهد');
+
+  const long = sanitizePlayerDisplayName('أ'.repeat(70));
+  assert.equal(long.valid, true);
+  assert.equal(long.name.length, 40);
+});
+
+test('resolveEffectivePlayerName uses Google displayName ONLY on first login and NEVER overwrites a custom saved pitch name', () => {
+  // First login: no saved name -> uses Google displayName
+  const firstLogin = resolveEffectivePlayerName({
+    savedName: '',
+    googleDisplayName: 'Ammar Faraj',
+    email: 'ammar@example.com',
+  });
+  assert.deepEqual(firstLogin, { name: 'Ammar Faraj', usedGoogleDefault: true });
+
+  // Subsequent login: player customized pitch nickname -> MUST NOT be replaced by Google displayName
+  const subsequentLogin = resolveEffectivePlayerName({
+    savedName: 'أبو فهد',
+    googleDisplayName: 'Ammar Faraj',
+    email: 'ammar@example.com',
+  });
+  assert.deepEqual(subsequentLogin, { name: 'أبو فهد', usedGoogleDefault: false });
+
+  // First login with blank Google displayName -> falls back to email prefix, then fallback
+  const emailFallback = resolveEffectivePlayerName({
+    savedName: '   ',
+    googleDisplayName: '',
+    email: 'striker9@gmail.com',
+  });
+  assert.deepEqual(emailFallback, { name: 'striker9', usedGoogleDefault: true });
+
+  const defaultFallback = resolveEffectivePlayerName({
+    savedName: null,
+    googleDisplayName: null,
+    email: null,
+    fallback: 'الكابتن',
+  });
+  assert.deepEqual(defaultFallback, { name: 'الكابتن', usedGoogleDefault: false });
+});
+
+test('resolveLivePlayerName resolves updated pitch name by id or ownerUid for attendance and voting views', () => {
+  const roster = [
+    { id: 'uid_1', ownerUid: 'uid_1', name: 'أبو فهد' },
+    { id: 'p_2', ownerUid: 'uid_2', name: 'الصقر' },
+  ];
+  assert.equal(resolveLivePlayerName(roster, 'uid_1', 'uid_1', 'الاسم القديم'), 'أبو فهد');
+  assert.equal(resolveLivePlayerName(roster, 'legacy_id', 'uid_2', 'كريم'), 'الصقر');
+  assert.equal(resolveLivePlayerName(roster, 'removed_id', '', 'لاعب سابق'), 'لاعب سابق');
+});
+

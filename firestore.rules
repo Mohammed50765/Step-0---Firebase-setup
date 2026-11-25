@@ -53,6 +53,10 @@ service cloud.firestore {
       return c is string && c.size() >= 8 && c.size() <= 20 && c.matches('^[A-Z0-9\\-]+$');
     }
 
+    function isValidReferralCodeStr(r) {
+      return r is string && r.size() <= 32 && (r == '' || r.matches('^REF-[A-Z0-9]{4,16}$'));
+    }
+
     function isValidPos(p) {
       return p in ['حارس مرمى', 'مدافع', 'لاعب وسط', 'جناح', 'مهاجم'];
     }
@@ -141,11 +145,29 @@ service cloud.firestore {
 
     function isValidInviteCodeDoc(data, code) {
       return data.keys().hasAll(['code', 'active', 'requireApproval', 'updatedAt']) &&
-        data.keys().hasOnly(['code', 'active', 'requireApproval', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'code', 'active', 'requireApproval', 'updatedAt',
+          'teamId', 'teamName', 'appName', 'primaryColor',
+          'usageType', 'maxUses', 'usedCount', 'durationDays',
+          'createdAtMs', 'expiresAtMs', 'status', 'createdBy', 'lastUsedBy'
+        ]) &&
         isValidInviteCodeStr(code) &&
         data.code == code &&
         data.active is bool &&
         data.requireApproval is bool &&
+        (!('teamId' in data) || data.teamId == 'main') &&
+        (!('teamName' in data) || (data.teamName is string && data.teamName.size() >= 1 && data.teamName.size() <= 80)) &&
+        (!('appName' in data) || (data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 60)) &&
+        (!('primaryColor' in data) || isValidHexColor(data.primaryColor)) &&
+        (!('usageType' in data) || data.usageType in ['single', 'multi']) &&
+        (!('maxUses' in data) || (data.maxUses is int && data.maxUses >= 1 && data.maxUses <= 100)) &&
+        (!('usedCount' in data) || (data.usedCount is int && data.usedCount >= 0 && data.usedCount <= 100)) &&
+        (!('durationDays' in data) || (data.durationDays is int && data.durationDays >= 1 && data.durationDays <= 365)) &&
+        (!('createdAtMs' in data) || (data.createdAtMs is int && data.createdAtMs >= 1000000000000)) &&
+        (!('expiresAtMs' in data) || (data.expiresAtMs is int && data.expiresAtMs >= 1000000000000)) &&
+        (!('status' in data) || data.status in ['active', 'revoked', 'expired', 'completed']) &&
+        (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128)) &&
+        (!('lastUsedBy' in data) || (data.lastUsedBy is string && data.lastUsedBy.size() <= 128)) &&
         data.updatedAt == request.time;
     }
 
@@ -165,7 +187,7 @@ service cloud.firestore {
           'id', 'teamId', 'ownerUid', 'name', 'role', 'jersey', 'age', 'height', 'weight',
           'foot', 'primaryPos', 'secondaryPos', 'photoZoom', 'photoY', 'hasPhoto',
           'skills', 'stats6', 'roleOverride', 'top3Strengths', 'weak3Points', 'seasonGoal', 'availability',
-          'availableStatus', 'roleModelStarId', 'createdAt', 'updatedAt'
+          'availableStatus', 'roleModelStarId', 'referredBy', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(playerId) &&
         data.id == playerId &&
@@ -192,6 +214,7 @@ service cloud.firestore {
         (!('availability' in data) || (data.availability is string && data.availability.size() <= 120)) &&
         data.availableStatus in ['available', 'unavailable'] &&
         (!('roleModelStarId' in data) || (data.roleModelStarId is string && data.roleModelStarId.size() <= 40 && data.roleModelStarId.matches('^[a-z0-9_]*$'))) &&
+        (!('referredBy' in data) || isValidReferralCodeStr(data.referredBy)) &&
         data.createdAt is timestamp &&
         data.updatedAt == request.time;
     }
@@ -212,7 +235,7 @@ service cloud.firestore {
 
     function isValidJoinRequest(data, uid) {
       return data.keys().hasAll(['uid', 'name', 'jersey', 'primaryPos', 'inviteCode', 'status', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'name', 'jersey', 'primaryPos', 'stats6', 'roleOverride', 'inviteCode', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'name', 'jersey', 'primaryPos', 'stats6', 'roleOverride', 'inviteCode', 'referredBy', 'status', 'createdAt', 'updatedAt']) &&
         isValidId(uid) &&
         data.uid == uid &&
         data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
@@ -221,6 +244,7 @@ service cloud.firestore {
         (!('stats6' in data) || isValidStats6Map(data.stats6)) &&
         (!('roleOverride' in data) || isValidRoleOverride(data.roleOverride)) &&
         isValidInviteCodeStr(data.inviteCode) &&
+        (!('referredBy' in data) || isValidReferralCodeStr(data.referredBy)) &&
         data.status in ['pending', 'approved', 'rejected'] &&
         data.createdAt is timestamp &&
         data.updatedAt == request.time;
@@ -578,11 +602,36 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Invite codes (single-doc get by exact code only, never listable)
+    // Smart Invite Codes:
+    // - Single-doc get by exact unguessable CSPRNG code allowed for verified users to preview team identity before joining.
+    // - List allowed ONLY for verified Captain (Invitations Log); never listable by players or outsiders.
+    // - Create & Delete allowed ONLY for verified Captain.
+    // - Update allowed for Captain (revocation/rotation) OR atomically paired with a new applicant's joinRequest (+1 usedCount).
     match /inviteCodes/{code} {
       allow get: if isVerifiedUser() && isValidInviteCodeStr(code);
-      allow list: if false;
-      allow create, update: if isVerifiedUser() && isValidInviteCodeDoc(incoming(), code) && isCaptain();
+      allow list: if isVerifiedUser() && isCaptain();
+      allow create: if isVerifiedUser() && isValidInviteCodeDoc(incoming(), code) && isCaptain();
+      allow update: if isVerifiedUser() &&
+        isValidInviteCodeDoc(incoming(), code) && (
+          isCaptain() ||
+          (
+            !exists(/databases/$(database)/documents/players/$(request.auth.uid)) &&
+            !exists(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
+            existsAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
+            getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode == code &&
+            existing().active == true &&
+            (!('status' in existing()) || existing().status == 'active') &&
+            (!('expiresAtMs' in existing()) || request.time.toMillis() < existing().expiresAtMs) &&
+            ('usedCount' in existing()) &&
+            ('maxUses' in existing()) &&
+            existing().usedCount < existing().maxUses &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['usedCount', 'active', 'status', 'lastUsedBy', 'updatedAt']) &&
+            incoming().usedCount == existing().usedCount + 1 &&
+            incoming().lastUsedBy == request.auth.uid &&
+            incoming().active == (incoming().usedCount < existing().maxUses) &&
+            incoming().status == (incoming().usedCount >= existing().maxUses ? 'completed' : 'active')
+          )
+        );
       allow delete: if isVerifiedUser() && isValidInviteCodeStr(code) && isCaptain();
     }
 
@@ -664,16 +713,34 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(playerId) && (isCaptain() || existing().ownerUid == request.auth.uid);
     }
 
-    // Join requests (doc ID == applicant UID -> 1 request per user, requires active invite code)
+    // Join requests (doc ID == applicant UID -> 1 request per user, requires active non-expired invite code & blocks existing team members)
     match /joinRequests/{uid} {
       allow get: if isVerifiedUser() && isValidId(uid) && (uid == request.auth.uid || isCaptain());
       allow list: if isVerifiedUser() && (isCaptain() || resource.data.uid == request.auth.uid);
       allow create: if isVerifiedUser() &&
         uid == request.auth.uid &&
+        !exists(/databases/$(database)/documents/players/$(request.auth.uid)) &&
         isValidJoinRequest(incoming(), uid) &&
         incoming().createdAt == request.time &&
         exists(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)) &&
-        get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.active == true && (
+        get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.active == true &&
+        (
+          !('status' in get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data) ||
+          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.status == 'active'
+        ) &&
+        (
+          !('expiresAtMs' in get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data) ||
+          request.time.toMillis() < get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.expiresAtMs
+        ) &&
+        (
+          !('maxUses' in get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data) ||
+          (
+            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount <
+            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.maxUses &&
+            getAfter(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount ==
+            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount + 1
+          )
+        ) && (
           incoming().status == 'pending' ||
           (
             incoming().status == 'approved' &&

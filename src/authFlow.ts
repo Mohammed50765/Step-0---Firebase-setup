@@ -115,6 +115,93 @@ export interface DefaultGooglePlayerProfile {
   availability: string;
 }
 
+export const DISPLAY_NAME_MIN_LEN = 2;
+export const DISPLAY_NAME_MAX_LEN = 40;
+
+export interface SanitizedDisplayNameResult {
+  valid: boolean;
+  name: string;
+  errorAr?: string;
+}
+
+/**
+ * Normalizes and validates a player's pitch display name ("الاسم الظاهر في الملعب").
+ * Enforces 2..40 chars (well within Firestore players/{uid}.name limit of 1..80).
+ */
+export function sanitizePlayerDisplayName(raw: unknown): SanitizedDisplayNameResult {
+  const collapsed = String(raw ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const clamped = clampStr(collapsed, DISPLAY_NAME_MAX_LEN);
+  if (clamped.length < DISPLAY_NAME_MIN_LEN) {
+    return {
+      valid: false,
+      name: '',
+      errorAr: 'أدخل الاسم الظاهر في الملعب (حرفان على الأقل)',
+    };
+  }
+  return {
+    valid: true,
+    name: clamped,
+  };
+}
+
+/**
+ * Resolves the effective display name for a player on Google Sign-In.
+ * - If the player already has a saved custom name, ALWAYS preserves it (never overwritten by Google displayName).
+ * - Uses `googleDisplayName` ONLY on first sign-in when no saved name exists.
+ */
+export function resolveEffectivePlayerName(input: {
+  savedName?: string | null;
+  googleDisplayName?: string | null;
+  email?: string | null;
+  fallback?: string;
+}): { name: string; usedGoogleDefault: boolean } {
+  const existing = clampStr(String(input?.savedName ?? '').replace(/\s+/g, ' ').trim(), 80);
+  if (existing) {
+    return { name: existing, usedGoogleDefault: false };
+  }
+  const rawDisplay = clampStr(String(input?.googleDisplayName ?? '').replace(/\s+/g, ' ').trim(), DISPLAY_NAME_MAX_LEN);
+  if (rawDisplay) {
+    return { name: rawDisplay, usedGoogleDefault: true };
+  }
+  const emailLocal = input?.email
+    ? clampStr(String(input.email).split('@')[0] || '', DISPLAY_NAME_MAX_LEN)
+    : '';
+  if (emailLocal) {
+    return { name: emailLocal, usedGoogleDefault: true };
+  }
+  return {
+    name: clampStr(input?.fallback || 'لاعب ميدان', 80) || 'لاعب ميدان',
+    usedGoogleDefault: false,
+  };
+}
+
+/**
+ * Looks up a player's live current display name from the roster by `playerId` or `ownerUid`,
+ * falling back to the historical snapshot name only if the player is no longer in the roster.
+ */
+export function resolveLivePlayerName(
+  players: Array<{ id?: unknown; ownerUid?: unknown; name?: unknown }> | null | undefined,
+  playerId?: unknown,
+  ownerUid?: unknown,
+  fallbackName?: unknown
+): string {
+  const pid = String(playerId ?? '').trim();
+  const ouid = String(ownerUid ?? '').trim();
+  if (Array.isArray(players)) {
+    const found = players.find((p) => {
+      if (!p) return false;
+      const pId = String(p.id ?? '').trim();
+      const pOwner = String(p.ownerUid ?? '').trim();
+      return (pid && pId === pid) || (ouid && (pOwner === ouid || pId === ouid));
+    });
+    const liveName = found ? String(found.name ?? '').trim() : '';
+    if (liveName) return liveName;
+  }
+  return String(fallbackName ?? '').trim() || 'لاعب';
+}
+
 /**
  * Creates a safe default player profile for any authenticated Google user entering directly.
  * Role is strictly hardcoded to 'player' (never 'admin').
@@ -125,12 +212,12 @@ export function buildDefaultGooglePlayerProfile(fbUser: {
   email?: string | null;
 }): DefaultGooglePlayerProfile {
   const uid = String(fbUser?.uid || '').trim() || `g_${Date.now()}`;
-  const rawDisplay = clampStr(fbUser?.displayName || '', 60);
-  const emailLocal =
-    !rawDisplay && fbUser?.email
-      ? clampStr(String(fbUser.email).split('@')[0] || '', 40)
-      : '';
-  const name = rawDisplay || emailLocal || 'لاعب ميدان';
+  const { name } = resolveEffectivePlayerName({
+    savedName: '',
+    googleDisplayName: fbUser?.displayName,
+    email: fbUser?.email,
+    fallback: 'لاعب ميدان',
+  });
   const stats6 = getPresetStats6ForPosition('لاعب وسط', 'CM');
   return {
     id: uid,
@@ -235,15 +322,112 @@ export function createCleanSessionFlags(): CleanSessionFlags {
   };
 }
 
+export const FRIENDS_MODE_DEFAULT = true;
+
+/**
+ * Friends Mode is enabled by default for casual 6v6 friend squads.
+ * Stored as an explicit opt-out check (`!== false`) so Firestore settings/team
+ * remains strictly compliant with existing security rules.
+ */
+export function isFriendsModeEnabled(settings?: { friendsMode?: unknown } | null): boolean {
+  return settings?.friendsMode !== false;
+}
+
+/**
+ * Centralized tab navigation guard: blocks direct or programmatic navigation
+ * to 'admin' unless the session is strictly verified via Firestore admins/{uid}.
+ */
+export function switchTabGuard(
+  targetTab: string,
+  authCtx: {
+    isFirebaseMode: boolean;
+    isCaptainSession: boolean;
+    localPlayerRole?: unknown;
+  }
+): { tab: string; blockedAdmin: boolean } {
+  const cleanTab = String(targetTab || '').trim() || 'fifa';
+  if (cleanTab === 'admin' && !isCaptainAuthorized(authCtx)) {
+    return { tab: 'fifa', blockedAdmin: true };
+  }
+  return { tab: cleanTab, blockedAdmin: false };
+}
+
+export interface WipeGuardInput {
+  isFirebaseMode: boolean;
+  isCaptainSession: boolean;
+  localPlayerRole?: unknown;
+  backupDownloaded: boolean;
+  secondConfirmed: boolean;
+  confirmText: string;
+}
+
+export interface WipeGuardResult {
+  canWipe: boolean;
+  missingStep: 'unauthorized' | 'backup' | 'double_confirm' | 'confirm_word' | null;
+  missingStepAr: string;
+}
+
+/**
+ * Enforces Captain-only authorization, mandatory session backup download,
+ * checkbox acknowledgement, and typing "حذف" before wiping team data.
+ */
+export function evaluateWipeGuard(input: WipeGuardInput): WipeGuardResult {
+  if (
+    !isCaptainAuthorized({
+      isFirebaseMode: input.isFirebaseMode,
+      isCaptainSession: input.isCaptainSession,
+      localPlayerRole: input.localPlayerRole,
+    })
+  ) {
+    return {
+      canWipe: false,
+      missingStep: 'unauthorized',
+      missingStepAr: 'مسح بيانات الفريق متاح للكابتن المعتمد فقط',
+    };
+  }
+  if (!input.backupDownloaded) {
+    return {
+      canWipe: false,
+      missingStep: 'backup',
+      missingStepAr: 'حمّل نسخة احتياطية JSON في هذه الجلسة أولاً قبل المسح',
+    };
+  }
+  if (!input.secondConfirmed) {
+    return {
+      canWipe: false,
+      missingStep: 'double_confirm',
+      missingStepAr: 'فعّل خانة التأكيد المزدوج بأنك حفظت النسخة الاحتياطية أولاً',
+    };
+  }
+  if (String(input.confirmText || '').trim() !== 'حذف') {
+    return {
+      canWipe: false,
+      missingStep: 'confirm_word',
+      missingStepAr: 'اكتب كلمة "حذف" للتأكيد النهائي',
+    };
+  }
+  return {
+    canWipe: true,
+    missingStep: null,
+    missingStepAr: '',
+  };
+}
+
 declare global {
   interface Window {
     MaydanAuthFlow?: {
       resolvePostAuthRoute: typeof resolvePostAuthRoute;
       buildGoogleLocalStorageKey: typeof buildGoogleLocalStorageKey;
       buildDefaultGooglePlayerProfile: typeof buildDefaultGooglePlayerProfile;
+      sanitizePlayerDisplayName: typeof sanitizePlayerDisplayName;
+      resolveEffectivePlayerName: typeof resolveEffectivePlayerName;
+      resolveLivePlayerName: typeof resolveLivePlayerName;
       sanitizePersonalTeamInput: typeof sanitizePersonalTeamInput;
       isCaptainAuthorized: typeof isCaptainAuthorized;
       createCleanSessionFlags: typeof createCleanSessionFlags;
+      isFriendsModeEnabled: typeof isFriendsModeEnabled;
+      switchTabGuard: typeof switchTabGuard;
+      evaluateWipeGuard: typeof evaluateWipeGuard;
     };
   }
 }
@@ -253,8 +437,14 @@ if (typeof window !== 'undefined') {
     resolvePostAuthRoute,
     buildGoogleLocalStorageKey,
     buildDefaultGooglePlayerProfile,
+    sanitizePlayerDisplayName,
+    resolveEffectivePlayerName,
+    resolveLivePlayerName,
     sanitizePersonalTeamInput,
     isCaptainAuthorized,
     createCleanSessionFlags,
+    isFriendsModeEnabled,
+    switchTabGuard,
+    evaluateWipeGuard,
   };
 }
