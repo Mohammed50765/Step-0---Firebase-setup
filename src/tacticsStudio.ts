@@ -57,6 +57,30 @@ import {
   computeSpeechRate,
   estimateSpeechTimeoutMs,
 } from './tacticsVoice';
+import {
+  PRO_SVG_W,
+  PRO_SVG_H,
+  portraitPctToProSvg,
+  mapSlotToBoardPct,
+  buildProLandscapePitchSvg,
+  renderFormationMiniPitchSvg,
+  projectProClientToPortraitPct,
+  clampProZoomPct,
+  isDrawingTool,
+  isSingleClickStampTool,
+  defaultColorForTool,
+  createHistoryState,
+  pushHistorySnapshot,
+  applyHistoryUndo,
+  applyHistoryRedo,
+  hitTestProAnnotation,
+  type ProAnnotation,
+  type ProAnnotationKind,
+  type ProBoardSnapshot,
+  type ProBoardTool,
+  type ProHistoryState,
+  type ProSectionTab,
+} from './tacticsProBoard';
 
 const STUDIO_STORAGE_KEY = 'maydan_tactics_studio_v1';
 const SVG_W = 360;
@@ -1062,6 +1086,24 @@ class TacticsStudioController {
   private timerRunning = false;
   private timerIntervalId: number | null = null;
 
+  // Full-Screen Pro Mode state (shares canonical currentOur/currentOpp/currentBall/sequence/prefs with zero state loss)
+  private isProFullscreen = false;
+  private proSection: ProSectionTab = 'formations';
+  private proTool: ProBoardTool = 'pointer';
+  private proZoomPct = 100;
+  private proShowNames = true;
+  private proShowNumbers = true;
+  private proShowTacticalLines = true;
+  private proAnnotations: ProAnnotation[] = [];
+  private proDraftAnnotation: ProAnnotation | null = null;
+  private proHistory: ProHistoryState = createHistoryState(30);
+  private proMobileDrawer: 'none' | 'left' | 'right' = 'none';
+  private proSettingsOpen = false;
+  private proLibraryOpen = false;
+  private proDrawStartPortrait: { x: number; y: number } | null = null;
+  private proDragSnapshotTaken = false;
+  private nativeViewportAnchors = new Map<string, { parent: HTMLElement; nextSibling: Node | null }>();
+
   constructor() {
     this.sequence = getFormationPhaseSequence('6v6', '2-2-1', 'attack');
     this.setActiveSequence(this.sequence);
@@ -1142,6 +1184,117 @@ class TacticsStudioController {
   public onTabDeactivated(): void {
     this.pause();
     this.stopSpeech();
+    if (this.isProFullscreen) {
+      this.exitProFullscreen();
+    }
+  }
+
+  public isProFullscreenActive(): boolean {
+    return this.isProFullscreen;
+  }
+
+  public enterProFullscreen(): void {
+    const overlay = document.getElementById('tacFullscreenOverlay');
+    if (!overlay) return;
+    this.isProFullscreen = true;
+    this.proMobileDrawer = 'none';
+    this.proSettingsOpen = false;
+    this.proLibraryOpen = false;
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('tac-pro-fullscreen-open');
+    this.renderAll();
+  }
+
+  public exitProFullscreen(): void {
+    const overlay = document.getElementById('tacFullscreenOverlay');
+    this.isProFullscreen = false;
+    this.proMobileDrawer = 'none';
+    this.proSettingsOpen = false;
+    this.proLibraryOpen = false;
+    this.proDraftAnnotation = null;
+    this.proDrawStartPortrait = null;
+    this.restoreNativeViewports();
+    if (overlay) {
+      overlay.classList.add('hidden');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+    document.body.classList.remove('tac-pro-fullscreen-open');
+    this.renderAll();
+  }
+
+  private restoreNativeViewports(): void {
+    (['tacStudioViewport', 'tacPosterViewport', 'tacFifaViewport'] as const).forEach((id) => {
+      const el = document.getElementById(id);
+      const anchor = this.nativeViewportAnchors.get(id);
+      if (el && anchor && el.parentElement !== anchor.parent) {
+        if (anchor.nextSibling && anchor.nextSibling.parentNode === anchor.parent) {
+          anchor.parent.insertBefore(el, anchor.nextSibling);
+        } else {
+          anchor.parent.appendChild(el);
+        }
+      }
+    });
+    const host = document.getElementById('tacProNativeHost');
+    if (host) host.classList.add('hidden');
+    const wrap = document.getElementById('tacProPitchCanvasWrap');
+    if (wrap) wrap.classList.remove('hidden');
+  }
+
+  private syncProViewModeHost(): void {
+    if (!this.isProFullscreen) {
+      this.restoreNativeViewports();
+      return;
+    }
+    const host = document.getElementById('tacProNativeHost');
+    const wrap = document.getElementById('tacProPitchCanvasWrap');
+    const caption = document.getElementById('tacProLiveCaption');
+    const stage = document.getElementById('tacProStage');
+    if (!host || !wrap) return;
+
+    if (stage) {
+      stage.dataset.proView = this.viewMode;
+    }
+
+    if (this.viewMode === 'studio') {
+      this.restoreNativeViewports();
+      return;
+    }
+
+    // Re-host ONLY the exact original active viewport (cinematic -> #tacStudioViewport, fifa -> #tacFifaViewport, poster -> #tacPosterViewport)
+    const targetId =
+      this.viewMode === 'cinematic'
+        ? 'tacStudioViewport'
+        : this.viewMode === 'fifa'
+        ? 'tacFifaViewport'
+        : 'tacPosterViewport';
+
+    (['tacStudioViewport', 'tacPosterViewport', 'tacFifaViewport'] as const).forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (!this.nativeViewportAnchors.has(id) && el.parentElement) {
+        this.nativeViewportAnchors.set(id, { parent: el.parentElement, nextSibling: el.nextSibling });
+      }
+      if (id === targetId) {
+        if (el.parentElement !== host) {
+          host.appendChild(el);
+        }
+        el.classList.remove('hidden');
+      } else {
+        const anchor = this.nativeViewportAnchors.get(id);
+        if (anchor && el.parentElement !== anchor.parent) {
+          if (anchor.nextSibling && anchor.nextSibling.parentNode === anchor.parent) {
+            anchor.parent.insertBefore(el, anchor.nextSibling);
+          } else {
+            anchor.parent.appendChild(el);
+          }
+        }
+      }
+    });
+
+    wrap.classList.add('hidden');
+    if (caption) caption.classList.add('hidden');
+    host.classList.remove('hidden');
   }
 
   public getPitchSize(): PitchSizeId {
@@ -1474,13 +1627,23 @@ class TacticsStudioController {
       this.ballScale = arc.scale;
       this.ballSpinDeg = (ballMoveT * ballDist * 14) % 360;
       if (ballDist >= 8 && ballMoveT > 0.03) {
+        const useLandscapeTrail = this.isProFullscreen && this.viewMode === 'cinematic';
+        const pStart = useLandscapeTrail
+          ? portraitPctToProSvg(prevFrame.ball)
+          : { x: toSvgX(prevFrame.ball.x), y: toSvgY(prevFrame.ball.y) };
+        const pCtrl = useLandscapeTrail
+          ? portraitPctToProSvg({ x: arc.ctrlX, y: arc.ctrlY })
+          : { x: toSvgX(arc.ctrlX), y: toSvgY(arc.ctrlY) };
+        const pEnd = useLandscapeTrail
+          ? portraitPctToProSvg(targetFrame.ball)
+          : { x: toSvgX(targetFrame.ball.x), y: toSvgY(targetFrame.ball.y) };
         this.ballTrailPath = buildPartialQuadPath(
-          toSvgX(prevFrame.ball.x),
-          toSvgY(prevFrame.ball.y),
-          toSvgX(arc.ctrlX),
-          toSvgY(arc.ctrlY),
-          toSvgX(targetFrame.ball.x),
-          toSvgY(targetFrame.ball.y),
+          pStart.x,
+          pStart.y,
+          pCtrl.x,
+          pCtrl.y,
+          pEnd.x,
+          pEnd.y,
           ballMoveT
         );
       } else {
@@ -1736,6 +1899,9 @@ class TacticsStudioController {
   // ==================== POINTER DRAG-AND-DROP BOARD (WITH 2.5D TOUCH FLATTENING) ====================
 
   private getSvgPointFromEvent(svg: SVGSVGElement, e: PointerEvent): { x: number; y: number } {
+    if (this.isProFullscreen && this.viewMode === 'cinematic') {
+      return projectProClientToPortraitPct(e.clientX, e.clientY, svg.getBoundingClientRect());
+    }
     return projectClientToPitchPct(e.clientX, e.clientY, svg.getBoundingClientRect(), SVG_W, SVG_H);
   }
 
@@ -1757,6 +1923,7 @@ class TacticsStudioController {
     this.dragTarget = { kind, idx };
     this.dragStartClient = { x: e.clientX, y: e.clientY };
     this.dragMoved = false;
+    this.proDragSnapshotTaken = false;
 
     // Synchronously flatten 2.5D perspective to flat 2D BEFORE any getBoundingClientRect() projection
     this.dragFlattened = true;
@@ -1776,6 +1943,10 @@ class TacticsStudioController {
     const dist = Math.hypot(e.clientX - this.dragStartClient.x, e.clientY - this.dragStartClient.y);
     if (dist > 6) this.dragMoved = true;
     if (!this.dragMoved) return;
+    if (!this.proDragSnapshotTaken) {
+      this.pushCurrentBoardHistory();
+      this.proDragSnapshotTaken = true;
+    }
 
     const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
     if (!svg) return;
@@ -2331,6 +2502,9 @@ class TacticsStudioController {
     this.renderScenariosSection();
     this.renderCaptainTools();
     this.renderSaveButton();
+    if (this.isProFullscreen) {
+      this.renderProFullscreenOverlay();
+    }
   }
 
   private renderComparisonBanner(): void {
@@ -2589,35 +2763,116 @@ class TacticsStudioController {
     return model.slotIdx;
   }
 
-  private ensureCinematicDomCache(svg: SVGSVGElement, ourCount: number, oppCount: number, reduced: boolean): CinematicDomCache {
-    const signature = `${ourCount}_${oppCount}_${reduced ? 1 : 0}_${this.prefs.size}`;
+  private ensureCinematicDomCache(
+    svg: SVGSVGElement,
+    ourCount: number,
+    oppCount: number,
+    reduced: boolean,
+    isLandscape: boolean
+  ): CinematicDomCache {
+    const signature = `${ourCount}_${oppCount}_${reduced ? 1 : 0}_${this.prefs.size}_${isLandscape ? 'L' : 'P'}`;
+    const canvasW = isLandscape ? PRO_SVG_W : SVG_W;
+    const canvasH = isLandscape ? PRO_SVG_H : SVG_H;
+    const expectedViewBox = `0 0 ${canvasW} ${canvasH}`;
+    if (svg.getAttribute('viewBox') !== expectedViewBox) {
+      svg.setAttribute('viewBox', expectedViewBox);
+    }
     if (this.cinCache && this.cinCache.signature === signature && svg.contains(this.cinCache.actorsLayer)) {
       return this.cinCache;
     }
 
-    const grassUrl = reduced ? '' : getCachedGrassTextureUrl();
-    const turfBg = grassUrl
+    const grassUrl = reduced || isLandscape ? '' : getCachedGrassTextureUrl();
+    const turfBg = isLandscape
+      ? `<rect x="0" y="0" width="${PRO_SVG_W}" height="${PRO_SVG_H}" rx="16" fill="url(#turfGrad)"/>
+         ${Array.from({ length: 12 }, (_, i) => {
+           const sw = (PRO_SVG_W - 96) / 12;
+           return i % 2 === 0
+             ? `<rect x="${(48 + i * sw).toFixed(1)}" y="30" width="${sw.toFixed(1)}" height="${PRO_SVG_H - 60}" fill="rgba(255,255,255,0.048)"/>`
+             : '';
+         }).join('')}
+         <rect x="0" y="0" width="${PRO_SVG_W}" height="${PRO_SVG_H}" rx="16" fill="url(#cinLandVignette)" pointer-events="none"/>`
+      : grassUrl
       ? `<image href="${grassUrl}" x="0" y="0" width="${SVG_W}" height="${SVG_H}" preserveAspectRatio="none" clip-path="url(#pitchClip)"/>`
       : `<rect x="0" y="0" width="${SVG_W}" height="${SVG_H}" rx="14" fill="url(#turfGrad)"/>
          ${Array.from({ length: 10 }, (_, i) => (i % 2 === 0 ? `<rect x="14" y="${16 + i * 48.8}" width="${SVG_W - 28}" height="48.8" fill="rgba(255,255,255,0.045)"/>` : '')).join('')}`;
 
     const floodlightCones = reduced
       ? ''
+      : isLandscape
+      ? `<g pointer-events="none" clip-path="url(#pitchClip)">
+          <polygon points="0,0 240,0 380,290 0,210" fill="url(#cinFloodLeft)"/>
+          <polygon points="${PRO_SVG_W},0 ${PRO_SVG_W - 240},0 ${PRO_SVG_W - 380},290 ${PRO_SVG_W},210" fill="url(#cinFloodRight)"/>
+          <ellipse cx="${PRO_SVG_W / 2}" cy="18" rx="300" ry="74" fill="url(#cinFloodTop)"/>
+        </g>`
       : `<g pointer-events="none" clip-path="url(#pitchClip)">
           <polygon points="0,0 135,0 240,260 0,190" fill="url(#cinFloodLeft)"/>
           <polygon points="${SVG_W},0 ${SVG_W - 135},0 ${SVG_W - 240},260 ${SVG_W},190" fill="url(#cinFloodRight)"/>
           <ellipse cx="${SVG_W / 2}" cy="24" rx="150" ry="62" fill="url(#cinFloodTop)"/>
         </g>`;
 
+    const pitchMarkings = isLandscape
+      ? `<g stroke="#e5c158" stroke-opacity="0.86" stroke-width="1.8" fill="none" pointer-events="none">
+          <rect x="48" y="30" width="764" height="460" rx="3"/>
+          <line x1="430" y1="30" x2="430" y2="490"/>
+          <circle cx="430" cy="260" r="64"/>
+          <circle cx="430" cy="260" r="3.4" fill="#fde047" stroke="none"/>
+          <rect x="48" y="138" width="122" height="244"/>
+          <rect x="48" y="198" width="46" height="124"/>
+          <path d="M 170 206 A 64 64 0 0 1 170 314"/>
+          <circle cx="132" cy="260" r="2.8" fill="#fde047" stroke="none"/>
+          <rect x="690" y="138" width="122" height="244"/>
+          <rect x="766" y="198" width="46" height="124"/>
+          <path d="M 690 206 A 64 64 0 0 0 690 314"/>
+          <circle cx="728" cy="260" r="2.8" fill="#fde047" stroke="none"/>
+          <path d="M 62 30 A 14 14 0 0 1 48 44"/>
+          <path d="M 798 30 A 14 14 0 0 0 812 44"/>
+          <path d="M 48 476 A 14 14 0 0 1 62 490"/>
+          <path d="M 812 476 A 14 14 0 0 0 798 490"/>
+          <rect x="24" y="216" width="24" height="88" rx="2" fill="url(#goalNetPat)" stroke="#fef9c3" stroke-width="2.1"/>
+          <circle cx="48" cy="216" r="2.6" fill="#fef9c3" stroke="none"/>
+          <circle cx="48" cy="304" r="2.6" fill="#fef9c3" stroke="none"/>
+          <rect x="812" y="216" width="24" height="88" rx="2" fill="url(#goalNetPat)" stroke="#fef9c3" stroke-width="2.1"/>
+          <circle cx="812" cy="216" r="2.6" fill="#fef9c3" stroke="none"/>
+          <circle cx="812" cy="304" r="2.6" fill="#fef9c3" stroke="none"/>
+        </g>`
+      : `<g stroke="#e5c158" stroke-opacity="0.82" stroke-width="1.5" fill="none" pointer-events="none">
+          <rect x="16" y="18" width="${SVG_W - 32}" height="${SVG_H - 36}" rx="3"/>
+          <line x1="16" y1="${SVG_H / 2}" x2="${SVG_W - 16}" y2="${SVG_H / 2}"/>
+          <circle cx="${SVG_W / 2}" cy="${SVG_H / 2}" r="42"/>
+          <circle cx="${SVG_W / 2}" cy="${SVG_H / 2}" r="2.8" fill="#fde047" stroke="none"/>
+          <rect x="86" y="18" width="${SVG_W - 172}" height="64"/>
+          <rect x="130" y="18" width="${SVG_W - 260}" height="24"/>
+          <path d="M 142 82 A 42 42 0 0 0 218 82"/>
+          <circle cx="${SVG_W / 2}" cy="60" r="2.3" fill="#fde047" stroke="none"/>
+          <rect x="86" y="${SVG_H - 82}" width="${SVG_W - 172}" height="64"/>
+          <rect x="130" y="${SVG_H - 42}" width="${SVG_W - 260}" height="24"/>
+          <path d="M 142 ${SVG_H - 82} A 42 42 0 0 1 218 ${SVG_H - 82}"/>
+          <circle cx="${SVG_W / 2}" cy="${SVG_H - 60}" r="2.3" fill="#fde047" stroke="none"/>
+          <path d="M 16 28 A 10 10 0 0 0 26 18"/>
+          <path d="M ${SVG_W - 26} 18 A 10 10 0 0 0 ${SVG_W - 16} 28"/>
+          <path d="M 16 ${SVG_H - 28} A 10 10 0 0 1 26 ${SVG_H - 18}"/>
+          <path d="M ${SVG_W - 26} ${SVG_H - 18} A 10 10 0 0 1 ${SVG_W - 16} ${SVG_H - 28}"/>
+          <rect x="142" y="5" width="76" height="13" rx="2" fill="url(#goalNetPat)" stroke="#fef9c3" stroke-width="2"/>
+          <circle cx="142" cy="18" r="2.3" fill="#fef9c3" stroke="none"/>
+          <circle cx="218" cy="18" r="2.3" fill="#fef9c3" stroke="none"/>
+          <rect x="142" y="${SVG_H - 18}" width="76" height="13" rx="2" fill="url(#goalNetPat)" stroke="#fef9c3" stroke-width="1.8" stroke-opacity="0.72"/>
+          <circle cx="142" cy="${SVG_H - 18}" r="2.1" fill="#fef9c3" stroke="none"/>
+          <circle cx="218" cy="${SVG_H - 18}" r="2.1" fill="#fef9c3" stroke="none"/>
+        </g>`;
+
     svg.innerHTML = `<defs>
       <clipPath id="pitchClip">
-        <rect x="0" y="0" width="${SVG_W}" height="${SVG_H}" rx="14"/>
+        <rect x="0" y="0" width="${canvasW}" height="${canvasH}" rx="${isLandscape ? 16 : 14}"/>
       </clipPath>
-      <linearGradient id="turfGrad" x1="0" y1="0" x2="0" y2="1">
+      <linearGradient id="turfGrad" x1="0" y1="0" x2="${isLandscape ? 1 : 0}" y2="${isLandscape ? 0.35 : 1}">
         <stop offset="0%" stop-color="#062811"/>
-        <stop offset="50%" stop-color="#0d4e20"/>
+        <stop offset="50%" stop-color="#0f5b26"/>
         <stop offset="100%" stop-color="#041c0b"/>
       </linearGradient>
+      <radialGradient id="cinLandVignette" cx="50%" cy="48%" r="68%">
+        <stop offset="55%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#020b05" stop-opacity="0.42"/>
+      </radialGradient>
       <linearGradient id="cinFloodLeft" x1="0%" y1="0%" x2="85%" y2="85%">
         <stop offset="0%" stop-color="#FEF9C3" stop-opacity="0.2"/>
         <stop offset="45%" stop-color="#FDE047" stop-opacity="0.06"/>
@@ -2713,31 +2968,8 @@ class TacticsStudioController {
     </defs>
     ${turfBg}
     ${floodlightCones}
-    <text x="${SVG_W / 2}" y="${SVG_H / 2 + 5}" text-anchor="middle" fill="#FEF08A" fill-opacity="0.06" font-size="22" font-weight="900" letter-spacing="6" pointer-events="none">MIDAN</text>
-    <g stroke="#e5c158" stroke-opacity="0.82" stroke-width="1.5" fill="none" pointer-events="none">
-      <rect x="16" y="18" width="${SVG_W - 32}" height="${SVG_H - 36}" rx="3"/>
-      <line x1="16" y1="${SVG_H / 2}" x2="${SVG_W - 16}" y2="${SVG_H / 2}"/>
-      <circle cx="${SVG_W / 2}" cy="${SVG_H / 2}" r="42"/>
-      <circle cx="${SVG_W / 2}" cy="${SVG_H / 2}" r="2.8" fill="#fde047" stroke="none"/>
-      <rect x="86" y="18" width="${SVG_W - 172}" height="64"/>
-      <rect x="130" y="18" width="${SVG_W - 260}" height="24"/>
-      <path d="M 142 82 A 42 42 0 0 0 218 82"/>
-      <circle cx="${SVG_W / 2}" cy="60" r="2.3" fill="#fde047" stroke="none"/>
-      <rect x="86" y="${SVG_H - 82}" width="${SVG_W - 172}" height="64"/>
-      <rect x="130" y="${SVG_H - 42}" width="${SVG_W - 260}" height="24"/>
-      <path d="M 142 ${SVG_H - 82} A 42 42 0 0 1 218 ${SVG_H - 82}"/>
-      <circle cx="${SVG_W / 2}" cy="${SVG_H - 60}" r="2.3" fill="#fde047" stroke="none"/>
-      <path d="M 16 28 A 10 10 0 0 0 26 18"/>
-      <path d="M ${SVG_W - 26} 18 A 10 10 0 0 0 ${SVG_W - 16} 28"/>
-      <path d="M 16 ${SVG_H - 28} A 10 10 0 0 1 26 ${SVG_H - 18}"/>
-      <path d="M ${SVG_W - 26} ${SVG_H - 18} A 10 10 0 0 1 ${SVG_W - 16} ${SVG_H - 28}"/>
-      <rect x="142" y="5" width="76" height="13" rx="2" fill="url(#goalNetPat)" stroke="#fef9c3" stroke-width="2"/>
-      <circle cx="142" cy="18" r="2.3" fill="#fef9c3" stroke="none"/>
-      <circle cx="218" cy="18" r="2.3" fill="#fef9c3" stroke="none"/>
-      <rect x="142" y="${SVG_H - 18}" width="76" height="13" rx="2" fill="url(#goalNetPat)" stroke="#fef9c3" stroke-width="1.8" stroke-opacity="0.72"/>
-      <circle cx="142" cy="${SVG_H - 18}" r="2.1" fill="#fef9c3" stroke="none"/>
-      <circle cx="218" cy="${SVG_H - 18}" r="2.1" fill="#fef9c3" stroke="none"/>
-    </g>
+    <text x="${canvasW / 2}" y="${canvasH / 2 + (isLandscape ? 8 : 5)}" text-anchor="middle" fill="#FEF08A" fill-opacity="0.06" font-size="${isLandscape ? 32 : 22}" font-weight="900" letter-spacing="${isLandscape ? 10 : 6}" pointer-events="none">MIDAN</text>
+    ${pitchMarkings}
     <g id="cinDynamicBgLayer"></g>
     <g id="cinActorsLayer"></g>
     <g id="cinOverlayLayer" pointer-events="none"></g>`;
@@ -2769,6 +3001,12 @@ class TacticsStudioController {
     const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
     if (!svg) return;
 
+    const isLandscape = this.isProFullscreen;
+    const canvasW = isLandscape ? PRO_SVG_W : SVG_W;
+    const canvasH = isLandscape ? PRO_SVG_H : SVG_H;
+    const mapPt = (pt: { x: number; y: number }): { x: number; y: number } =>
+      isLandscape ? portraitPctToProSvg(pt) : { x: toSvgX(pt.x), y: toSvgY(pt.y) };
+
     const form = this.getCurrentFormation();
     const assigned = this.getAssignedPlayersForCurrentFormation();
     const frame = this.sequence.frames[this.frameIdx] || this.sequence.frames[0];
@@ -2784,20 +3022,20 @@ class TacticsStudioController {
         : deOverlapPositions(this.currentOur, this.currentOpp, minSepPct);
     const oppAlerts = computeOpponentAlertSet(displayOpp, this.currentBall, this.currentOur, frame?.zones);
 
-    const cache = this.ensureCinematicDomCache(svg, this.currentOur.length, displayOpp.length, reduced);
+    const cache = this.ensureCinematicDomCache(svg, this.currentOur.length, displayOpp.length, reduced, isLandscape);
 
-    const ourSvgPts = this.currentOur.map((p) => ({ x: toSvgX(p.x), y: toSvgY(p.y) }));
-    const oppSvgPts = displayOpp.map((p) => ({ x: toSvgX(p.x), y: toSvgY(p.y) }));
-    const rawBallSvg = { x: toSvgX(this.currentBall.x), y: toSvgY(this.currentBall.y) };
+    const ourSvgPts = this.currentOur.map((p) => mapPt(p));
+    const oppSvgPts = displayOpp.map((p) => mapPt(p));
+    const rawBallSvg = mapPt(this.currentBall);
     const isBallInFlight = this.ballLift > 0.04 || this.dragTarget?.kind === 'ball';
     const ballSvg = computeSmartBallDisplayPoint(
       rawBallSvg,
       ourSvgPts,
       oppSvgPts,
-      13.5,
+      isLandscape ? 17.5 : 13.5,
       isBallInFlight,
-      SVG_W,
-      SVG_H
+      canvasW,
+      canvasH
     );
     const allTokenObstacles = [...ourSvgPts, ...oppSvgPts, ballSvg];
 
@@ -2806,20 +3044,34 @@ class TacticsStudioController {
 
     if (this.sequence.offsideEnabled && displayOpp.length >= 3) {
       const sortedY = displayOpp.map((o) => o.y).sort((a, b) => a - b);
-      const offsideY = toSvgY(sortedY[1]);
-      const badge = placeOffsideBadge(offsideY, oppSvgPts, SVG_W);
-      bgParts.push(`<g class="tac-offside-line">
-        <line x1="16" y1="${offsideY.toFixed(1)}" x2="${SVG_W - 16}" y2="${offsideY.toFixed(1)}" stroke="#fb7185" stroke-width="1.8" stroke-dasharray="6 4"/>
-        <rect x="${badge.x.toFixed(1)}" y="${badge.y.toFixed(1)}" width="${badge.w}" height="${badge.h}" rx="5" fill="rgba(136,19,55,0.92)" stroke="rgba(251,113,133,0.75)" stroke-width="1"/>
-        <text x="${badge.textX.toFixed(1)}" y="${badge.textY.toFixed(1)}" text-anchor="middle" fill="#fff1f2" font-size="8.8" font-weight="800">${escapeHtml(isolateLtrTokens('خط التسلل (11v11)'))}</text>
-      </g>`);
+      if (isLandscape) {
+        const offsideX = mapPt({ x: 50, y: sortedY[1] }).x;
+        const badgeW = 114;
+        const badgeX = Math.max(54, Math.min(PRO_SVG_W - 54 - badgeW, offsideX - badgeW / 2));
+        bgParts.push(`<g class="tac-offside-line">
+          <line x1="${offsideX.toFixed(1)}" y1="30" x2="${offsideX.toFixed(1)}" y2="490" stroke="#fb7185" stroke-width="2" stroke-dasharray="7 5"/>
+          <rect x="${badgeX.toFixed(1)}" y="36" width="${badgeW}" height="18" rx="6" fill="rgba(136,19,55,0.92)" stroke="rgba(251,113,133,0.75)" stroke-width="1"/>
+          <text x="${(badgeX + badgeW / 2).toFixed(1)}" y="48.5" text-anchor="middle" fill="#fff1f2" font-size="9.5" font-weight="800">${escapeHtml(isolateLtrTokens('خط التسلل (11v11)'))}</text>
+        </g>`);
+      } else {
+        const offsideY = toSvgY(sortedY[1]);
+        const badge = placeOffsideBadge(offsideY, oppSvgPts, SVG_W);
+        bgParts.push(`<g class="tac-offside-line">
+          <line x1="16" y1="${offsideY.toFixed(1)}" x2="${SVG_W - 16}" y2="${offsideY.toFixed(1)}" stroke="#fb7185" stroke-width="1.8" stroke-dasharray="6 4"/>
+          <rect x="${badge.x.toFixed(1)}" y="${badge.y.toFixed(1)}" width="${badge.w}" height="${badge.h}" rx="5" fill="rgba(136,19,55,0.92)" stroke="rgba(251,113,133,0.75)" stroke-width="1"/>
+          <text x="${badge.textX.toFixed(1)}" y="${badge.textY.toFixed(1)}" text-anchor="middle" fill="#fff1f2" font-size="8.8" font-weight="800">${escapeHtml(isolateLtrTokens('خط التسلل (11v11)'))}</text>
+        </g>`);
+      }
     }
 
     const heatZone =
       this.spotlightInfo?.zone ||
       (focusedUserIdx !== null ? getRoleSpotlightSequence(this.prefs.size, form.id, focusedUserIdx).zone : null);
     if (heatZone) {
-      bgParts.push(`<ellipse cx="${toSvgX(heatZone.x).toFixed(1)}" cy="${toSvgY(heatZone.y).toFixed(1)}" rx="${(heatZone.rx * 3.1).toFixed(1)}" ry="${(heatZone.ry * 4.2).toFixed(1)}" fill="url(#heatZoneGrad)" stroke="rgba(250,204,21,0.48)" stroke-dasharray="5 4" stroke-width="1.4"/>`);
+      const hz = mapPt({ x: heatZone.x, y: heatZone.y });
+      const rx = isLandscape ? heatZone.ry * 6.2 : heatZone.rx * 3.1;
+      const ry = isLandscape ? heatZone.rx * 4.1 : heatZone.ry * 4.2;
+      bgParts.push(`<ellipse cx="${hz.x.toFixed(1)}" cy="${hz.y.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="url(#heatZoneGrad)" stroke="rgba(250,204,21,0.48)" stroke-dasharray="5 4" stroke-width="1.4"/>`);
     }
 
     if (frame?.zones?.length) {
@@ -2831,16 +3083,18 @@ class TacticsStudioController {
       };
       frame.zones.forEach((z) => {
         const col = zoneColors[z.color || 'gold'] || zoneColors.gold;
-        const cx = toSvgX(z.x);
-        const cy = toSvgY(z.y);
-        const r = z.r * 3.0;
+        const zp = mapPt({ x: z.x, y: z.y });
+        const cx = zp.x;
+        const cy = zp.y;
+        const r = z.r * (isLandscape ? 4.2 : 3.0);
         bgParts.push(`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${col.fill}" stroke="${col.stroke}" stroke-width="1.35" stroke-dasharray="4 3"/>`);
         if (z.label) {
-          const ly = placeZoneLabelY(cx, cy, r, allTokenObstacles, SVG_H);
-          const lblW = Math.max(46, Math.min(92, z.label.length * 5.6 + 14));
-          const pillX = Math.max(20, Math.min(SVG_W - 20 - lblW, cx - lblW / 2));
-          bgParts.push(`<rect x="${pillX.toFixed(1)}" y="${(ly - 10.5).toFixed(1)}" width="${lblW.toFixed(1)}" height="14" rx="5" fill="rgba(4,12,8,0.84)" stroke="${col.stroke}" stroke-width="0.7"/>`);
-          bgParts.push(`<text x="${(pillX + lblW / 2).toFixed(1)}" y="${(ly - 0.8).toFixed(1)}" text-anchor="middle" fill="${col.txt}" font-size="8.4" font-weight="800">${escapeHtml(z.label)}</text>`);
+          const ly = placeZoneLabelY(cx, cy, r, allTokenObstacles, canvasH);
+          const lblW = Math.max(54, Math.min(118, z.label.length * (isLandscape ? 6.4 : 5.6) + 16));
+          const padX = isLandscape ? 54 : 20;
+          const pillX = Math.max(padX, Math.min(canvasW - padX - lblW, cx - lblW / 2));
+          bgParts.push(`<rect x="${pillX.toFixed(1)}" y="${(ly - 10.5).toFixed(1)}" width="${lblW.toFixed(1)}" height="${isLandscape ? 16 : 14}" rx="5" fill="rgba(4,12,8,0.84)" stroke="${col.stroke}" stroke-width="0.7"/>`);
+          bgParts.push(`<text x="${(pillX + lblW / 2).toFixed(1)}" y="${(ly + (isLandscape ? 0.5 : -0.8)).toFixed(1)}" text-anchor="middle" fill="${col.txt}" font-size="${isLandscape ? 9.6 : 8.4}" font-weight="800">${escapeHtml(z.label)}</text>`);
         }
       });
     }
@@ -2853,34 +3107,36 @@ class TacticsStudioController {
         const pC = ourSvgPts[c];
         if (!pA || !pB || !pC) return;
         const pts = `${pA.x.toFixed(1)},${pA.y.toFixed(1)} ${pB.x.toFixed(1)},${pB.y.toFixed(1)} ${pC.x.toFixed(1)},${pC.y.toFixed(1)}`;
-        bgParts.push(`<polygon points="${pts}" fill="rgba(250,204,21,0.08)" stroke="rgba(250,204,21,0.34)" stroke-width="1.15" stroke-dasharray="4 3"/>`);
+        bgParts.push(`<polygon points="${pts}" fill="rgba(250,204,21,0.08)" stroke="rgba(250,204,21,0.34)" stroke-width="1.3" stroke-dasharray="4 3"/>`);
       });
     }
 
     if (frame?.arrows?.length) {
       const reveal = reduced ? 1 : this.arrowRevealT;
       frame.arrows.forEach((arr) => {
-        const x1 = toSvgX(arr.from[0]);
-        const y1 = toSvgY(arr.from[1]);
-        const x2 = toSvgX(arr.to[0]);
-        const y2 = toSvgY(arr.to[1]);
+        const p1 = mapPt({ x: arr.from[0], y: arr.from[1] });
+        const p2 = mapPt({ x: arr.to[0], y: arr.to[1] });
+        const x1 = p1.x;
+        const y1 = p1.y;
+        const x2 = p2.x;
+        const y2 = p2.y;
         if (Math.hypot(x2 - x1, y2 - y1) < 8) return;
-        const geom = buildCurvedArrowGeometry(x1, y1, x2, y2, arr.kind, reveal, SVG_W / 2, SVG_H / 2);
+        const geom = buildCurvedArrowGeometry(x1, y1, x2, y2, arr.kind, reveal, canvasW / 2, canvasH / 2);
         const stroke = arr.kind === 'ball' ? '#fde047' : arr.kind === 'run' ? '#fde047' : '#4ade80';
         const marker = arr.kind === 'ball' ? 'url(#arrBall)' : arr.kind === 'run' ? 'url(#arrRun)' : 'url(#arrCover)';
-        const width = arr.kind === 'ball' ? 2.8 : arr.kind === 'run' ? 2.4 : 2.0;
+        const width = (arr.kind === 'ball' ? 2.8 : arr.kind === 'run' ? 2.4 : 2.0) * (isLandscape ? 1.2 : 1);
 
         if (!reduced && reveal < 0.985) {
           const dashLen = geom.approxLength.toFixed(1);
           const dashOff = geom.dashOffset.toFixed(1);
           if (arr.kind === 'ball' || arr.kind === 'run') {
-            bgParts.push(`<path d="${geom.pathD}" fill="none" stroke="url(#trailGoldGrad)" stroke-width="${arr.kind === 'ball' ? '8' : '5.5'}" stroke-linecap="round" stroke-dasharray="${dashLen}" stroke-dashoffset="${dashOff}"/>`);
+            bgParts.push(`<path d="${geom.pathD}" fill="none" stroke="url(#trailGoldGrad)" stroke-width="${arr.kind === 'ball' ? '8.5' : '6'}" stroke-linecap="round" stroke-dasharray="${dashLen}" stroke-dashoffset="${dashOff}"/>`);
           }
           bgParts.push(`<path class="tac-arrow-path" d="${geom.pathD}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-dasharray="${dashLen}" stroke-dashoffset="${dashOff}" ${reveal > 0.24 ? `marker-end="${marker}"` : ''} opacity="0.96"/>`);
         } else {
           const settledDash = arr.kind === 'ball' ? '' : arr.kind === 'run' ? 'stroke-dasharray="7 5"' : 'stroke-dasharray="3 3.5"';
           if (arr.kind === 'ball' && !reduced) {
-            bgParts.push(`<path d="${geom.pathD}" fill="none" stroke="url(#trailGoldGrad)" stroke-width="8" stroke-linecap="round"/>`);
+            bgParts.push(`<path d="${geom.pathD}" fill="none" stroke="url(#trailGoldGrad)" stroke-width="8.5" stroke-linecap="round"/>`);
           }
           bgParts.push(`<path class="tac-arrow-path" d="${geom.pathD}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" ${settledDash} marker-end="${marker}" opacity="0.94"/>`);
         }
@@ -2897,7 +3153,13 @@ class TacticsStudioController {
     cache.bgLayer.innerHTML = bgParts.join('');
 
     // 2) Update Articulated Metallic Gold & Silver Figurines IN-PLACE (zero DOM recreation per frame)
-    const baseScale = this.prefs.size === '11v11' ? 0.9 : 1.18;
+    const baseScale = isLandscape
+      ? this.prefs.size === '11v11'
+        ? 1.04
+        : 1.32
+      : this.prefs.size === '11v11'
+      ? 0.9
+      : 1.18;
     const isInMotionWindow = this.lastRawMoveWindowT > 0.02 && this.lastRawMoveWindowT < 0.98;
     const isMovingNow = !reduced && (this.isPlaying || this.singleStepStopMs !== null || isInMotionWindow) && this.frameIdx > 0;
     const depthList: Array<{ y: number; node: SVGGElement }> = [];
@@ -2912,16 +3174,14 @@ class TacticsStudioController {
       const dy = targP.y - prevP.y;
       const localT = this.ourLocalTs[i] ?? 1;
 
-      const prevFace = this.ourFacings[i] ?? (pt.x > SVG_W / 2 ? -1 : 1);
+      const screenDx = isLandscape ? -dy : dx;
+      const ballScreenDx = isLandscape
+        ? -(this.currentBall.y - this.currentOur[i].y)
+        : this.currentBall.x - this.currentOur[i].x;
+      const prevFace = this.ourFacings[i] ?? (pt.x > canvasW / 2 ? -1 : 1);
       const targetFace =
-        Math.abs(dx) > 1.8
-          ? dx >= 0
-            ? 1
-            : -1
-          : this.currentBall.x - this.currentOur[i].x >= 0
-          ? 1
-          : -1;
-      const isTurning = prevFace * targetFace < 0 && Math.abs(dx) > 2.2;
+        Math.abs(screenDx) > 1.8 ? (screenDx >= 0 ? 1 : -1) : ballScreenDx >= 0 ? 1 : -1;
+      const isTurning = prevFace * targetFace < 0 && Math.abs(screenDx) > 2.2;
       const nextFace = reduced ? targetFace : prevFace + (targetFace - prevFace) * 0.24;
       this.ourFacings[i] = nextFace;
 
@@ -2961,14 +3221,13 @@ class TacticsStudioController {
         focusedUserIdx !== null
           ? !isFocusedMine
           : this.spotlightSlotIdx !== null && !isSpotlighted && !activeSet.has(i);
-      // Soft golden ring ONLY on explicitly selected / focused / grabbed player (never cluttered on everyone)
       const showSelRing = isGrabbed || isFocusedMine || isSpotlighted;
 
       const slot = form.slots[i];
       const pl = assigned[i];
       const jerseyLabel = pl ? String(pl.jersey || slot?.short || '') : slot?.short || String(i + 1);
       const tagLabel = pl ? firstWord(pl.name) : showSelRing && slot ? slot.short : '';
-      const depthScale = baseScale * (0.86 + (pt.y / SVG_H) * 0.24);
+      const depthScale = baseScale * (0.86 + (pt.y / canvasH) * 0.24);
 
       applyFigurinePoseToDom(fig, pt.x, pt.y, depthScale, nextFace, pose, {
         opacity: isDimmed ? 0.26 : 1,
@@ -2997,16 +3256,14 @@ class TacticsStudioController {
       const dy = targP.y - prevP.y;
       const localT = this.oppLocalTs[i] ?? 1;
 
-      const prevFace = this.oppFacings[i] ?? (op.x > SVG_W / 2 ? -1 : 1);
+      const screenDx = isLandscape ? -dy : dx;
+      const ballScreenDx = isLandscape
+        ? -(this.currentBall.y - displayOpp[i].y)
+        : this.currentBall.x - displayOpp[i].x;
+      const prevFace = this.oppFacings[i] ?? (op.x > canvasW / 2 ? -1 : 1);
       const targetFace =
-        Math.abs(dx) > 1.8
-          ? dx >= 0
-            ? 1
-            : -1
-          : this.currentBall.x - displayOpp[i].x >= 0
-          ? 1
-          : -1;
-      const isTurning = prevFace * targetFace < 0 && Math.abs(dx) > 2.2;
+        Math.abs(screenDx) > 1.8 ? (screenDx >= 0 ? 1 : -1) : ballScreenDx >= 0 ? 1 : -1;
+      const isTurning = prevFace * targetFace < 0 && Math.abs(screenDx) > 2.2;
       const nextFace = reduced ? targetFace : prevFace + (targetFace - prevFace) * 0.24;
       this.oppFacings[i] = nextFace;
 
@@ -3041,7 +3298,7 @@ class TacticsStudioController {
       const isAlert = oppAlerts.has(i);
       const isGrabbed = this.dragTarget?.kind === 'opp' && this.dragTarget.idx === i;
       const opacity = this.spotlightSlotIdx !== null || focusedUserIdx !== null ? 0.34 : 0.94;
-      const depthScale = baseScale * 0.96 * (0.86 + (op.y / SVG_H) * 0.24);
+      const depthScale = baseScale * 0.96 * (0.86 + (op.y / canvasH) * 0.24);
 
       applyFigurinePoseToDom(fig, op.x, op.y, depthScale, nextFace, pose, {
         opacity,
@@ -3056,7 +3313,7 @@ class TacticsStudioController {
 
     // 3) 3D Football with Ground Shadow Separation & Visual Spin
     const ballGrabbed = this.dragTarget?.kind === 'ball';
-    const ballDepthScale = (0.88 + (ballSvg.y / SVG_H) * 0.2) * this.ballScale;
+    const ballDepthScale = (isLandscape ? 1.16 : 1) * (0.88 + (ballSvg.y / canvasH) * 0.2) * this.ballScale;
     const ballLiftPx = this.ballLift * 10.5;
     const shadowRx = Math.max(4.6, 7.6 - this.ballLift * 2.1);
     const shadowRy = Math.max(2.2, 3.5 - this.ballLift * 1.1);
@@ -3095,7 +3352,14 @@ class TacticsStudioController {
         ? frame.activeIndices[0]
         : -1;
     const anchorSvg = anchorIdx >= 0 && ourSvgPts[anchorIdx] ? ourSvgPts[anchorIdx] : ballSvg;
-    const calloutBox = placeCalloutBox(anchorSvg, allTokenObstacles, SVG_W, SVG_H - 96, 138, 76);
+    const calloutBox = placeCalloutBox(
+      anchorSvg,
+      allTokenObstacles,
+      canvasW,
+      isLandscape ? canvasH - 36 : canvasH - 96,
+      isLandscape ? 210 : 138,
+      isLandscape ? 82 : 76
+    );
 
     if (frame?.narration) {
       const tipTargetY = anchorIdx >= 0 ? anchorSvg.y - 18 : anchorSvg.y;
@@ -3116,10 +3380,19 @@ class TacticsStudioController {
       cache.overlayLayer.innerHTML = '';
     }
 
-    this.renderInPitchCallout(frame, anchorIdx >= 0 ? form.slots[anchorIdx]?.label : undefined, calloutBox);
+    this.renderInPitchCallout(
+      frame,
+      anchorIdx >= 0 ? form.slots[anchorIdx]?.label : undefined,
+      calloutBox,
+      canvasW,
+      canvasH
+    );
   }
 
   private renderSvgPitch(): void {
+    if (this.isProFullscreen) {
+      this.renderProPitchOnly();
+    }
     if (this.viewMode === 'cinematic') {
       this.renderCinematicPitch();
       return;
@@ -3128,6 +3401,10 @@ class TacticsStudioController {
 
     const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
     if (!svg) return;
+    const portraitViewBox = `0 0 ${SVG_W} ${SVG_H}`;
+    if (svg.getAttribute('viewBox') !== portraitViewBox) {
+      svg.setAttribute('viewBox', portraitViewBox);
+    }
 
     const form = this.getCurrentFormation();
     const assigned = this.getAssignedPlayersForCurrentFormation();
@@ -3384,6 +3661,46 @@ class TacticsStudioController {
       });
     }
 
+    // Preserve user-drawn Pro Fullscreen annotations inside Normal portrait pitch too (zero lost edits on exit!)
+    if (this.proAnnotations.length) {
+      parts.push(`<g class="tac-user-annotations" pointer-events="none">`);
+      this.proAnnotations.forEach((ann) => {
+        const ax1 = toSvgX(ann.x1);
+        const ay1 = toSvgY(ann.y1);
+        const ax2 = toSvgX(ann.x2);
+        const ay2 = toSvgY(ann.y2);
+        parts.push(`<g data-pro-ann-id="${escapeHtml(ann.id)}">`);
+        if (ann.kind === 'arrow') {
+          parts.push(`<line x1="${ax1.toFixed(1)}" y1="${ay1.toFixed(1)}" x2="${ax2.toFixed(1)}" y2="${ay2.toFixed(1)}" stroke="${ann.color}" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#arrBall)" opacity="0.92"/>`);
+        } else if (ann.kind === 'path') {
+          const g = buildCurvedArrowGeometry(ax1, ay1, ax2, ay2, 'ball', 1, SVG_W / 2, SVG_H / 2);
+          parts.push(`<path d="${g.pathD}" fill="none" stroke="#FACC15" stroke-width="2.8" stroke-linecap="round" marker-end="url(#arrBall)" opacity="0.95"/>`);
+        } else if (ann.kind === 'circle') {
+          const r = Math.max(10, Math.hypot(ax2 - ax1, ay2 - ay1));
+          parts.push(`<circle cx="${ax1.toFixed(1)}" cy="${ay1.toFixed(1)}" r="${r.toFixed(1)}" fill="rgba(56,189,248,0.14)" stroke="${ann.color}" stroke-width="1.6" stroke-dasharray="5 3"/>`);
+        } else if (ann.kind === 'rect' || ann.kind === 'zone') {
+          const rx = Math.min(ax1, ax2);
+          const ry = Math.min(ay1, ay2);
+          const rw = Math.max(16, Math.abs(ax2 - ax1));
+          const rh = Math.max(16, Math.abs(ay2 - ay1));
+          parts.push(`<rect x="${rx.toFixed(1)}" y="${ry.toFixed(1)}" width="${rw.toFixed(1)}" height="${rh.toFixed(1)}" rx="4" fill="rgba(56,189,248,0.18)" stroke="${ann.color}" stroke-width="1.5"/>`);
+        } else if (ann.kind === 'triangle') {
+          const topX = (ax1 + ax2) / 2;
+          const topY = Math.min(ay1, ay2);
+          const botY = Math.max(ay1, ay2);
+          parts.push(`<polygon points="${topX.toFixed(1)},${topY.toFixed(1)} ${Math.max(ax1, ax2).toFixed(1)},${botY.toFixed(1)} ${Math.min(ax1, ax2).toFixed(1)},${botY.toFixed(1)}" fill="rgba(74,222,128,0.16)" stroke="${ann.color}" stroke-width="1.6"/>`);
+        } else if (ann.kind === 'cone') {
+          parts.push(`<polygon points="${(ax1 - 6).toFixed(1)},${(ay1 + 5).toFixed(1)} ${(ax1 + 6).toFixed(1)},${(ay1 + 5).toFixed(1)} ${ax1.toFixed(1)},${(ay1 - 7).toFixed(1)}" fill="#F59E0B" stroke="#FEF08A" stroke-width="0.9"/>`);
+        } else if (ann.kind === 'flag') {
+          parts.push(`<line x1="${ax1.toFixed(1)}" y1="${(ay1 + 7).toFixed(1)}" x2="${ax1.toFixed(1)}" y2="${(ay1 - 9).toFixed(1)}" stroke="#fff" stroke-width="1.5"/><polygon points="${ax1.toFixed(1)},${(ay1 - 9).toFixed(1)} ${(ax1 + 10).toFixed(1)},${(ay1 - 5.5).toFixed(1)} ${ax1.toFixed(1)},${(ay1 - 2).toFixed(1)}" fill="#EF4444"/>`);
+        } else if (ann.kind === 'ball') {
+          parts.push(`<circle cx="${ax1.toFixed(1)}" cy="${ay1.toFixed(1)}" r="6" fill="url(#footballGrad)" stroke="#090b10" stroke-width="1"/>`);
+        }
+        parts.push(`</g>`);
+      });
+      parts.push(`</g>`);
+    }
+
     // Opponent tokens: Sculpted 3D chamfered octagon/shield with ground shadow (distinct from circular teammates)
     if (this.showOpponents) {
       const oppR = discR - 1.2;
@@ -3561,7 +3878,9 @@ class TacticsStudioController {
   private renderInPitchCallout(
     frame: TacticalKeyframe | undefined,
     activeSlotLabel: string | undefined,
-    box: { x: number; y: number; w: number; h: number }
+    box: { x: number; y: number; w: number; h: number },
+    canvasW: number = SVG_W,
+    canvasH: number = SVG_H
   ): void {
     const el = document.getElementById('tacPitchCallout');
     if (!el) return;
@@ -3574,9 +3893,9 @@ class TacticsStudioController {
     el.classList.remove('collapsed');
     el.classList.toggle('callout-mistake', isMistakeMode);
 
-    const leftPct = (box.x / SVG_W) * 100;
-    const topPct = (box.y / SVG_H) * 100;
-    const widthPct = (box.w / SVG_W) * 100;
+    const leftPct = (box.x / canvasW) * 100;
+    const topPct = (box.y / canvasH) * 100;
+    const widthPct = (box.w / canvasW) * 100;
     el.style.left = `${leftPct.toFixed(1)}%`;
     el.style.top = `${topPct.toFixed(1)}%`;
     el.style.width = `${widthPct.toFixed(1)}%`;
@@ -3750,6 +4069,11 @@ class TacticsStudioController {
     document.querySelectorAll<HTMLButtonElement>('[data-tac-speed]').forEach((b) => {
       b.classList.toggle('active', Number(b.dataset.tacSpeed) === this.speed);
     });
+
+    if (this.isProFullscreen) {
+      this.renderProControlsState();
+      if (this.proSection === 'moves') this.renderProLeftPanel();
+    }
   }
 
   private renderSpotlightCard(): void {
@@ -3860,7 +4184,8 @@ class TacticsStudioController {
         if (pl && this.prefs.setPieces.cornerId === pl.id) badges.push('🚩');
         if (pl && this.prefs.setPieces.freeKickId === pl.id) badges.push('🎯');
 
-        return `<button type="button" data-assign-slot="${idx}" class="poster-node ${this.prefs.size === '11v11' ? 'compact' : ''}" style="left:${s.x}%;top:${s.y}%;">
+        const pos = mapSlotToBoardPct(s, this.isProFullscreen);
+        return `<button type="button" data-assign-slot="${idx}" class="poster-node ${this.prefs.size === '11v11' ? 'compact' : ''}" style="left:${pos.x}%;top:${pos.y}%;">
           <div class="poster-avatar ${pl ? 'filled' : ''}">
             ${
               photo
@@ -3903,13 +4228,15 @@ class TacticsStudioController {
         const a = form.slots[lk.a];
         const b = form.slots[lk.b];
         if (!a || !b) return '';
+        const posA = mapSlotToBoardPct(a, this.isProFullscreen);
+        const posB = mapSlotToBoardPct(b, this.isProFullscreen);
         const cls =
           lk.level === 'gold'
             ? 'chem-line-gold'
             : lk.level === 'green'
             ? 'chem-line-green'
             : 'chem-line-dashed';
-        return `<line x1="${a.x}%" y1="${a.y}%" x2="${b.x}%" y2="${b.y}%" class="${cls}" />`;
+        return `<line x1="${posA.x}%" y1="${posA.y}%" x2="${posB.x}%" y2="${posB.y}%" class="${cls}" />`;
       })
       .join('');
     svg.innerHTML = lines;
@@ -3924,7 +4251,8 @@ class TacticsStudioController {
         if (pl && ovr > 0) realOvrs.push(ovr);
         const photo = pl ? sanitizeImageDataUrl(pl.photo || '', 250000) : '';
         const tierCls = ovr >= 84 ? 'mini-diamond' : ovr >= 74 ? 'mini-gold' : pl ? 'mini-emerald' : 'mini-empty';
-        return `<button type="button" data-assign-slot="${idx}" class="mini-fifa-card ${tierCls} ${this.prefs.size === '11v11' ? 'compact' : ''}" style="left:${s.x}%;top:${s.y}%;">
+        const pos = mapSlotToBoardPct(s, this.isProFullscreen);
+        return `<button type="button" data-assign-slot="${idx}" class="mini-fifa-card ${tierCls} ${this.prefs.size === '11v11' ? 'compact' : ''}" style="left:${pos.x}%;top:${pos.y}%;">
           <div class="mini-fifa-top">
             <span class="mini-fifa-ovr">${pl ? ovr : '+'}</span>
             <span class="mini-fifa-pos">${escapeHtml(s.short)}</span>
@@ -4455,6 +4783,976 @@ class TacticsStudioController {
         this.renderCaptainTools();
       });
     });
+
+    // Full-Screen Pro Studio trigger & overlay events
+    document.getElementById('btnTacFullscreen')?.addEventListener('click', () => {
+      this.enterProFullscreen();
+    });
+    this.bindProFullscreenEvents();
+  }
+
+  // ==================== FULL-SCREEN PRO STUDIO MODE (REFERENCE-MATCHED WORKSPACE) ====================
+
+  private captureBoardSnapshot(): ProBoardSnapshot {
+    return {
+      our: this.currentOur.map((p) => ({ x: p.x, y: p.y })),
+      opp: this.currentOpp.map((p) => ({ x: p.x, y: p.y })),
+      ball: { x: this.currentBall.x, y: this.currentBall.y },
+      annotations: this.proAnnotations.map((a) => ({ ...a })),
+    };
+  }
+
+  private pushCurrentBoardHistory(): void {
+    this.proHistory = pushHistorySnapshot(this.proHistory, this.captureBoardSnapshot());
+    if (this.isProFullscreen) this.renderProControlsState();
+  }
+
+  private applyBoardSnapshot(snap: ProBoardSnapshot): void {
+    this.currentOur = snap.our.map((p) => ({ x: p.x, y: p.y }));
+    this.currentOpp = snap.opp.map((p) => ({ x: p.x, y: p.y }));
+    this.currentBall = { x: snap.ball.x, y: snap.ball.y };
+    this.proAnnotations = snap.annotations.map((a) => ({ ...a }));
+    this.renderSvgPitch();
+    if (this.isProFullscreen) this.renderProControlsState();
+  }
+
+  private proUndo(): void {
+    const res = applyHistoryUndo(this.proHistory, this.captureBoardSnapshot());
+    if (!res.restored) {
+      this.ctx?.toast('لا توجد خطوة سابقة للتراجع عنها');
+      return;
+    }
+    this.proHistory = res.history;
+    this.applyBoardSnapshot(res.restored);
+  }
+
+  private proRedo(): void {
+    const res = applyHistoryRedo(this.proHistory, this.captureBoardSnapshot());
+    if (!res.restored) {
+      this.ctx?.toast('لا توجد خطوة للإعادة');
+      return;
+    }
+    this.proHistory = res.history;
+    this.applyBoardSnapshot(res.restored);
+  }
+
+  private proSaveCurrentPlan(): void {
+    const form = this.getCurrentFormation();
+    const customArrows: TacticalArrow[] = this.proAnnotations
+      .filter((a) => a.kind === 'arrow' || a.kind === 'path')
+      .map((a) => ({
+        from: [a.x1, a.y1],
+        to: [a.x2, a.y2],
+        kind: a.kind === 'path' ? 'ball' : 'run',
+      }));
+    const currentFrame: TacticalKeyframe = {
+      title: `خطة ${form.id} (${this.prefs.size})`,
+      narration:
+        (this.sequence.frames[this.frameIdx]?.narration || `تشكيلة ${form.name} محفوظة من وضع التكبير الاحترافي`),
+      durationMs: 2400,
+      ourPos: this.currentOur.map((p) => ({ ...p })),
+      oppPos: this.currentOpp.map((p) => ({ ...p })),
+      ball: { ...this.currentBall },
+      activeIndices: this.sequence.frames[this.frameIdx]?.activeIndices || [],
+      arrows: [...(this.sequence.frames[this.frameIdx]?.arrows || []), ...customArrows],
+    };
+    const framesToSave: TacticalKeyframe[] =
+      this.recordedFrames.length >= 2
+        ? this.recordedFrames.map((f) => ({ ...f }))
+        : [
+            currentFrame,
+            {
+              ...currentFrame,
+              title: `المرحلة 2 — ${form.id}`,
+            },
+          ];
+
+    const planName = `خطة ${form.id} (${this.prefs.size}) #${this.prefs.customPlans.length + 1}`;
+    const plan: CustomPlan = {
+      id: 'plan_' + Date.now(),
+      name: planName,
+      size: this.prefs.size,
+      formationId: form.id,
+      frames: framesToSave,
+    };
+    this.prefs.customPlans.unshift(plan);
+    this.prefs.customPlans = this.prefs.customPlans.slice(0, 12);
+    savePrefs(this.prefs);
+
+    if (this.prefs.size === '6v6' && this.ctx) {
+      const t = this.ctx.getTactics();
+      this.ctx.setTactics({ formation: form.id, slots: { ...(t.slots || {}) } });
+    }
+    this.renderRecorderPanel();
+    if (this.isProFullscreen) {
+      this.renderProLibraryModal();
+      this.renderProLeftPanel();
+    }
+    this.ctx?.toast(`تم حفظ «${planName}» في مكتبة الخطط ✓`);
+  }
+
+  private renderProPitchOnly(): void {
+    if (this.viewMode !== 'studio') return;
+    const svg = document.getElementById('tacProPitchSvg') as unknown as SVGSVGElement | null;
+    if (!svg) return;
+    const form = this.getCurrentFormation();
+    const assigned = this.getAssignedPlayersForCurrentFormation();
+    const frame = this.sequence.frames[this.frameIdx] || this.sequence.frames[0];
+    const activeSet = new Set(frame?.activeIndices || []);
+    const focusedUserIdx = this.focusMineOnly ? this.getFocusedUserSlotIdx() : null;
+
+    const ourNumbers = form.slots.map((slot, i) => {
+      const pl = assigned[i];
+      return pl && pl.jersey ? String(pl.jersey) : String(i + 1);
+    });
+    const ourNames = form.slots.map((slot, i) => {
+      const pl = assigned[i];
+      return pl ? firstWord(pl.name) : slot.short;
+    });
+
+    svg.innerHTML = buildProLandscapePitchSvg({
+      size: this.prefs.size,
+      formation: form,
+      ourPortrait: this.currentOur,
+      oppPortrait: this.currentOpp,
+      ballPortrait: this.currentBall,
+      ourNumbers,
+      ourNames,
+      activeIndices: activeSet,
+      spotlightIdx: this.spotlightSlotIdx,
+      focusedIdx: focusedUserIdx,
+      dragTarget: this.dragTarget,
+      frame,
+      display: {
+        showNames: this.proShowNames,
+        showNumbers: this.proShowNumbers,
+        showTacticalLines: this.proShowTacticalLines,
+        showOpponents: this.showOpponents,
+        showTriangles: this.showTriangles,
+      },
+      annotations: this.proAnnotations,
+      draftAnnotation: this.proDraftAnnotation,
+      arrowRevealT: this.arrowRevealT,
+      ballLift: this.ballLift,
+      reducedMotion: this.isMotionReduced(),
+      offsideEnabled: this.sequence.offsideEnabled,
+      isMistakeCompare: Boolean(this.activeComparisonId && this.comparisonVariant === 'mistake'),
+    });
+
+    // Sync live narration ticker & comparison strip at top of pitch
+    const narrEl = document.getElementById('tacProLiveCaption');
+    if (narrEl) {
+      if (this.activeComparisonId) {
+        const cmp = getComparisonById(this.activeComparisonId);
+        const isMistake = this.comparisonVariant === 'mistake';
+        narrEl.classList.remove('hidden');
+        narrEl.innerHTML = `<div class="tac-pro-cmp-bar ${isMistake ? 'is-mistake' : 'is-correct'}">
+          <span>${isMistake ? '⚠️ الخطأ الشائع' : '✓ الصحيح التكتيكي'}: <strong>${escapeHtml(cmp?.title || '')}</strong></span>
+          <div class="tac-pro-cmp-actions">
+            <button type="button" data-pro-cmp-var="mistake" class="tac-pro-cmp-pill ${isMistake ? 'active' : ''}">الخطأ</button>
+            <button type="button" data-pro-cmp-var="correct" class="tac-pro-cmp-pill ${!isMistake ? 'active' : ''}">الصحيح</button>
+            <button type="button" data-pro-cmp-close="1" class="tac-pro-cmp-pill">✕</button>
+          </div>
+        </div>`;
+      } else if (frame?.narration) {
+        narrEl.classList.remove('hidden');
+        const stepLbl = `${this.frameIdx + 1}/${Math.max(1, this.sequence.frames.length)}`;
+        narrEl.innerHTML = `<div class="tac-pro-caption-pill">
+          <span class="tac-pro-caption-step" dir="ltr">${stepLbl}</span>
+          <span class="tac-pro-caption-txt">${escapeHtml(frame.title ? `${frame.title} — ${frame.narration}` : frame.narration)}</span>
+        </div>`;
+      } else {
+        narrEl.classList.add('hidden');
+      }
+    }
+  }
+
+  private renderProControlsState(): void {
+    // Top bar play/pause state
+    const playBtn = document.getElementById('btnTacProPlay');
+    const playLbl = document.getElementById('tacProPlayLbl');
+    if (playBtn) playBtn.classList.toggle('is-playing', this.isPlaying);
+    if (playLbl) playLbl.textContent = this.isPlaying ? 'إيقاف مؤقت' : 'تشغيل الخطة';
+
+    // Top section tabs
+    document.querySelectorAll<HTMLButtonElement>('[data-pro-section]').forEach((btn) => {
+      const isAct = btn.dataset.proSection === this.proSection;
+      btn.classList.toggle('active', isAct);
+      btn.setAttribute('aria-selected', isAct ? 'true' : 'false');
+    });
+
+    // Right drawing & advanced tool buttons
+    document.querySelectorAll<HTMLButtonElement>('[data-pro-tool]').forEach((btn) => {
+      const isAct = btn.dataset.proTool === this.proTool;
+      btn.classList.toggle('active', isAct);
+      btn.setAttribute('aria-pressed', isAct ? 'true' : 'false');
+    });
+
+    // Cursor class on pitch canvas
+    const stage = document.getElementById('tacProPitchCanvasWrap');
+    if (stage) {
+      stage.dataset.tool = this.proTool;
+      stage.style.transform = `scale(${(this.proZoomPct / 100).toFixed(2)})`;
+    }
+
+    // Display switches
+    const chkNames = document.getElementById('chkProShowNames') as HTMLInputElement | null;
+    const chkNums = document.getElementById('chkProShowNumbers') as HTMLInputElement | null;
+    const chkLines = document.getElementById('chkProShowLines') as HTMLInputElement | null;
+    if (chkNames) chkNames.checked = this.proShowNames;
+    if (chkNums) chkNums.checked = this.proShowNumbers;
+    if (chkLines) chkLines.checked = this.proShowTacticalLines;
+
+    // Bottom dock state: Undo/Redo, Zoom, Compare, Voice
+    const undoBtn = document.getElementById('btnTacProUndo') as HTMLButtonElement | null;
+    const redoBtn = document.getElementById('btnTacProRedo') as HTMLButtonElement | null;
+    if (undoBtn) undoBtn.disabled = this.proHistory.undoStack.length === 0;
+    if (redoBtn) redoBtn.disabled = this.proHistory.redoStack.length === 0;
+
+    const zoomLbl = document.getElementById('tacProZoomLabel');
+    if (zoomLbl) zoomLbl.textContent = `${this.proZoomPct}%`;
+
+    const cmpBtn = document.getElementById('btnTacProCompare');
+    if (cmpBtn) cmpBtn.classList.toggle('active', Boolean(this.activeComparisonId));
+
+    const voiceBtn = document.getElementById('btnTacProVoice');
+    if (voiceBtn) voiceBtn.classList.toggle('active', this.voiceEnabled);
+
+    const libBtn = document.getElementById('btnTacProLibrary');
+    if (libBtn) libBtn.classList.toggle('active', this.proLibraryOpen);
+
+    // Mobile drawer classes
+    const overlay = document.getElementById('tacFullscreenOverlay');
+    if (overlay) {
+      overlay.classList.toggle('drawer-left-open', this.proMobileDrawer === 'left');
+      overlay.classList.toggle('drawer-right-open', this.proMobileDrawer === 'right');
+    }
+  }
+
+  private renderProLeftPanel(): void {
+    const body = document.getElementById('tacProLeftBody');
+    if (!body) return;
+    const curForm = this.getCurrentFormation();
+
+    if (this.proSection === 'formations') {
+      const sizes: PitchSizeId[] = ['6v6', '5v5', '7v7', '11v11'];
+      const forms = FORMATIONS_CATALOG[this.prefs.size];
+      body.innerHTML = `
+        <div class="tac-pro-size-row" role="group" aria-label="حجم الملعب">
+          ${sizes
+            .map(
+              (sz) =>
+                `<button type="button" data-pro-size="${sz}" class="tac-pro-size-chip ${sz === this.prefs.size ? 'active' : ''}" dir="ltr">${sz}</button>`
+            )
+            .join('')}
+        </div>
+        <div class="tac-pro-form-list" role="listbox" aria-label="قائمة التشكيلات">
+          ${forms
+            .map((f) => {
+              const active = f.id === curForm.id;
+              return `<button type="button" data-pro-formation="${escapeHtml(f.id)}" class="tac-pro-form-card ${active ? 'active' : ''}" aria-selected="${active ? 'true' : 'false'}">
+                ${renderFormationMiniPitchSvg(f)}
+                <div class="tac-pro-form-meta">
+                  <span class="tac-pro-form-code"><bdi dir="ltr">${escapeHtml(f.id)}</bdi></span>
+                  <span class="tac-pro-form-sub">${escapeHtml(f.tagline)}</span>
+                </div>
+                ${active ? '<span class="tac-pro-form-check" aria-hidden="true">✓</span>' : ''}
+              </button>`;
+            })
+            .join('')}
+        </div>
+        <button type="button" id="btnTacProNewFormation" class="tac-pro-new-btn">
+          <span>+ تشكيل جديد</span>
+        </button>
+      `;
+      return;
+    }
+
+    if (this.proSection === 'plans') {
+      const phases: Array<{ id: TacticalPhaseId; label: string; desc: string }> = [
+        { id: 'attack', label: 'الهجوم والبناء', desc: 'توسيع العرض وفتح زوايا التمرير' },
+        { id: 'defend', label: 'الدفاع والتغطية', desc: 'إغلاق العمق وحماية المرمى' },
+        { id: 'gegenpress', label: 'الضغط العكسي', desc: 'استعادة الكرة خلال 5 ثوانٍ' },
+        { id: 'counter', label: 'التحول السريع', desc: 'انطلاقة مباشرة للمساحات الفارغة' },
+        { id: 'highpress', label: 'الضغط العالي', desc: 'خنق بناء الخصم من منطقته' },
+        { id: 'possession', label: 'الاستحواذ والمثلثات', desc: 'تدوير الكرة وبناء مثلثات آمنة' },
+        { id: 'setpieces', label: 'الكرات الثابتة', desc: 'تنظيم الركنيات والضربات الحرة' },
+      ];
+      body.innerHTML = `
+        <div class="tac-pro-panel-head">خطط اللعب — <bdi dir="ltr">${escapeHtml(curForm.id)}</bdi></div>
+        <div class="tac-pro-stack">
+          ${phases
+            .map(
+              (p) => `<button type="button" data-pro-phase="${p.id}" class="tac-pro-list-item ${this.phase === p.id && !this.activeScenarioId ? 'active' : ''}">
+                <strong>${p.label}</strong>
+                <span>${p.desc}</span>
+              </button>`
+            )
+            .join('')}
+        </div>
+      `;
+      return;
+    }
+
+    if (this.proSection === 'moves') {
+      const stepNo = this.frameIdx + 1;
+      const totalSteps = Math.max(1, this.sequence.frames.length);
+      body.innerHTML = `
+        <div class="tac-pro-panel-head">الحركات التكتيكية والتسجيل</div>
+        <div class="tac-pro-move-card">
+          <div class="tac-pro-move-row">
+            <span>الخطوة الحالية</span>
+            <strong dir="ltr">${stepNo} / ${totalSteps}</strong>
+          </div>
+          <div class="tac-pro-move-btns">
+            <button type="button" data-pro-move="prev" class="tac-pro-mini-btn">⏮ السابق</button>
+            <button type="button" data-pro-move="play" class="tac-pro-mini-btn is-gold">${this.isPlaying ? '⏸ إيقاف' : '▶ تشغيل'}</button>
+            <button type="button" data-pro-move="next" class="tac-pro-mini-btn">التالي ⏭</button>
+            <button type="button" data-pro-move="replay" class="tac-pro-mini-btn">↻ إعادة</button>
+          </div>
+          <div class="tac-pro-move-row" style="margin-top:8px;">
+            <span>السرعة</span>
+            <div class="tac-pro-speed-pills">
+              ${[0.5, 1, 1.5]
+                .map(
+                  (sp) =>
+                    `<button type="button" data-pro-speed="${sp}" class="tac-pro-size-chip ${this.speed === sp ? 'active' : ''}" dir="ltr">${sp}x</button>`
+                )
+                .join('')}
+            </div>
+          </div>
+        </div>
+        <div class="tac-pro-move-card" style="margin-top:8px;">
+          <div class="tac-pro-move-row">
+            <strong>🎥 تسجيل حركة خاصة</strong>
+            <span class="tac-pro-badge">${this.recordedFrames.length} لقطات</span>
+          </div>
+          <p class="tac-pro-hint">اسحب اللاعبين ثم اضغط التقاط لقطة لبناء حركة متحركة كاملة.</p>
+          <div class="tac-pro-move-btns">
+            <button type="button" data-pro-rec="capture" class="tac-pro-mini-btn is-gold">+ التقاط لقطة</button>
+            <button type="button" data-pro-rec="preview" class="tac-pro-mini-btn">▶ معاينة</button>
+            <button type="button" data-pro-rec="pop" class="tac-pro-mini-btn">↩ حذف أخيرة</button>
+            <button type="button" data-pro-rec="save" class="tac-pro-mini-btn">💾 حفظ</button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    if (this.proSection === 'learn') {
+      body.innerHTML = `
+        <div class="tac-pro-panel-head">المراحل والسيناريوهات التدريبية (10)</div>
+        <div class="tac-pro-stack">
+          ${TACTICAL_SCENARIOS_10.map(
+            (sc, idx) => `<button type="button" data-pro-scenario="${escapeHtml(sc.id)}" class="tac-pro-list-item ${this.activeScenarioId === sc.id ? 'active' : ''}">
+              <strong>${idx + 1}. ${escapeHtml(sc.title)}</strong>
+              <span>${escapeHtml(sc.category)} • ${sc.frames.length} مراحل</span>
+            </button>`
+          ).join('')}
+        </div>
+      `;
+      return;
+    }
+
+    // Captain Tools section inside Pro Mode
+    const players = this.ctx?.getPlayers() || [];
+    const readiness = this.ctx?.getReadiness ? this.ctx.getReadiness() : [];
+    const teamName = this.ctx?.getTeamSettings().teamName || 'ميدان 6v6';
+    const split = splitFairTeams(players, teamName, readiness);
+    const smart = suggestSmartLineup(players, curForm, readiness);
+    const chem = computeTeamChemistry(curForm, this.getAssignedPlayersForCurrentFormation());
+    body.innerHTML = `
+      <div class="tac-pro-panel-head">أدوات الكابتن</div>
+      <div class="tac-pro-stack">
+        <div class="tac-pro-move-card">
+          <strong>التشكيلة الذكية المقترحة</strong>
+          <p class="tac-pro-hint">${smart.assignedCount} / ${curForm.slots.length} مركز جاهز • التناغم الحالي ${chem.totalPct}%</p>
+          <button type="button" data-pro-cap-act="apply-smart" class="tac-pro-mini-btn is-gold" style="width:100%;">تطبيق التشكيلة المقترحة</button>
+        </div>
+        <div class="tac-pro-move-card">
+          <strong>التقسيمة العادلة السريعة</strong>
+          <p class="tac-pro-hint">الفريق الذهبي (${split.gold.length}) مقابل الفضي (${split.silver.length}) • فارق ${split.diff.toFixed(1)}</p>
+          <button type="button" data-pro-cap-act="copy-split" class="tac-pro-mini-btn" style="width:100%;">نسخ التقسيمة لواتساب</button>
+        </div>
+        <div class="tac-pro-move-card">
+          <strong>منبّه التبديلات (<span dir="ltr">${this.formatClock(this.timerSecondsLeft)}</span>)</strong>
+          <div class="tac-pro-move-btns" style="margin-top:6px;">
+            <button type="button" data-pro-cap-act="timer-toggle" class="tac-pro-mini-btn is-gold">${this.timerRunning ? 'إيقاف' : 'تشغيل'}</button>
+            <button type="button" data-pro-cap-act="timer-reset" class="tac-pro-mini-btn">تصفير</button>
+          </div>
+        </div>
+        <button type="button" data-pro-cap-act="publish" class="tac-pro-mini-btn is-gold" style="width:100%;">نشر التشكيلة الرسمية للفريق</button>
+      </div>
+    `;
+  }
+
+  private renderProSettingsPopover(): void {
+    const pop = document.getElementById('tacProSettingsPop');
+    if (!pop) return;
+    if (!this.proSettingsOpen) {
+      pop.classList.add('hidden');
+      return;
+    }
+    pop.classList.remove('hidden');
+    pop.innerHTML = `
+      <div class="tac-pro-pop-title">إعدادات استوديو التكبير</div>
+      <div class="tac-pro-pop-row">
+        <span>إظهار فريق الخصم</span>
+        <button type="button" data-pro-set="opponents" class="tac-pro-mini-btn ${this.showOpponents ? 'is-gold' : ''}">${this.showOpponents ? 'مفعّل' : 'مخفي'}</button>
+      </div>
+      <div class="tac-pro-pop-row">
+        <span>مثلثات التمرير</span>
+        <button type="button" data-pro-set="triangles" class="tac-pro-mini-btn ${this.showTriangles ? 'is-gold' : ''}">${this.showTriangles ? 'مفعّل' : 'مخفي'}</button>
+      </div>
+      <div class="tac-pro-pop-row">
+        <span>الرسومات المضافة (${this.proAnnotations.length})</span>
+        <button type="button" data-pro-set="clear-draw" class="tac-pro-mini-btn">مسح الكل</button>
+      </div>
+      <div class="tac-pro-pop-row">
+        <span>إعادة ضبط المواقع</span>
+        <button type="button" data-pro-set="reset-pos" class="tac-pro-mini-btn">استعادة</button>
+      </div>
+    `;
+  }
+
+  private renderProLibraryModal(): void {
+    const pop = document.getElementById('tacProLibraryPop');
+    if (!pop) return;
+    if (!this.proLibraryOpen) {
+      pop.classList.add('hidden');
+      return;
+    }
+    pop.classList.remove('hidden');
+    const plans = this.prefs.customPlans;
+    pop.innerHTML = `
+      <div class="tac-pro-pop-head">
+        <strong>📁 مكتبة الخطط المحفوظة (${plans.length})</strong>
+        <button type="button" id="btnTacProCloseLib" class="tac-pro-cmp-pill">✕</button>
+      </div>
+      ${
+        plans.length
+          ? `<div class="tac-pro-stack" style="max-height:240px;overflow-y:auto;">
+              ${plans
+                .map(
+                  (p) => `<div class="tac-pro-lib-row">
+                    <button type="button" data-pro-load-plan="${escapeHtml(p.id)}" class="tac-pro-lib-open">
+                      <strong>${escapeHtml(p.name)}</strong>
+                      <span><bdi dir="ltr">${escapeHtml(p.size)} • ${escapeHtml(p.formationId)}</bdi> (${p.frames.length} لقطات)</span>
+                    </button>
+                    <button type="button" data-pro-del-plan="${escapeHtml(p.id)}" class="tac-pro-cmp-pill" title="حذف">🗑</button>
+                  </div>`
+                )
+                .join('')}
+            </div>`
+          : `<p class="tac-pro-hint" style="margin:10px 0;">لا توجد خطط محفوظة بعد — اضغط «حفظ الخطة» بالأعلى لحفظ التشكيلة والأسهم الحالية.</p>`
+      }
+    `;
+  }
+
+  private renderProFullscreenOverlay(): void {
+    if (!this.isProFullscreen) return;
+    this.syncProViewModeHost();
+    this.renderViewModeTabs();
+    this.renderProPitchOnly();
+    this.renderProLeftPanel();
+    this.renderProControlsState();
+    this.renderProSettingsPopover();
+    this.renderProLibraryModal();
+  }
+
+  private handleProPointerDown = (e: PointerEvent): void => {
+    const svg = document.getElementById('tacProPitchSvg') as unknown as SVGSVGElement | null;
+    if (!svg) return;
+
+    // Close open mobile drawer when interacting with pitch
+    if (this.proMobileDrawer !== 'none') {
+      this.proMobileDrawer = 'none';
+      this.renderProControlsState();
+    }
+    if (this.proSettingsOpen || this.proLibraryOpen) {
+      this.proSettingsOpen = false;
+      this.proLibraryOpen = false;
+      this.renderProSettingsPopover();
+      this.renderProLibraryModal();
+    }
+
+    const pt = projectProClientToPortraitPct(e.clientX, e.clientY, svg.getBoundingClientRect());
+
+    // 1. Eraser tool -> delete clicked annotation
+    if (this.proTool === 'erase') {
+      const directEl = (e.target as Element | null)?.closest('[data-pro-ann-id]');
+      const hitId = directEl?.getAttribute('data-pro-ann-id') || hitTestProAnnotation(this.proAnnotations, pt);
+      if (hitId) {
+        this.pushCurrentBoardHistory();
+        this.proAnnotations = this.proAnnotations.filter((a) => a.id !== hitId);
+        this.renderSvgPitch();
+        this.renderProControlsState();
+      } else {
+        this.ctx?.toast('اضغط على سهم أو شكل أو مخروط لحذفه');
+      }
+      e.preventDefault();
+      return;
+    }
+
+    // 2. Single-click stamp tools (cone, flag, extra ball)
+    if (isSingleClickStampTool(this.proTool)) {
+      this.pushCurrentBoardHistory();
+      this.proAnnotations.push({
+        id: 'ann_' + Date.now() + '_' + Math.floor(Math.random() * 999),
+        kind: this.proTool as ProAnnotationKind,
+        x1: pt.x,
+        y1: pt.y,
+        x2: pt.x,
+        y2: pt.y,
+        color: defaultColorForTool(this.proTool),
+      });
+      this.renderSvgPitch();
+      this.renderProControlsState();
+      e.preventDefault();
+      return;
+    }
+
+    // 3. Drag-to-draw vector tools (arrow, path, circle, rect, triangle, zone)
+    if (isDrawingTool(this.proTool)) {
+      this.pause();
+      this.proDrawStartPortrait = pt;
+      this.proDraftAnnotation = {
+        id: 'draft',
+        kind: this.proTool as ProAnnotationKind,
+        x1: pt.x,
+        y1: pt.y,
+        x2: pt.x,
+        y2: pt.y,
+        color: defaultColorForTool(this.proTool),
+      };
+      try {
+        svg.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+      this.renderProPitchOnly();
+      e.preventDefault();
+      return;
+    }
+
+    // 4. Pointer / Move tool -> drag player or ball token
+    const token = (e.target as Element | null)?.closest('[data-pro-drag-kind]') as SVGElement | null;
+    if (!token) return;
+    const kind = token.getAttribute('data-pro-drag-kind') as 'our' | 'opp' | 'ball' | null;
+    const idx = Number(token.getAttribute('data-pro-drag-idx') || '0');
+    if (!kind) return;
+
+    this.pause();
+    this.dragTarget = { kind, idx };
+    this.dragStartClient = { x: e.clientX, y: e.clientY };
+    this.dragMoved = false;
+    this.proDragSnapshotTaken = false;
+    try {
+      svg.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    this.renderProPitchOnly();
+    e.preventDefault();
+  };
+
+  private handleProPointerMove = (e: PointerEvent): void => {
+    const svg = document.getElementById('tacProPitchSvg') as unknown as SVGSVGElement | null;
+    if (!svg) return;
+
+    if (this.proDraftAnnotation && this.proDrawStartPortrait) {
+      const pt = projectProClientToPortraitPct(e.clientX, e.clientY, svg.getBoundingClientRect());
+      this.proDraftAnnotation = {
+        ...this.proDraftAnnotation,
+        x2: pt.x,
+        y2: pt.y,
+      };
+      this.renderProPitchOnly();
+      return;
+    }
+
+    if (!this.dragTarget) return;
+    const dist = Math.hypot(e.clientX - this.dragStartClient.x, e.clientY - this.dragStartClient.y);
+    if (dist > 5) this.dragMoved = true;
+    if (!this.dragMoved) return;
+
+    if (!this.proDragSnapshotTaken) {
+      this.pushCurrentBoardHistory();
+      this.proDragSnapshotTaken = true;
+    }
+    const pt = projectProClientToPortraitPct(e.clientX, e.clientY, svg.getBoundingClientRect());
+    if (this.dragTarget.kind === 'our' && this.currentOur[this.dragTarget.idx]) {
+      this.currentOur[this.dragTarget.idx] = pt;
+    } else if (this.dragTarget.kind === 'opp' && this.currentOpp[this.dragTarget.idx]) {
+      this.currentOpp[this.dragTarget.idx] = pt;
+    } else if (this.dragTarget.kind === 'ball') {
+      this.currentBall = pt;
+    }
+    this.renderSvgPitch();
+  };
+
+  private handleProPointerUp = (e: PointerEvent): void => {
+    const svg = document.getElementById('tacProPitchSvg') as unknown as SVGSVGElement | null;
+    if (svg) {
+      try {
+        svg.releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+    }
+
+    if (this.proDraftAnnotation) {
+      const fin = this.proDraftAnnotation;
+      this.proDraftAnnotation = null;
+      this.proDrawStartPortrait = null;
+      if (Math.hypot(fin.x2 - fin.x1, fin.y2 - fin.y1) >= 2.2) {
+        this.pushCurrentBoardHistory();
+        this.proAnnotations.push({
+          ...fin,
+          id: 'ann_' + Date.now() + '_' + Math.floor(Math.random() * 999),
+        });
+      }
+      this.renderSvgPitch();
+      this.renderProControlsState();
+      return;
+    }
+
+    if (!this.dragTarget) return;
+    const released = this.dragTarget;
+    const wasDrag = this.dragMoved;
+    this.dragTarget = null;
+    this.dragMoved = false;
+    this.renderSvgPitch();
+
+    if (!wasDrag && released.kind === 'our' && this.proTool === 'pointer') {
+      this.enterRoleSpotlight(released.idx);
+    }
+  };
+
+  private bindProFullscreenEvents(): void {
+    // Back / Exit Fullscreen
+    document.getElementById('btnTacProBack')?.addEventListener('click', () => this.exitProFullscreen());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isProFullscreen) {
+        if (this.proSettingsOpen || this.proLibraryOpen) {
+          this.proSettingsOpen = false;
+          this.proLibraryOpen = false;
+          this.renderProSettingsPopover();
+          this.renderProLibraryModal();
+        } else {
+          this.exitProFullscreen();
+        }
+      }
+    });
+
+    // Top bar: Save, Play/Pause, Settings
+    document.getElementById('btnTacProSave')?.addEventListener('click', () => this.proSaveCurrentPlan());
+    document.getElementById('btnTacProPlay')?.addEventListener('click', () => {
+      if (!this.isInteractivePitchMode()) {
+        this.viewMode = 'studio';
+        this.renderAll();
+      }
+      if (this.isPlaying) this.pause();
+      else this.play();
+      this.renderProControlsState();
+    });
+    document.getElementById('btnTacProSettings')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.proLibraryOpen = false;
+      this.proSettingsOpen = !this.proSettingsOpen;
+      this.renderProLibraryModal();
+      this.renderProSettingsPopover();
+    });
+
+    // Settings popover delegation
+    document.getElementById('tacProSettingsPop')?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-pro-set]');
+      if (!btn?.dataset.proSet) return;
+      const act = btn.dataset.proSet;
+      if (act === 'opponents') {
+        this.showOpponents = !this.showOpponents;
+      } else if (act === 'triangles') {
+        this.showTriangles = !this.showTriangles;
+      } else if (act === 'clear-draw') {
+        if (this.proAnnotations.length) {
+          this.pushCurrentBoardHistory();
+          this.proAnnotations = [];
+          this.ctx?.toast('تم مسح جميع الرسومات التكتيكية');
+        }
+      } else if (act === 'reset-pos') {
+        this.pushCurrentBoardHistory();
+        this.loadCurrentPhaseSequence(false);
+        this.ctx?.toast('تمت استعادة التمركز الافتراضي');
+      }
+      this.renderAll();
+    });
+
+    // 5 Top Section Tabs
+    document.querySelectorAll<HTMLButtonElement>('[data-pro-section]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const sec = btn.dataset.proSection as ProSectionTab | undefined;
+        if (!sec) return;
+        this.proSection = sec;
+        if (window.innerWidth < 1024) {
+          this.proMobileDrawer = 'left';
+        }
+        this.renderProLeftPanel();
+        this.renderProControlsState();
+      });
+    });
+
+    // Mobile drawer toggle buttons + backdrop
+    document.getElementById('btnTacProMobLeft')?.addEventListener('click', () => {
+      this.proMobileDrawer = this.proMobileDrawer === 'left' ? 'none' : 'left';
+      this.renderProControlsState();
+    });
+    document.getElementById('btnTacProMobRight')?.addEventListener('click', () => {
+      this.proMobileDrawer = this.proMobileDrawer === 'right' ? 'none' : 'right';
+      this.renderProControlsState();
+    });
+    document.getElementById('tacProDrawerBackdrop')?.addEventListener('click', () => {
+      this.proMobileDrawer = 'none';
+      this.renderProControlsState();
+    });
+
+    // Left panel delegation (formations, sizes, phases, moves, scenarios, captain tools)
+    document.getElementById('tacProLeftBody')?.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const szBtn = target.closest<HTMLButtonElement>('[data-pro-size]');
+      if (szBtn?.dataset.proSize) {
+        this.setPitchSize(szBtn.dataset.proSize as PitchSizeId);
+        return;
+      }
+      const formBtn = target.closest<HTMLButtonElement>('[data-pro-formation]');
+      if (formBtn?.dataset.proFormation) {
+        this.pushCurrentBoardHistory();
+        this.onFormationSelectChanged(formBtn.dataset.proFormation);
+        if (window.innerWidth < 1024) this.proMobileDrawer = 'none';
+        this.renderProControlsState();
+        return;
+      }
+      if (target.closest('#btnTacProNewFormation')) {
+        this.proSection = 'moves';
+        this.captureCustomFrame();
+        this.renderProLeftPanel();
+        this.renderProControlsState();
+        return;
+      }
+      const phBtn = target.closest<HTMLButtonElement>('[data-pro-phase]');
+      if (phBtn?.dataset.proPhase) {
+        this.phase = phBtn.dataset.proPhase as TacticalPhaseId;
+        this.activeScenarioId = null;
+        this.activeComparisonId = null;
+        this.spotlightSlotIdx = null;
+        this.spotlightInfo = null;
+        this.loadCurrentPhaseSequence(true);
+        if (window.innerWidth < 1024) this.proMobileDrawer = 'none';
+        this.renderAll();
+        return;
+      }
+      const moveBtn = target.closest<HTMLButtonElement>('[data-pro-move]');
+      if (moveBtn?.dataset.proMove) {
+        const m = moveBtn.dataset.proMove;
+        if (m === 'prev') this.stepPrev();
+        else if (m === 'next') this.stepNext();
+        else if (m === 'replay') this.replay();
+        else if (m === 'play') {
+          if (this.isPlaying) this.pause();
+          else this.play();
+        }
+        this.renderProFullscreenOverlay();
+        return;
+      }
+      const spBtn = target.closest<HTMLButtonElement>('[data-pro-speed]');
+      if (spBtn?.dataset.proSpeed) {
+        this.speed = Number(spBtn.dataset.proSpeed) || 1;
+        this.renderTimelineButtons();
+        this.renderProLeftPanel();
+        return;
+      }
+      const recBtn = target.closest<HTMLButtonElement>('[data-pro-rec]');
+      if (recBtn?.dataset.proRec) {
+        const r = recBtn.dataset.proRec;
+        if (r === 'capture') this.captureCustomFrame();
+        else if (r === 'preview') this.playRecordedDraft();
+        else if (r === 'pop') this.popCustomFrame();
+        else if (r === 'save') this.proSaveCurrentPlan();
+        this.renderProLeftPanel();
+        return;
+      }
+      const scBtn = target.closest<HTMLButtonElement>('[data-pro-scenario]');
+      if (scBtn?.dataset.proScenario) {
+        this.loadScenario(scBtn.dataset.proScenario);
+        if (window.innerWidth < 1024) this.proMobileDrawer = 'none';
+        this.renderProFullscreenOverlay();
+        return;
+      }
+      const capBtn = target.closest<HTMLButtonElement>('[data-pro-cap-act]');
+      if (capBtn?.dataset.proCapAct) {
+        const act = capBtn.dataset.proCapAct;
+        if (act === 'apply-smart' && this.ctx) {
+          if (!this.ctx.isAdmin()) {
+            this.ctx.toast('تطبيق التشكيلة الذكية متاح للكابتن فقط', true);
+            return;
+          }
+          const form = this.getCurrentFormation();
+          const smart = suggestSmartLineup(this.ctx.getPlayers(), form, this.ctx.getReadiness ? this.ctx.getReadiness() : []);
+          Object.entries(smart.slots).forEach(([key, pid]) => {
+            const idx = Number(key.split('_').pop() || '0');
+            this.setSlotPlayerId(form.id, idx, pid);
+          });
+          this.ctx.toast('تم تطبيق التشكيلة الذكية المقترحة ✓');
+          this.renderAll();
+        } else if (act === 'copy-split' && this.ctx) {
+          const teamName = this.ctx.getTeamSettings().teamName || 'ميدان 6v6';
+          const split = splitFairTeams(this.ctx.getPlayers(), teamName, this.ctx.getReadiness ? this.ctx.getReadiness() : []);
+          navigator.clipboard?.writeText(split.whatsappText).catch(() => {});
+          this.ctx.toast('تم نسخ التقسيمة العادلة ✓');
+        } else if (act === 'timer-toggle') {
+          if (this.timerRunning) this.pauseRotationTimer();
+          else this.startRotationTimer();
+          this.renderProLeftPanel();
+        } else if (act === 'timer-reset') {
+          this.resetRotationTimer();
+          this.renderProLeftPanel();
+        } else if (act === 'publish' && this.ctx?.onPublishLineup) {
+          void this.ctx.onPublishLineup(this.getCurrentLineupPayload());
+        }
+      }
+    });
+
+    // Right panel: Drawing & Advanced tools
+    document.querySelectorAll<HTMLButtonElement>('[data-pro-tool]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tool = btn.dataset.proTool as ProBoardTool | undefined;
+        if (!tool) return;
+        this.proTool = tool;
+        if (window.innerWidth < 1024 && tool !== 'pointer') {
+          this.proMobileDrawer = 'none';
+        }
+        this.renderProControlsState();
+      });
+    });
+
+    // Display options checkboxes
+    document.getElementById('chkProShowNames')?.addEventListener('change', (e) => {
+      this.proShowNames = (e.target as HTMLInputElement).checked;
+      this.renderProPitchOnly();
+    });
+    document.getElementById('chkProShowNumbers')?.addEventListener('change', (e) => {
+      this.proShowNumbers = (e.target as HTMLInputElement).checked;
+      this.renderProPitchOnly();
+    });
+    document.getElementById('chkProShowLines')?.addEventListener('change', (e) => {
+      this.proShowTacticalLines = (e.target as HTMLInputElement).checked;
+      this.renderProPitchOnly();
+    });
+
+    // Live caption comparison toggle delegation
+    document.getElementById('tacProLiveCaption')?.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('[data-pro-cmp-close]')) {
+        this.exitComparisonMode();
+        this.renderProFullscreenOverlay();
+        return;
+      }
+      const vBtn = t.closest<HTMLButtonElement>('[data-pro-cmp-var]');
+      if (vBtn?.dataset.proCmpVar === 'mistake' || vBtn?.dataset.proCmpVar === 'correct') {
+        this.setComparisonVariant(vBtn.dataset.proCmpVar);
+        this.renderProFullscreenOverlay();
+      }
+    });
+
+    // Bottom Dock actions
+    document.getElementById('btnTacProLibrary')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.proSettingsOpen = false;
+      this.proLibraryOpen = !this.proLibraryOpen;
+      this.renderProSettingsPopover();
+      this.renderProLibraryModal();
+      this.renderProControlsState();
+    });
+    document.getElementById('tacProLibraryPop')?.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('#btnTacProCloseLib')) {
+        this.proLibraryOpen = false;
+        this.renderProLibraryModal();
+        this.renderProControlsState();
+        return;
+      }
+      const loadBtn = t.closest<HTMLButtonElement>('[data-pro-load-plan]');
+      if (loadBtn?.dataset.proLoadPlan) {
+        this.loadCustomPlan(loadBtn.dataset.proLoadPlan);
+        this.proLibraryOpen = false;
+        this.renderProFullscreenOverlay();
+        return;
+      }
+      const delBtn = t.closest<HTMLButtonElement>('[data-pro-del-plan]');
+      if (delBtn?.dataset.proDelPlan) {
+        this.prefs.customPlans = this.prefs.customPlans.filter((p) => p.id !== delBtn.dataset.proDelPlan);
+        savePrefs(this.prefs);
+        this.renderRecorderPanel();
+        this.renderProLibraryModal();
+        this.ctx?.toast('تم حذف الخطة من المكتبة');
+      }
+    });
+
+    document.getElementById('btnTacProScenarios')?.addEventListener('click', () => {
+      this.proSection = 'learn';
+      if (window.innerWidth < 1024) this.proMobileDrawer = 'left';
+      this.renderProLeftPanel();
+      this.renderProControlsState();
+    });
+
+    document.getElementById('btnTacProUndo')?.addEventListener('click', () => this.proUndo());
+    document.getElementById('btnTacProRedo')?.addEventListener('click', () => this.proRedo());
+
+    document.getElementById('btnTacProZoomOut')?.addEventListener('click', () => {
+      this.proZoomPct = clampProZoomPct(this.proZoomPct - 15);
+      this.renderProControlsState();
+    });
+    document.getElementById('btnTacProZoomIn')?.addEventListener('click', () => {
+      this.proZoomPct = clampProZoomPct(this.proZoomPct + 15);
+      this.renderProControlsState();
+    });
+    document.getElementById('tacProZoomLabel')?.addEventListener('click', () => {
+      this.proZoomPct = 100;
+      this.renderProControlsState();
+    });
+
+    document.getElementById('btnTacProCompare')?.addEventListener('click', () => {
+      if (this.activeComparisonId) this.exitComparisonMode();
+      else this.enterComparisonMode(undefined, 'mistake');
+      this.renderProFullscreenOverlay();
+    });
+
+    document.getElementById('btnTacProVoice')?.addEventListener('click', () => {
+      if (!this.isSpeechSupported()) {
+        this.ctx?.toast('التعليق الصوتي العربي غير مدعوم على هذا المتصفح — الشرح النصي يعمل بسلاسة');
+        return;
+      }
+      this.voiceEnabled = !this.voiceEnabled;
+      if (!this.voiceEnabled) this.stopSpeech();
+      else {
+        const cur = this.sequence.frames[this.frameIdx];
+        if (cur?.narration) this.speakText(cur.narration);
+      }
+      this.renderTimelineButtons();
+      this.renderProControlsState();
+    });
+
+    document.getElementById('btnTacProShare')?.addEventListener('click', () => {
+      void this.shareLineupOnWhatsApp();
+    });
+
+    // Pro SVG Pitch Pointer Events
+    const proSvg = document.getElementById('tacProPitchSvg') as unknown as SVGSVGElement | null;
+    if (proSvg) {
+      proSvg.addEventListener('pointerdown', this.handleProPointerDown);
+      proSvg.addEventListener('pointermove', this.handleProPointerMove);
+      proSvg.addEventListener('pointerup', this.handleProPointerUp);
+      proSvg.addEventListener('pointercancel', this.handleProPointerUp);
+    }
   }
 }
 

@@ -3407,6 +3407,1458 @@
         min-height: 52px;
       }
     }
+
+    /* =====================================================================
+       TACTICS STUDIO — LUXURY FULL-SCREEN PRO MODE (SCOPED ONLY TO OVERLAY)
+       ===================================================================== */
+    #btnTacFullscreen.tac-fs-trigger {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 38px;
+      padding: 0 13px;
+      border-radius: 12px;
+      border: 1px solid rgba(235, 190, 96, 0.55);
+      background: linear-gradient(180deg, rgba(240, 195, 92, 0.2), rgba(145, 102, 24, 0.16));
+      color: #f6d57a;
+      font-family: inherit;
+      font-size: 0.78rem;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 0 14px rgba(235, 190, 96, 0.14), inset 0 1px 0 rgba(255, 232, 160, 0.25);
+      transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    #btnTacFullscreen.tac-fs-trigger:hover {
+      border-color: rgba(246, 213, 122, 0.9);
+      box-shadow: 0 0 18px rgba(240, 195, 92, 0.3);
+      transform: translateY(-1px);
+    }
+    @media (max-width: 600px) {
+      #btnTacFullscreen.tac-fs-trigger {
+        min-height: 42px;
+        padding: 0 11px;
+        font-size: 0.74rem;
+      }
+    }
+
+    body.tac-pro-fullscreen-open {
+      overflow: hidden !important;
+      overscroll-behavior: none;
+    }
+    body.tac-pro-fullscreen-open .toast {
+      z-index: 1100;
+      bottom: calc(74px + env(safe-area-inset-bottom));
+    }
+    body.tac-pro-fullscreen-open .modal-bg {
+      z-index: 1050;
+    }
+
+    .tac-pro-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 950;
+      width: 100dvw;
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      background:
+        radial-gradient(ellipse 68% 36% at 50% 0%, rgba(236, 187, 74, 0.18), transparent 64%),
+        radial-gradient(ellipse 56% 42% at 50% 52%, rgba(22, 85, 42, 0.22), transparent 70%),
+        linear-gradient(180deg, #06070a 0%, #090b10 46%, #050609 100%);
+      color: #f6eedc;
+      padding:
+        max(8px, env(safe-area-inset-top))
+        max(12px, env(safe-area-inset-right))
+        max(8px, env(safe-area-inset-bottom))
+        max(12px, env(safe-area-inset-left));
+      gap: 8px;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: 'Cairo', 'Tajawal', system-ui, sans-serif;
+    }
+    .tac-pro-overlay.hidden {
+      display: none !important;
+    }
+
+    /* 1) TOP ROYAL HEADER BAR */
+    .tac-pro-topbar {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 12px;
+      min-height: 62px;
+      padding: 4px 10px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(24, 22, 18, 0.94), rgba(10, 10, 13, 0.96));
+      border: 1px solid rgba(229, 184, 88, 0.48);
+      box-shadow:
+        0 8px 28px rgba(0, 0, 0, 0.65),
+        inset 0 1px 0 rgba(255, 228, 154, 0.22);
+      position: relative;
+      z-index: 30;
+    }
+    .tac-pro-top-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .tac-pro-back-btn {
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+      padding: 0 !important;
+      border-radius: 50%;
+      border: 1.6px solid rgba(237, 193, 94, 0.85);
+      background: radial-gradient(circle at 35% 30%, #241e14, #0d0d11 78%);
+      color: #f4cc6c;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 0 16px rgba(235, 186, 75, 0.26), inset 0 1px 1px rgba(255, 232, 160, 0.28);
+      transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    .tac-pro-back-btn svg {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+    .tac-pro-back-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 22px rgba(245, 200, 90, 0.45);
+      background: radial-gradient(circle at 35% 30%, #342915, #121014 80%);
+    }
+    .tac-pro-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .tac-pro-brand-crest {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1.5px solid rgba(242, 197, 94, 0.72);
+      box-shadow: 0 0 14px rgba(242, 197, 94, 0.28);
+      background: #100f0d;
+      flex: 0 0 42px;
+    }
+    .tac-pro-brand-copy {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+      min-width: 0;
+      text-align: right;
+    }
+    .tac-pro-brand-title {
+      font-size: 1.12rem;
+      font-weight: 900;
+      letter-spacing: 0.01em;
+      background: linear-gradient(180deg, #ffe79e 0%, #e5b248 65%, #c78f28 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      white-space: nowrap;
+    }
+    .tac-pro-brand-sub {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: rgba(236, 214, 168, 0.78);
+      white-space: nowrap;
+    }
+
+    /* Chamfered Royal Title Plaque */
+    .tac-pro-title-plaque {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 6px 26px;
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(35, 29, 19, 0.94), rgba(14, 13, 15, 0.98));
+      border: 1.4px solid rgba(240, 194, 92, 0.72);
+      box-shadow:
+        0 0 22px rgba(236, 187, 74, 0.2),
+        inset 0 1px 0 rgba(255, 236, 174, 0.32),
+        inset 0 -1px 0 rgba(168, 120, 32, 0.35);
+      clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 100%, 0 100%);
+    }
+    .tac-pro-plaque-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      border: 1.2px solid rgba(240, 194, 92, 0.7);
+      background: rgba(240, 194, 92, 0.1);
+      color: #f3c861;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 36px;
+    }
+    .tac-pro-plaque-text {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      line-height: 1.15;
+    }
+    .tac-pro-plaque-h1 {
+      margin: 0;
+      font-size: 1.18rem;
+      font-weight: 900;
+      background: linear-gradient(180deg, #ffeaad 0%, #ebba50 65%, #c98e27 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      white-space: nowrap;
+    }
+    .tac-pro-plaque-sub {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: rgba(240, 212, 150, 0.84);
+      white-space: nowrap;
+    }
+
+    .tac-pro-top-right {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 9px;
+      position: relative;
+    }
+    .tac-pro-gold-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: 1.5px solid rgba(238, 193, 93, 0.82);
+      background: linear-gradient(180deg, rgba(35, 30, 21, 0.94), rgba(14, 14, 17, 0.98));
+      color: #f8e8c3;
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 0 14px rgba(235, 187, 78, 0.16), inset 0 1px 0 rgba(255, 232, 165, 0.25);
+      transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    .tac-pro-gold-pill svg {
+      color: #f3c861;
+      flex: 0 0 auto;
+    }
+    .tac-pro-gold-pill:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 0 20px rgba(243, 200, 97, 0.34);
+      border-color: #f9d982;
+    }
+    .tac-pro-gold-pill.is-playing {
+      background: linear-gradient(180deg, #f3c75a 0%, #c88b22 100%);
+      color: #141008;
+      border-color: #ffe399;
+      box-shadow: 0 0 22px rgba(243, 199, 90, 0.45);
+    }
+    .tac-pro-gold-pill.is-playing svg {
+      color: #141008;
+    }
+    .tac-pro-gear-btn {
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      padding: 0 !important;
+      border-radius: 50%;
+      border: 1.4px solid rgba(238, 193, 93, 0.72);
+      background: linear-gradient(180deg, rgba(34, 29, 20, 0.92), rgba(13, 13, 17, 0.98));
+      color: #f3c861;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 0 12px rgba(235, 187, 78, 0.18);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .tac-pro-gear-btn svg {
+      width: 19px;
+      height: 19px;
+      flex-shrink: 0;
+    }
+    .tac-pro-gear-btn:hover {
+      transform: rotate(22deg);
+      box-shadow: 0 0 18px rgba(245, 200, 90, 0.38);
+    }
+
+    /* 2) 5 LUXURY SECTION TABS BAR */
+    .tac-pro-secbar {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      padding: 6px 10px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(20, 19, 22, 0.92), rgba(9, 10, 13, 0.95));
+      border: 1px solid rgba(226, 181, 86, 0.36);
+      box-shadow: inset 0 1px 0 rgba(255, 228, 152, 0.14);
+      position: relative;
+      z-index: 20;
+    }
+    .tac-pro-sec-tab {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: linear-gradient(180deg, rgba(44, 46, 52, 0.82), rgba(18, 20, 25, 0.92));
+      color: #ede5d4;
+      font-family: inherit;
+      font-size: 0.88rem;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.18s ease;
+    }
+    .tac-pro-sec-tab svg {
+      color: #efc35f;
+      flex: 0 0 auto;
+    }
+    .tac-pro-sec-tab:hover {
+      border-color: rgba(240, 194, 92, 0.55);
+      color: #fff6df;
+    }
+    .tac-pro-sec-tab.active {
+      background: linear-gradient(180deg, #f9d574 0%, #e4ad3b 52%, #bf831b 100%);
+      color: #151008;
+      border-color: #ffe8a3;
+      box-shadow: 0 0 22px rgba(242, 191, 74, 0.42), inset 0 1px 0 rgba(255, 248, 214, 0.72);
+    }
+    .tac-pro-sec-tab.active svg {
+      color: #151008;
+    }
+
+    .tac-pro-mob-triggers {
+      display: none;
+    }
+
+    /* 3) 3-COLUMN WORKSPACE (LEFT FORMATIONS | CENTER HERO STADIUM | RIGHT TOOLS) */
+    .tac-pro-workspace {
+      display: grid;
+      grid-template-columns: 224px minmax(0, 1fr) 256px;
+      gap: 12px;
+      min-height: 0;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+    .tac-pro-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(20, 21, 25, 0.94), rgba(10, 11, 14, 0.97));
+      border: 1.2px solid rgba(232, 187, 92, 0.45);
+      box-shadow:
+        0 10px 28px rgba(0, 0, 0, 0.55),
+        inset 0 1px 0 rgba(255, 230, 160, 0.14);
+      padding: 10px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(232, 187, 92, 0.35) transparent;
+    }
+    .tac-pro-panel-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+      flex: 1;
+    }
+    .tac-pro-size-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 3px;
+      padding: 3px;
+      border-radius: 10px;
+      background: rgba(8, 9, 12, 0.8);
+      border: 1px solid rgba(232, 187, 92, 0.24);
+    }
+    .tac-pro-size-chip {
+      min-height: 28px;
+      min-width: 0;
+      padding: 0 2px !important;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: rgba(242, 230, 200, 0.72);
+      font-family: inherit;
+      font-size: 0.69rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .tac-pro-size-chip:hover {
+      color: #fff3d1;
+      background: rgba(232, 187, 92, 0.12);
+    }
+    .tac-pro-size-chip.active {
+      background: linear-gradient(180deg, #f2c65e, #c3871e);
+      color: #140f06;
+      border-color: #ffe39b;
+      box-shadow: 0 2px 8px rgba(235, 186, 72, 0.3);
+    }
+
+    .tac-pro-form-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      overflow-y: auto;
+      flex: 1;
+      min-height: 0;
+      padding-right: 2px;
+    }
+    .tac-pro-form-card {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      padding: 7px 9px;
+      border-radius: 12px;
+      border: 1.2px solid rgba(255, 255, 255, 0.14);
+      background: linear-gradient(180deg, rgba(30, 32, 38, 0.92), rgba(16, 17, 21, 0.96));
+      color: #f3ecdc;
+      font-family: inherit;
+      cursor: pointer;
+      text-align: right;
+      transition: all 0.16s ease;
+      position: relative;
+    }
+    .tac-pro-form-card:hover {
+      border-color: rgba(240, 194, 92, 0.56);
+      transform: translateY(-1px);
+    }
+    .tac-pro-form-card.active {
+      background: linear-gradient(135deg, rgba(180, 129, 32, 0.44), rgba(58, 43, 14, 0.85));
+      border: 1.6px solid #f4c860;
+      box-shadow: 0 0 18px rgba(244, 200, 96, 0.32), inset 0 1px 0 rgba(255, 240, 188, 0.35);
+    }
+    .tac-pro-mini-pitch {
+      width: 56px;
+      height: 44px;
+      flex: 0 0 56px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+    }
+    .tac-pro-form-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      direction: rtl;
+      text-align: right;
+      min-width: 0;
+      flex: 1;
+    }
+    .tac-pro-form-code {
+      font-size: 0.98rem;
+      font-weight: 900;
+      color: #fff6e0;
+      letter-spacing: 0.02em;
+      direction: ltr;
+      align-self: flex-end;
+    }
+    .tac-pro-form-sub {
+      font-size: 0.67rem;
+      font-weight: 600;
+      color: rgba(235, 218, 180, 0.76);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+      direction: rtl;
+      text-align: right;
+    }
+    .tac-pro-form-check {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: linear-gradient(180deg, #ffe08a, #d39424);
+      color: #161006;
+      font-size: 0.78rem;
+      font-weight: 900;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 22px;
+      box-shadow: 0 0 10px rgba(245, 202, 92, 0.55);
+    }
+    .tac-pro-new-btn {
+      margin-top: auto;
+      min-height: 40px;
+      border-radius: 999px;
+      border: 1.4px solid rgba(240, 194, 92, 0.8);
+      background: linear-gradient(180deg, rgba(38, 32, 20, 0.92), rgba(16, 15, 17, 0.98));
+      color: #f8de96;
+      font-family: inherit;
+      font-size: 0.86rem;
+      font-weight: 800;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 0 14px rgba(236, 187, 74, 0.18);
+      transition: all 0.15s ease;
+    }
+    .tac-pro-new-btn:hover {
+      background: linear-gradient(180deg, rgba(240, 194, 92, 0.25), rgba(140, 96, 22, 0.22));
+      box-shadow: 0 0 20px rgba(240, 194, 92, 0.34);
+    }
+
+    /* Non-formation dynamic left sections */
+    .tac-pro-panel-head {
+      font-size: 0.84rem;
+      font-weight: 900;
+      color: #f4cc6c;
+      padding: 4px 2px 6px;
+      border-bottom: 1px solid rgba(232, 187, 92, 0.24);
+      text-align: right;
+    }
+    .tac-pro-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      overflow-y: auto;
+      flex: 1;
+      min-height: 0;
+    }
+    .tac-pro-list-item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 11px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(24, 26, 32, 0.88);
+      color: #f5ecda;
+      font-family: inherit;
+      text-align: right;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .tac-pro-list-item strong {
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+    .tac-pro-list-item span {
+      font-size: 0.7rem;
+      color: rgba(232, 218, 186, 0.7);
+    }
+    .tac-pro-list-item:hover {
+      border-color: rgba(240, 194, 92, 0.55);
+    }
+    .tac-pro-list-item.active {
+      background: linear-gradient(135deg, rgba(180, 129, 32, 0.38), rgba(46, 35, 14, 0.82));
+      border-color: #f4c860;
+      box-shadow: 0 0 14px rgba(244, 200, 96, 0.26);
+    }
+    .tac-pro-move-card {
+      padding: 9px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(232, 187, 92, 0.25);
+      background: rgba(18, 20, 25, 0.88);
+      text-align: right;
+    }
+    .tac-pro-move-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 0.78rem;
+      direction: rtl;
+    }
+    .tac-pro-move-btns {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+      direction: rtl;
+    }
+    .tac-pro-speed-pills {
+      display: inline-flex;
+      gap: 4px;
+    }
+    .tac-pro-mini-btn {
+      min-height: 32px;
+      padding: 4px 8px;
+      border-radius: 9px;
+      border: 1px solid rgba(232, 187, 92, 0.38);
+      background: rgba(28, 30, 36, 0.92);
+      color: #f5ebd5;
+      font-family: inherit;
+      font-size: 0.74rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .tac-pro-mini-btn:hover {
+      border-color: #f5ca64;
+    }
+    .tac-pro-mini-btn.is-gold {
+      background: linear-gradient(180deg, #f3c861, #c6891f);
+      color: #140f06;
+      border-color: #ffe399;
+    }
+    .tac-pro-badge {
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.68rem;
+      font-weight: 800;
+      background: rgba(242, 197, 94, 0.18);
+      color: #f4cc6c;
+    }
+    .tac-pro-hint {
+      font-size: 0.71rem;
+      line-height: 1.45;
+      color: rgba(232, 220, 194, 0.72);
+      margin: 5px 0 6px;
+      direction: rtl;
+    }
+
+    /* CENTER HERO STADIUM STAGE */
+    .tac-pro-stage {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      min-height: 0;
+      border-radius: 18px;
+      background:
+        radial-gradient(ellipse 42% 28% at 22% 4%, rgba(220, 238, 255, 0.24), transparent 62%),
+        radial-gradient(ellipse 42% 28% at 78% 4%, rgba(220, 238, 255, 0.24), transparent 62%),
+        radial-gradient(ellipse 85% 75% at 50% 54%, rgba(24, 96, 46, 0.32), rgba(7, 10, 15, 0.94) 76%),
+        #070a0f;
+      border: 1.4px solid rgba(236, 191, 92, 0.44);
+      box-shadow:
+        0 14px 36px rgba(0, 0, 0, 0.68),
+        inset 0 0 42px rgba(0, 0, 0, 0.6);
+      overflow: hidden;
+      padding: 8px 10px;
+    }
+    .tac-pro-view-bar {
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 18;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 5px;
+      border-radius: 999px;
+      background: rgba(10, 12, 16, 0.88);
+      border: 1px solid rgba(236, 191, 92, 0.5);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+      max-width: calc(100% - 16px);
+      overflow-x: auto;
+      scrollbar-width: none;
+      direction: rtl;
+    }
+    .tac-pro-view-bar::-webkit-scrollbar {
+      display: none;
+    }
+    .tac-pro-view-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      min-height: 28px;
+      padding: 0 11px !important;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: rgba(244, 232, 204, 0.8);
+      font-family: inherit;
+      font-size: 0.72rem;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      transition: all 0.15s ease;
+    }
+    .tac-pro-view-btn svg {
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+    }
+    .tac-pro-view-btn:hover {
+      color: #fff6df;
+      background: rgba(242, 197, 94, 0.12);
+    }
+    .tac-pro-view-btn.active {
+      background: linear-gradient(180deg, #f8d474 0%, #d89b2a 100%);
+      color: #151007;
+      border-color: #ffe8a6;
+      box-shadow: 0 0 14px rgba(242, 191, 74, 0.36);
+    }
+    .tac-pro-live-caption {
+      position: absolute;
+      top: 46px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 12;
+      max-width: min(94%, 640px);
+      direction: rtl;
+    }
+    .tac-pro-live-caption.hidden {
+      display: none;
+    }
+    .tac-pro-native-host {
+      width: 100%;
+      height: 100%;
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 46px 14px 10px;
+      direction: rtl;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(232, 187, 92, 0.35) transparent;
+    }
+    .tac-pro-native-host.hidden {
+      display: none !important;
+    }
+    .tac-pro-native-host > #tacStudioViewport,
+    .tac-pro-native-host > #tacPosterViewport,
+    .tac-pro-native-host > #tacFifaViewport {
+      width: min(860px, 100%);
+      margin: auto 0;
+    }
+    .tac-pro-native-host .tac-camera-bar {
+      margin-bottom: 6px;
+    }
+    .tac-pro-native-host .tac-pitch-stage {
+      width: min(840px, 100%, calc((100dvh - 255px) * 1.6538));
+      max-width: 100%;
+      max-height: none;
+      margin: 2px auto 0 !important;
+    }
+    .tac-pro-native-host .tac-pitch-stage.is-cinematic {
+      perspective: 1120px;
+      margin-top: 2px !important;
+    }
+    .tac-pro-native-host .tac-pitch-stage.is-cinematic.cam-cinematic .tac-pitch-inner {
+      transform: rotateX(15deg) scale(0.96);
+    }
+    .tac-pro-native-host .tac-pitch-stage.is-cinematic.cam-wide .tac-pitch-inner {
+      transform: rotateX(9deg) scale(0.92);
+    }
+    .tac-pro-native-host .tac-pitch-stage.is-cinematic.cam-top .tac-pitch-inner {
+      transform: none;
+    }
+    .tac-pro-native-host .tac-pitch-svg {
+      aspect-ratio: 860 / 520;
+    }
+    .tac-pro-native-host .tac-pitch-callout {
+      max-width: 245px;
+    }
+    .tac-pro-native-host .tac-fifa-kpis {
+      max-width: 800px;
+      margin: 0 auto 8px;
+    }
+    .tac-pro-native-host .tac-poster-header {
+      max-width: 780px;
+      margin: 0 auto 6px;
+    }
+    .tac-pro-native-host .tac-board-field {
+      width: min(800px, 100%, calc((100dvh - 305px) * 1.6538));
+      max-width: 100%;
+      aspect-ratio: 860 / 520;
+      margin: 0 auto 8px;
+      border-radius: 16px;
+      background-image:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 860 520' preserveAspectRatio='none'%3E%3Cg stroke='%23e5c158' stroke-opacity='0.65' stroke-width='2' fill='none'%3E%3Crect x='34' y='24' width='792' height='472' rx='4'/%3E%3Cline x1='430' y1='24' x2='430' y2='496'/%3E%3Ccircle cx='430' cy='260' r='64'/%3E%3Ccircle cx='430' cy='260' r='3.5' fill='%23fde047' stroke='none'/%3E%3Crect x='34' y='134' width='124' height='252'/%3E%3Crect x='34' y='194' width='48' height='132'/%3E%3Cpath d='M 158 206 A 64 64 0 0 1 158 314'/%3E%3Ccircle cx='120' cy='260' r='2.8' fill='%23fde047' stroke='none'/%3E%3Crect x='702' y='134' width='124' height='252'/%3E%3Crect x='778' y='194' width='48' height='132'/%3E%3Cpath d='M 702 206 A 64 64 0 0 0 702 314'/%3E%3Ccircle cx='740' cy='260' r='2.8' fill='%23fde047' stroke='none'/%3E%3Crect x='14' y='214' width='20' height='92' rx='2' stroke='%23fef9c3' stroke-opacity='0.78'/%3E%3Crect x='826' y='214' width='20' height='92' rx='2' stroke='%23fef9c3' stroke-opacity='0.78'/%3E%3C/g%3E%3C/svg%3E"),
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.045) 0 8.333%, transparent 8.333% 16.666%),
+        radial-gradient(ellipse at 50% 45%, #166534 0%, #0d4522 55%, #051d0f 100%);
+      background-size: 100% 100%, 100% 100%, 100% 100%;
+      border: 1.5px solid rgba(250, 204, 21, 0.52);
+      box-shadow: 0 16px 38px rgba(0, 0, 0, 0.65), inset 0 0 28px rgba(0, 0, 0, 0.38);
+    }
+    .tac-pro-native-host .tac-board-field::before,
+    .tac-pro-native-host .tac-board-field::after {
+      display: none;
+    }
+    .tac-pro-native-host #tacPosterViewport .tac-board-field {
+      width: min(780px, 100%, calc((100dvh - 345px) * 1.6538));
+    }
+    .tac-pro-native-host #btnExportPosterPng {
+      max-width: 420px;
+      margin: 0 auto 4px;
+      display: block;
+    }
+    @media (max-width: 640px) {
+      .tac-pro-native-host {
+        padding: 44px 6px 8px;
+      }
+      .tac-pro-native-host .tac-pitch-stage,
+      .tac-pro-native-host .tac-board-field,
+      .tac-pro-native-host #tacPosterViewport .tac-board-field {
+        width: 100%;
+      }
+      .tac-pro-native-host .mini-fifa-card {
+        width: 48px;
+        padding: 2px 3px 3px;
+      }
+      .tac-pro-native-host .mini-fifa-pic {
+        width: 24px;
+        height: 24px;
+      }
+      .tac-pro-native-host .mini-fifa-name {
+        font-size: 0.5rem;
+      }
+      .tac-pro-native-host .poster-avatar {
+        width: 36px;
+        height: 36px;
+        font-size: 0.68rem;
+      }
+      .tac-pro-native-host .poster-name {
+        font-size: 0.56rem;
+        padding: 1px 5px;
+      }
+    }
+    .tac-pro-pitch-wrap.hidden {
+      display: none !important;
+    }
+    .tac-pro-caption-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: rgba(8, 10, 14, 0.82);
+      border: 1px solid rgba(242, 197, 94, 0.48);
+      backdrop-filter: blur(8px);
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: #f6ead0;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+    }
+    .tac-pro-caption-step {
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #f3c861, #c6891f);
+      color: #140f06;
+      font-size: 0.68rem;
+      font-weight: 900;
+      flex: 0 0 auto;
+    }
+    .tac-pro-caption-txt {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 520px;
+    }
+    .tac-pro-cmp-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(12, 14, 18, 0.92);
+      border: 1.4px solid rgba(244, 200, 96, 0.6);
+      font-size: 0.76rem;
+      color: #fff3d5;
+      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.6);
+    }
+    .tac-pro-cmp-bar.is-mistake {
+      border-color: rgba(239, 68, 68, 0.75);
+    }
+    .tac-pro-cmp-bar.is-correct {
+      border-color: rgba(52, 211, 153, 0.75);
+    }
+    .tac-pro-cmp-actions {
+      display: inline-flex;
+      gap: 5px;
+    }
+    .tac-pro-cmp-pill {
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      background: rgba(255, 255, 255, 0.08);
+      color: #f6eedc;
+      font-family: inherit;
+      font-size: 0.7rem;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .tac-pro-cmp-pill.active {
+      background: #f3c861;
+      color: #140f06;
+      border-color: #ffe298;
+    }
+
+    .tac-pro-pitch-wrap {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: center center;
+      transition: transform 0.18s ease;
+    }
+    .tac-pro-pitch-wrap[data-tool="arrow"],
+    .tac-pro-pitch-wrap[data-tool="path"],
+    .tac-pro-pitch-wrap[data-tool="circle"],
+    .tac-pro-pitch-wrap[data-tool="rect"],
+    .tac-pro-pitch-wrap[data-tool="triangle"],
+    .tac-pro-pitch-wrap[data-tool="zone"],
+    .tac-pro-pitch-wrap[data-tool="cone"],
+    .tac-pro-pitch-wrap[data-tool="flag"],
+    .tac-pro-pitch-wrap[data-tool="ball"] {
+      cursor: crosshair;
+    }
+    .tac-pro-pitch-wrap[data-tool="erase"] {
+      cursor: not-allowed;
+    }
+    .tac-pro-pitch-svg {
+      width: 100%;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      aspect-ratio: 860 / 520;
+      display: block;
+      touch-action: none;
+      filter: drop-shadow(0 16px 32px rgba(0, 0, 0, 0.72));
+    }
+
+    /* RIGHT PANEL: DRAWING TOOLS + ADVANCED + DISPLAY TOGGLES */
+    .tac-pro-right-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(232, 187, 92, 0.22);
+      direction: rtl;
+    }
+    .tac-pro-right-section:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .tac-pro-right-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 0.84rem;
+      font-weight: 900;
+      color: #f4e6c6;
+      padding: 2px 2px 0;
+    }
+    .tac-pro-right-title svg {
+      color: #f3c861;
+    }
+    .tac-pro-tool-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+      direction: ltr;
+    }
+    .tac-pro-tool-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-height: 56px;
+      padding: 6px 3px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: linear-gradient(180deg, rgba(32, 34, 41, 0.92), rgba(16, 18, 23, 0.96));
+      color: #ece4d4;
+      font-family: inherit;
+      font-size: 0.67rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .tac-pro-tool-btn svg {
+      width: 20px;
+      height: 20px;
+      color: #f5eee0;
+    }
+    .tac-pro-tool-btn:hover {
+      border-color: rgba(242, 197, 94, 0.58);
+      transform: translateY(-1px);
+    }
+    .tac-pro-tool-btn.active {
+      background: linear-gradient(180deg, rgba(196, 141, 34, 0.45), rgba(76, 54, 14, 0.88));
+      border: 1.6px solid #f7cf68;
+      color: #fff6de;
+      box-shadow: 0 0 16px rgba(245, 200, 90, 0.34), inset 0 1px 0 rgba(255, 238, 178, 0.35);
+    }
+    .tac-pro-tool-btn.active svg {
+      color: #ffe399;
+    }
+
+    .tac-pro-adv-details {
+      margin-top: 8px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(232, 187, 92, 0.22);
+      direction: rtl;
+    }
+    .tac-pro-adv-summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 800;
+      color: #f2e4c4;
+      padding: 4px 2px 8px;
+    }
+    .tac-pro-adv-summary::-webkit-details-marker {
+      display: none;
+    }
+    .tac-pro-adv-summary .tac-pro-chev {
+      transition: transform 0.2s ease;
+      color: #f3c861;
+    }
+    .tac-pro-adv-details[open] .tac-pro-chev {
+      transform: rotate(180deg);
+    }
+
+    /* Display Options Toggle Switches */
+    .tac-pro-switches {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 2px;
+    }
+    .tac-pro-switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: #f1e6cf;
+      cursor: pointer;
+    }
+    .tac-pro-switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+      flex: 0 0 40px;
+    }
+    .tac-pro-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .tac-pro-slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(232, 187, 92, 0.34);
+      transition: all 0.2s ease;
+    }
+    .tac-pro-slider::before {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 2px;
+      top: 2px;
+      border-radius: 50%;
+      background: #e5dcc8;
+      transition: transform 0.2s ease;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+    }
+    .tac-pro-switch input:checked + .tac-pro-slider {
+      background: linear-gradient(90deg, #b87e1b, #f3c861);
+      border-color: #ffe399;
+      box-shadow: 0 0 12px rgba(243, 200, 97, 0.35);
+    }
+    .tac-pro-switch input:checked + .tac-pro-slider::before {
+      transform: translateX(18px);
+      background: #fff9e8;
+    }
+
+    /* 4) BOTTOM ACTION DOCK */
+    .tac-pro-bottombar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(22, 20, 18, 0.94), rgba(10, 10, 13, 0.98));
+      border: 1.2px solid rgba(232, 187, 92, 0.48);
+      box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 232, 160, 0.16);
+      position: relative;
+      z-index: 25;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .tac-pro-bottombar::-webkit-scrollbar {
+      display: none;
+    }
+    .tac-pro-dock-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 40px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1.3px solid rgba(232, 187, 92, 0.62);
+      background: linear-gradient(180deg, rgba(34, 31, 24, 0.94), rgba(15, 15, 19, 0.98));
+      color: #f5ebd5;
+      font-family: inherit;
+      font-size: 0.8rem;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      transition: all 0.15s ease;
+    }
+    .tac-pro-dock-btn svg {
+      color: #f3c861;
+      flex: 0 0 auto;
+    }
+    .tac-pro-dock-btn:hover {
+      border-color: #ffe08a;
+      box-shadow: 0 0 14px rgba(243, 200, 97, 0.25);
+    }
+    .tac-pro-dock-btn.active {
+      background: linear-gradient(180deg, rgba(212, 154, 42, 0.36), rgba(82, 58, 14, 0.85));
+      border-color: #ffd978;
+      color: #fff6de;
+    }
+    .tac-pro-dock-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 6px;
+      border-radius: 999px;
+      border: 1.2px solid rgba(232, 187, 92, 0.54);
+      background: rgba(16, 17, 21, 0.94);
+      flex: 0 0 auto;
+    }
+    .tac-pro-icon-pill {
+      width: 34px;
+      height: 34px;
+      padding: 0 !important;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #f3d796;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex: 0 0 34px;
+      transition: all 0.15s ease;
+    }
+    .tac-pro-icon-pill svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+    .tac-pro-icon-pill:hover:not(:disabled) {
+      background: rgba(243, 200, 97, 0.16);
+      color: #ffe8a8;
+    }
+    .tac-pro-icon-pill:disabled {
+      opacity: 0.42;
+      cursor: not-allowed;
+    }
+    .tac-pro-zoom-val {
+      min-width: 52px;
+      height: 30px;
+      padding: 0 8px !important;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.06);
+      color: #fff4d8;
+      font-family: inherit;
+      font-size: 0.78rem;
+      font-weight: 800;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tac-pro-share-cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 0 20px;
+      border-radius: 999px;
+      border: 1.4px solid #ffeaad;
+      background: linear-gradient(180deg, #fad675 0%, #e4ab38 52%, #bd8019 100%);
+      color: #151007;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 900;
+      cursor: pointer;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      box-shadow: 0 0 22px rgba(244, 195, 78, 0.45), inset 0 1px 0 rgba(255, 250, 224, 0.75);
+      transition: transform 0.15s ease, box-shadow 0.2s ease;
+    }
+    .tac-pro-share-cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 0 28px rgba(248, 206, 96, 0.65);
+    }
+
+    /* FLOATING POPOVERS (SETTINGS & SAVED PLANS LIBRARY) */
+    .tac-pro-popover {
+      position: fixed;
+      z-index: 980;
+      width: min(310px, calc(100vw - 24px));
+      padding: 12px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(24, 23, 21, 0.98), rgba(11, 12, 15, 0.99));
+      border: 1.4px solid rgba(240, 194, 92, 0.68);
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.78);
+      direction: rtl;
+      text-align: right;
+    }
+    .tac-pro-popover.hidden {
+      display: none;
+    }
+    .tac-pro-pop-settings {
+      top: calc(74px + env(safe-area-inset-top));
+      right: 16px;
+    }
+    .tac-pro-pop-library {
+      bottom: calc(68px + env(safe-area-inset-bottom));
+      left: 16px;
+      width: min(340px, calc(100vw - 24px));
+    }
+    .tac-pro-pop-title {
+      font-size: 0.86rem;
+      font-weight: 900;
+      color: #f4cc6c;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(232, 187, 92, 0.25);
+    }
+    .tac-pro-pop-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(232, 187, 92, 0.25);
+      font-size: 0.84rem;
+      color: #f4cc6c;
+    }
+    .tac-pro-pop-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 0;
+      font-size: 0.8rem;
+      color: #f2e8d2;
+    }
+    .tac-pro-lib-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tac-pro-lib-open {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      padding: 7px 9px;
+      border-radius: 10px;
+      border: 1px solid rgba(232, 187, 92, 0.3);
+      background: rgba(28, 30, 36, 0.9);
+      color: #f7eedb;
+      font-family: inherit;
+      cursor: pointer;
+      text-align: right;
+    }
+    .tac-pro-lib-open strong {
+      font-size: 0.8rem;
+    }
+    .tac-pro-lib-open span {
+      font-size: 0.69rem;
+      color: rgba(234, 218, 184, 0.72);
+    }
+
+    .tac-pro-drawer-backdrop {
+      display: none;
+    }
+
+    /* RESPONSIVE TABLET & MOBILE ERGONOMICS (< 1024px) */
+    @media (max-width: 1023px) {
+      .tac-pro-overlay {
+        padding:
+          max(6px, env(safe-area-inset-top))
+          max(6px, env(safe-area-inset-right))
+          max(6px, env(safe-area-inset-bottom))
+          max(6px, env(safe-area-inset-left));
+        gap: 6px;
+      }
+      .tac-pro-topbar {
+        grid-template-columns: auto 1fr auto;
+        min-height: 50px;
+        padding: 4px 8px;
+        gap: 6px;
+      }
+      .tac-pro-brand-sub,
+      .tac-pro-plaque-sub,
+      .tac-pro-plaque-icon {
+        display: none;
+      }
+      .tac-pro-brand-crest {
+        width: 34px;
+        height: 34px;
+        flex-basis: 34px;
+      }
+      .tac-pro-brand-title {
+        font-size: 0.9rem;
+      }
+      .tac-pro-back-btn {
+        width: 36px;
+        height: 36px;
+        flex-basis: 36px;
+      }
+      .tac-pro-title-plaque {
+        padding: 4px 12px;
+        clip-path: none;
+      }
+      .tac-pro-plaque-h1 {
+        font-size: 0.86rem;
+      }
+      .tac-pro-gold-pill {
+        min-height: 36px;
+        padding: 0 10px;
+        font-size: 0.74rem;
+      }
+      .tac-pro-gear-btn {
+        width: 36px;
+        height: 36px;
+      }
+      .tac-pro-secbar {
+        display: flex;
+        overflow-x: auto;
+        gap: 6px;
+        padding: 5px 6px;
+        scrollbar-width: none;
+      }
+      .tac-pro-secbar::-webkit-scrollbar {
+        display: none;
+      }
+      .tac-pro-sec-tab {
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 0 11px;
+        font-size: 0.76rem;
+      }
+      .tac-pro-mob-triggers {
+        display: inline-flex;
+        gap: 6px;
+        flex: 0 0 auto;
+      }
+      .tac-pro-mob-btn {
+        min-height: 36px;
+        padding: 0 11px;
+        border-radius: 10px;
+        border: 1.3px solid rgba(242, 197, 94, 0.72);
+        background: rgba(34, 28, 16, 0.94);
+        color: #f8da85;
+        font-family: inherit;
+        font-size: 0.75rem;
+        font-weight: 800;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      /* Pitch takes 100% of viewport width; side panels become slide-over drawers */
+      .tac-pro-workspace {
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+      .tac-pro-panel-left,
+      .tac-pro-panel-right {
+        position: fixed;
+        top: calc(108px + env(safe-area-inset-top));
+        bottom: calc(62px + env(safe-area-inset-bottom));
+        width: min(296px, 84vw);
+        z-index: 970;
+        transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .tac-pro-panel-left {
+        left: 6px;
+        transform: translateX(calc(-100% - 20px));
+      }
+      .tac-pro-panel-right {
+        right: 6px;
+        transform: translateX(calc(100% + 20px));
+      }
+      .tac-pro-overlay.drawer-left-open .tac-pro-panel-left {
+        transform: translateX(0);
+      }
+      .tac-pro-overlay.drawer-right-open .tac-pro-panel-right {
+        transform: translateX(0);
+      }
+      .tac-pro-overlay.drawer-left-open .tac-pro-drawer-backdrop,
+      .tac-pro-overlay.drawer-right-open .tac-pro-drawer-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 960;
+        background: rgba(0, 0, 0, 0.56);
+        backdrop-filter: blur(2px);
+      }
+      .tac-pro-bottombar {
+        padding: 5px 6px;
+        gap: 6px;
+      }
+      .tac-pro-dock-btn,
+      .tac-pro-share-cta {
+        min-height: 36px;
+        padding: 0 11px;
+        font-size: 0.74rem;
+      }
+    }
+    @media (max-width: 600px) {
+      .tac-pro-brand-copy,
+      .tac-pro-title-plaque {
+        display: none;
+      }
+      .tac-pro-topbar {
+        grid-template-columns: auto 1fr;
+      }
+      .tac-pro-gold-pill .tac-pro-save-lbl {
+        display: none;
+      }
+      .tac-pro-caption-txt {
+        max-width: 64vw;
+      }
+    }
   </style>
 </head>
 <body>
@@ -4343,6 +5795,11 @@
               <button type="button" id="btnTacOptionsDrawer" class="tac-options-trigger" aria-expanded="false" aria-controls="tacOptionsDrawer">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 <span>خيارات الخطة</span>
+              </button>
+
+              <button type="button" id="btnTacFullscreen" class="tac-fs-trigger" title="فتح استوديو التكتيك بملء الشاشة" aria-label="فتح استوديو التكتيك بملء الشاشة">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                <span>تكبير الاستوديو</span>
               </button>
 
               <select id="tacFormation" class="tac-formation-select" aria-label="اختيار الخطة">
@@ -5876,6 +7333,278 @@
         <button id="btnSharePng" type="button" class="btn-emerald">📤 مشاركة (واتساب)</button>
       </div>
     </div>
+  </div>
+
+  <!-- ==================== TACTICS STUDIO FULL-SCREEN PRO OVERLAY ==================== -->
+  <div id="tacFullscreenOverlay" class="tac-pro-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-label="استوديو الخطط التكتيكية بملء الشاشة" dir="ltr">
+    <!-- 1) Top Royal Bar (Exact visual placement: Left=Back+Brand, Center=Title Plaque, Right=Save+Play+Settings) -->
+    <header class="tac-pro-topbar">
+      <div class="tac-pro-top-left">
+        <button type="button" id="btnTacProBack" class="tac-pro-back-btn" title="العودة للاستوديو العادي (Esc)" aria-label="العودة للاستوديو العادي">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div class="tac-pro-brand">
+          <img src="/assets/midan-crest.webp" alt="شعار ميدان 6v6" class="tac-pro-brand-crest" width="42" height="42" onerror="if(!this.dataset.pngTried){this.dataset.pngTried='1';this.src='/assets/midan-crest.png';return;}this.onerror=null;this.src='data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20128%20128%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FEF08A%22%2F%3E%3Cstop%20offset%3D%2255%25%22%20stop-color%3D%22%23FACC15%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23A16207%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Cpath%20d%3D%22M64%206L114%2022V66C114%2096%2088%20114%2064%20122C40%20114%2014%2096%2014%2066V22L64%206Z%22%20fill%3D%22%23090a0e%22%20stroke%3D%22url(%23g)%22%20stroke-width%3D%225%22%2F%3E%3Cpath%20d%3D%22M36%2052L46%2036L64%2048L82%2036L92%2052L86%2070H42L36%2052Z%22%20fill%3D%22url(%23g)%22%2F%3E%3Ctext%20x%3D%2264%22%20y%3D%2298%22%20text-anchor%3D%22middle%22%20fill%3D%22%23FEF08A%22%20font-family%3D%22sans-serif%22%20font-weight%3D%22900%22%20font-size%3D%2220%22%3E6v6%3C%2Ftext%3E%3C%2Fsvg%3E';" />
+          <div class="tac-pro-brand-copy" dir="rtl">
+            <span class="tac-pro-brand-title">ميدان <bdi dir="ltr">6v6</bdi></span>
+            <span class="tac-pro-brand-sub">معاً .. نلعب بذكاء</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tac-pro-title-plaque">
+        <div class="tac-pro-plaque-icon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <circle cx="8" cy="8" r="1.5"/>
+            <circle cx="16" cy="16" r="1.5"/>
+            <path d="M8 16l8-8"/>
+            <path d="M13 8h3v3"/>
+          </svg>
+        </div>
+        <div class="tac-pro-plaque-text" dir="rtl">
+          <h2 class="tac-pro-plaque-h1">استوديو الخطط التكتيكية</h2>
+          <span class="tac-pro-plaque-sub">خطط . درّب . حقق الفوز</span>
+        </div>
+      </div>
+
+      <div class="tac-pro-top-right">
+        <button type="button" id="btnTacProSave" class="tac-pro-gold-pill" title="حفظ الخطة الحالية في مكتبة الخطط" dir="rtl">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          <span class="tac-pro-save-lbl">حفظ الخطة</span>
+        </button>
+        <button type="button" id="btnTacProPlay" class="tac-pro-gold-pill" title="تشغيل أو إيقاف التحريك التكتيكي" dir="rtl">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+          <span id="tacProPlayLbl">تشغيل الخطة</span>
+        </button>
+        <button type="button" id="btnTacProSettings" class="tac-pro-gear-btn" title="إعدادات الاستوديو" aria-label="إعدادات الاستوديو">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 2) 5 Luxury Section Tabs (Exact visual L->R order: التشكيلات -> خطط اللعب -> الحركات التكتيكية -> المراحل التعليمية -> أدوات الكابتن) -->
+    <nav class="tac-pro-secbar" role="tablist" aria-label="أقسام استوديو التكتيك">
+      <div class="tac-pro-mob-triggers">
+        <button type="button" id="btnTacProMobLeft" class="tac-pro-mob-btn" dir="rtl" style="display:inline-flex;align-items:center;gap:5px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          <span>التشكيلات</span>
+        </button>
+        <button type="button" id="btnTacProMobRight" class="tac-pro-mob-btn" dir="rtl" style="display:inline-flex;align-items:center;gap:5px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span>الأدوات</span>
+        </button>
+      </div>
+      <button type="button" data-pro-section="formations" class="tac-pro-sec-tab active" role="tab" aria-selected="true" dir="rtl">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>التشكيلات</span>
+      </button>
+      <button type="button" data-pro-section="plans" class="tac-pro-sec-tab" role="tab" aria-selected="false" dir="rtl">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>خطط اللعب</span>
+      </button>
+      <button type="button" data-pro-section="moves" class="tac-pro-sec-tab" role="tab" aria-selected="false" dir="rtl">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="14" cy="4.5" r="2"/><path d="M10.5 21l1.5-5.5 3.5-2.5 2 3.5 3 1"/><path d="M6.5 11.5l3.5-2 3.5 1.5-2 4.5-4.5 1"/></svg>
+        <span>الحركات التكتيكية</span>
+      </button>
+      <button type="button" data-pro-section="learn" class="tac-pro-sec-tab" role="tab" aria-selected="false" dir="rtl">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 10L12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/></svg>
+        <span>المراحل التعليمية</span>
+      </button>
+      <button type="button" data-pro-section="captain" class="tac-pro-sec-tab" role="tab" aria-selected="false" dir="rtl">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polygon points="12 8 13.4 10.8 16.5 11.2 14.2 13.4 14.8 16.5 12 15 9.2 16.5 9.8 13.4 7.5 11.2 10.6 10.8 12 8"/></svg>
+        <span>أدوات الكابتن</span>
+      </button>
+    </nav>
+
+    <!-- 3) 3-Column Stadium Workspace -->
+    <div class="tac-pro-workspace">
+      <div id="tacProDrawerBackdrop" class="tac-pro-drawer-backdrop" aria-hidden="true"></div>
+
+      <!-- LEFT PANEL: Formations / Active Section Content -->
+      <aside id="tacProLeftPanel" class="tac-pro-panel tac-pro-panel-left" aria-label="قائمة التشكيلات والأقسام">
+        <div id="tacProLeftBody" class="tac-pro-panel-body"></div>
+      </aside>
+
+      <!-- CENTER STAGE: Dominant Horizontal Stadium Pitch + Original 4 Display Modes -->
+      <main id="tacProStage" class="tac-pro-stage" aria-label="ملعب التكتيك بملء الشاشة" data-pro-view="studio">
+        <div class="tac-pro-view-bar" role="group" aria-label="طريقة عرض الملعب والخطة">
+          <button type="button" data-tac-view="cinematic" class="tac-pro-view-btn" title="المشهد السينمائي — مجسمات ذهبية وفضية متحركة">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5.5" r="2.5"/><path d="M9 11.5l3-1.5 3 1.5"/><path d="M12 10v5.5"/><path d="M9.5 21l2.5-5.5 2.5 5.5"/></svg>
+            <span>سينمائي</span>
+          </button>
+          <button type="button" data-tac-view="studio" class="tac-pro-view-btn active" title="العرض التكتيكي المبسط والملعب الأفقي">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>
+            <span>بسيط</span>
+          </button>
+          <button type="button" data-tac-view="fifa" class="tac-pro-view-btn" title="بطاقات ميدان وخطوط التناغم">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M9 7h6"/><circle cx="12" cy="13" r="2.2"/></svg>
+            <span>بطاقات ميدان</span>
+          </button>
+          <button type="button" data-tac-view="poster" class="tac-pro-view-btn" title="بوستر التشكيلة الرسمية وتصدير PNG">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <span>بوستر</span>
+          </button>
+        </div>
+        <div id="tacProLiveCaption" class="tac-pro-live-caption hidden"></div>
+        <div id="tacProPitchCanvasWrap" class="tac-pro-pitch-wrap" data-tool="pointer">
+          <svg id="tacProPitchSvg" class="tac-pro-pitch-svg" viewBox="0 0 860 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ملعب استوديو الخطط التكتيكية الأفقي"></svg>
+        </div>
+        <div id="tacProNativeHost" class="tac-pro-native-host hidden"></div>
+      </main>
+
+      <!-- RIGHT PANEL: Drawing Tools + Collapsible Advanced Tools + Display Switches -->
+      <aside id="tacProRightPanel" class="tac-pro-panel tac-pro-panel-right" aria-label="أدوات الرسم وخيارات العرض">
+        <div class="tac-pro-right-section">
+          <div class="tac-pro-right-title">
+            <span>أدوات الرسم والتحريك</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </div>
+          <div class="tac-pro-tool-grid" role="group" aria-label="أدوات الرسم والتحريك">
+            <button type="button" data-pro-tool="pointer" class="tac-pro-tool-btn active" aria-pressed="true" title="تحديد وتحريك اللاعبين">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 3l14 9-6.5 1.8L9.8 20 5 3z"/></svg>
+              <span>مؤشر</span>
+            </button>
+            <button type="button" data-pro-tool="move" class="tac-pro-tool-btn" aria-pressed="false" title="سحب حر للاعبين والكرة">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+              <span>تحريك</span>
+            </button>
+            <button type="button" data-pro-tool="arrow" class="tac-pro-tool-btn" aria-pressed="false" title="رسم سهم تمرير مستقيم">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="19" x2="19" y2="5" stroke-dasharray="3 3"/><polyline points="12 5 19 5 19 12"/></svg>
+              <span>سهم</span>
+            </button>
+            <button type="button" data-pro-tool="path" class="tac-pro-tool-btn" aria-pressed="false" title="رسم مسار جري منحنٍ">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19c2-7 8-12 15-12"/><polyline points="15 3 19 7 15 11"/></svg>
+              <span>مسار</span>
+            </button>
+            <button type="button" data-pro-tool="circle" class="tac-pro-tool-btn" aria-pressed="false" title="رسم دائرة ضغط أو تغطية">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>
+              <span>دائرة</span>
+            </button>
+            <button type="button" data-pro-tool="rect" class="tac-pro-tool-btn" aria-pressed="false" title="رسم مستطيل منطقة">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/></svg>
+              <span>مستطيل</span>
+            </button>
+            <button type="button" data-pro-tool="triangle" class="tac-pro-tool-btn" aria-pressed="false" title="رسم مثلث تمرير">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><polygon points="12 4 21 19 3 19"/></svg>
+              <span>مثلث</span>
+            </button>
+            <button type="button" data-pro-tool="erase" class="tac-pro-tool-btn" aria-pressed="false" title="حذف عنصر مرسوم">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              <span>حذف</span>
+            </button>
+          </div>
+        </div>
+
+        <details class="tac-pro-adv-details" open>
+          <summary class="tac-pro-adv-summary">
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+              <span>أدوات متقدمة</span>
+            </span>
+            <svg class="tac-pro-chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+          </summary>
+          <div class="tac-pro-tool-grid" role="group" aria-label="أدوات متقدمة">
+            <button type="button" data-pro-tool="zone" class="tac-pro-tool-btn" aria-pressed="false" title="تظليل منطقة تكتيكية">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" stroke-dasharray="3 2"/><path d="M7 15l4-5 3 3 3-4"/></svg>
+              <span>مناطق</span>
+            </button>
+            <button type="button" data-pro-tool="cone" class="tac-pro-tool-btn" aria-pressed="false" title="وضع مخروط تدريبي">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l6 15H6L12 3z" fill="#f59e0b" stroke="#fde68a"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
+              <span>مخروط</span>
+            </button>
+            <button type="button" data-pro-tool="flag" class="tac-pro-tool-btn" aria-pressed="false" title="وضع راية تكتيكية">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="21" x2="6" y2="4"/><polygon points="6 4 19 8.5 6 13" fill="#ef4444" stroke="#fca5a5"/></svg>
+              <span>راية</span>
+            </button>
+            <button type="button" data-pro-tool="ball" class="tac-pro-tool-btn" aria-pressed="false" title="إضافة كرة تدريب إضافية">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><polygon points="12 8.2 15 10.4 13.8 14 10.2 14 9 10.4" fill="currentColor"/></svg>
+              <span>كرة</span>
+            </button>
+          </div>
+        </details>
+
+        <div class="tac-pro-right-section" style="margin-top:8px;">
+          <div class="tac-pro-right-title">
+            <span>خيارات العرض</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <div class="tac-pro-switches">
+            <label class="tac-pro-switch-row" for="chkProShowNames">
+              <span>إظهار الأسماء</span>
+              <span class="tac-pro-switch">
+                <input type="checkbox" id="chkProShowNames" checked />
+                <span class="tac-pro-slider"></span>
+              </span>
+            </label>
+            <label class="tac-pro-switch-row" for="chkProShowNumbers">
+              <span>إظهار الأرقام</span>
+              <span class="tac-pro-switch">
+                <input type="checkbox" id="chkProShowNumbers" checked />
+                <span class="tac-pro-slider"></span>
+              </span>
+            </label>
+            <label class="tac-pro-switch-row" for="chkProShowLines">
+              <span>خطوط التكتيك</span>
+              <span class="tac-pro-switch">
+                <input type="checkbox" id="chkProShowLines" checked />
+                <span class="tac-pro-slider"></span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 4) Bottom Action Dock (Exact visual L->R order matching reference image) -->
+    <footer class="tac-pro-bottombar">
+      <button type="button" id="btnTacProLibrary" class="tac-pro-dock-btn" dir="rtl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <span>مكتبة الخطط</span>
+      </button>
+
+      <button type="button" id="btnTacProScenarios" class="tac-pro-dock-btn" dir="rtl">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+        <span>سيناريوهات تدريبية</span>
+      </button>
+
+      <div class="tac-pro-dock-group" role="group" aria-label="تراجع وإعادة">
+        <button type="button" id="btnTacProUndo" class="tac-pro-icon-pill" title="تراجع (Undo)" aria-label="تراجع" disabled>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+        </button>
+        <button type="button" id="btnTacProRedo" class="tac-pro-icon-pill" title="إعادة (Redo)" aria-label="إعادة" disabled>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
+        </button>
+      </div>
+
+      <div class="tac-pro-dock-group" role="group" aria-label="تكبير وتصغير الملعب">
+        <button type="button" id="btnTacProZoomOut" class="tac-pro-icon-pill" title="تصغير الملعب" aria-label="تصغير">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+        <button type="button" id="tacProZoomLabel" class="tac-pro-zoom-val" title="إعادة الزووم إلى 100%">100%</button>
+        <button type="button" id="btnTacProZoomIn" class="tac-pro-icon-pill" title="تكبير الملعب" aria-label="تكبير">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+      </div>
+
+      <button type="button" id="btnTacProCompare" class="tac-pro-dock-btn" dir="rtl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>المقارنة</span>
+      </button>
+
+      <button type="button" id="btnTacProVoice" class="tac-pro-dock-btn" dir="rtl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+        <span>الشرح الصوتي</span>
+      </button>
+
+      <button type="button" id="btnTacProShare" class="tac-pro-share-cta" dir="rtl">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        <span>مشاركة الخطة</span>
+      </button>
+    </footer>
+
+    <!-- Floating Popovers -->
+    <div id="tacProSettingsPop" class="tac-pro-popover tac-pro-pop-settings hidden" role="menu"></div>
+    <div id="tacProLibraryPop" class="tac-pro-popover tac-pro-pop-library hidden" role="dialog" aria-label="مكتبة الخطط المحفوظة"></div>
   </div>
 
   <!-- Toast with Undo -->
