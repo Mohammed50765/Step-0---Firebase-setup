@@ -145,6 +145,325 @@ export interface WhatsAppReminderResult {
   waUrl: string;
 }
 
+export interface AttendanceRecordLike {
+  playerId?: string;
+  ownerUid?: string;
+  playerName?: string;
+  date?: string;
+  matchDate?: string;
+  status?: string;
+  updatedAt?: unknown;
+  createdAt?: unknown;
+}
+
+export interface ReadinessRecordLike {
+  playerId?: string;
+  ownerUid?: string;
+  playerName?: string;
+  date?: string;
+  matchDate?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  sleep?: number;
+  fatigue?: number;
+}
+
+export interface MatchScopedAttendanceResult {
+  targetDate: string;
+  confirmedIds: string[];
+  maybeIds: string[];
+  declinedIds: string[];
+  latestStatusByKey: Map<string, string>;
+  getStatusForPlayer: (player: { id?: string; ownerUid?: string; name?: string }) => string | null;
+}
+
+function normalizeYmdDate(raw: unknown): string {
+  const s = String(raw || '').trim();
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return m ? m[1] : '';
+}
+
+function extractRecordMillis(rec: { updatedAt?: unknown; createdAt?: unknown; date?: string; matchDate?: string }): number | null {
+  for (const field of [rec.updatedAt, rec.createdAt]) {
+    if (typeof field === 'number' && Number.isFinite(field) && field > 0) return field;
+    if (field && typeof field === 'object' && 'toMillis' in field && typeof (field as { toMillis?: unknown }).toMillis === 'function') {
+      const ms = (field as { toMillis: () => number }).toMillis();
+      if (Number.isFinite(ms) && ms > 0) return ms;
+    }
+    if (field && typeof field === 'object' && 'seconds' in field && typeof (field as { seconds?: unknown }).seconds === 'number') {
+      return (field as { seconds: number }).seconds * 1000;
+    }
+    if (typeof field === 'string' && field.trim()) {
+      const parsed = Date.parse(field);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  const ymd = normalizeYmdDate(rec.date || rec.matchDate);
+  if (ymd) {
+    const parsed = Date.parse(`${ymd}T12:00:00Z`);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+/**
+ * Strictly scopes attendance records to `targetMatchDate` so records from previous matches
+ * are NEVER counted toward the upcoming match, and resolves each player's latest response
+ * (e.g., if a player changed from 'جاي' to 'معتذر', they are no longer counted as confirmed).
+ */
+export function resolveMatchScopedAttendance(
+  attendance: AttendanceRecordLike[],
+  targetMatchDate: string,
+  players?: Array<{ id?: string; ownerUid?: string; name?: string }>
+): MatchScopedAttendanceResult {
+  const targetDate = normalizeYmdDate(targetMatchDate);
+  const latestStatusByKey = new Map<string, string>();
+  const latestOrderByKey = new Map<string, number>();
+
+  const rows = Array.isArray(attendance) ? attendance : [];
+  rows.forEach((row, idx) => {
+    if (!row) return;
+    const rowDate = normalizeYmdDate(row.matchDate || row.date);
+    if (targetDate) {
+      // Strict match-date binding: ignore records from other dates AND undated legacy rows
+      if (!rowDate || rowDate !== targetDate) return;
+    }
+    const status = String(row.status || '').trim();
+    if (!status) return;
+    const orderVal = extractRecordMillis(row) ?? idx;
+    const keys = [row.playerId, row.ownerUid, row.playerName]
+      .map((k) => String(k || '').trim())
+      .filter(Boolean);
+    for (const key of keys) {
+      const prevOrder = latestOrderByKey.get(key);
+      if (prevOrder === undefined || orderVal >= prevOrder) {
+        latestOrderByKey.set(key, orderVal);
+        latestStatusByKey.set(key, status);
+      }
+    }
+  });
+
+  const getStatusForPlayer = (player: { id?: string; ownerUid?: string; name?: string }): string | null => {
+    for (const k of [player.id, player.ownerUid, player.name]) {
+      const clean = String(k || '').trim();
+      if (clean && latestStatusByKey.has(clean)) {
+        return latestStatusByKey.get(clean) || null;
+      }
+    }
+    return null;
+  };
+
+  const confirmedIds: string[] = [];
+  const maybeIds: string[] = [];
+  const declinedIds: string[] = [];
+
+  if (Array.isArray(players) && players.length > 0) {
+    for (const p of players) {
+      const pid = String(p.id || p.ownerUid || p.name || '').trim();
+      if (!pid) continue;
+      const st = getStatusForPlayer(p);
+      if (st === 'جاي') confirmedIds.push(pid);
+      else if (st === 'محتمل' || st === 'مو أكيد') maybeIds.push(pid);
+      else if (st === 'معتذر' || st === 'ما فيني') declinedIds.push(pid);
+    }
+  } else {
+    const seenPrimary = new Set<string>();
+    for (const row of rows) {
+      if (!row) continue;
+      const rowDate = normalizeYmdDate(row.matchDate || row.date);
+      if (targetDate && (!rowDate || rowDate !== targetDate)) continue;
+      const primaryKey = String(row.playerId || row.ownerUid || row.playerName || '').trim();
+      if (!primaryKey || seenPrimary.has(primaryKey)) continue;
+      seenPrimary.add(primaryKey);
+      const st = latestStatusByKey.get(primaryKey);
+      if (st === 'جاي') confirmedIds.push(primaryKey);
+      else if (st === 'محتمل' || st === 'مو أكيد') maybeIds.push(primaryKey);
+      else if (st === 'معتذر' || st === 'ما فيني') declinedIds.push(primaryKey);
+    }
+  }
+
+  return {
+    targetDate,
+    confirmedIds,
+    maybeIds,
+    declinedIds,
+    latestStatusByKey,
+    getStatusForPlayer,
+  };
+}
+
+/**
+ * Checks whether a player has submitted a readiness check linked to the current/upcoming match
+ * (matching `targetMatchDate` OR submitted within 48 hours prior to the upcoming match),
+ * preventing stale readiness logs from past weeks from falsely clearing the reminder.
+ */
+export function findMatchScopedReadiness(
+  readiness: ReadinessRecordLike[],
+  player: { id?: string; ownerUid?: string; name?: string },
+  targetMatchDate: string,
+  nowMs: number = Date.now()
+): ReadinessRecordLike | null {
+  const targetDate = normalizeYmdDate(targetMatchDate);
+  const pid = String(player.id || '').trim();
+  const ouid = String(player.ownerUid || '').trim();
+  const pname = String(player.name || '').trim();
+  const rows = Array.isArray(readiness) ? readiness : [];
+
+  const targetMs = targetDate ? Date.parse(`${targetDate}T23:59:59Z`) : null;
+  const maxWindowBeforeMatchMs = 72 * 3600 * 1000; // within 3 days leading up to upcoming match
+  const maxFreshMs = 48 * 3600 * 1000; // within last 48h when no match date is set
+
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (!r) continue;
+    const belongs =
+      (pid && String(r.playerId || '') === pid) ||
+      (ouid && String(r.ownerUid || '') === ouid) ||
+      (pname && String(r.playerName || '') === pname);
+    if (!belongs) continue;
+
+    const rMatchDate = normalizeYmdDate(r.matchDate);
+    const rDate = normalizeYmdDate(r.date);
+
+    // 1. Explicit matchDate tag match / mismatch
+    if (targetDate && rMatchDate) {
+      if (rMatchDate === targetDate) return r;
+      continue;
+    }
+
+    // 2. Same calendar date as upcoming match
+    if (targetDate && rDate && rDate === targetDate) {
+      return r;
+    }
+
+    // 3. Timestamp/date freshness check scoped to upcoming match window (never old weeks!)
+    const recMs = extractRecordMillis(r);
+    if (recMs === null) continue;
+
+    if (targetMs !== null) {
+      const diffToMatch = targetMs - recMs;
+      // Submitted up to 72h before upcoming match (and not from after the match or prior week)
+      if (diffToMatch >= 0 && diffToMatch <= maxWindowBeforeMatchMs) {
+        return r;
+      }
+      continue;
+    }
+
+    if (Math.abs(nowMs - recMs) <= maxFreshMs) {
+      return r;
+    }
+  }
+  return null;
+}
+
+export interface NextActionRecommendation {
+  key: 'pending_joins' | 'attend' | 'readiness' | 'report' | 'profile' | 'tactics';
+  tag: string;
+  title: string;
+  desc: string;
+  btnText: string;
+  targetTab: 'team' | 'ready' | 'live' | 'fifa' | 'tactics';
+  scrollTargetId?: string;
+}
+
+/**
+ * Single authoritative "What do I need to do now?" engine shared by Home Command Center
+ * (#tab-team) and Profile (#tab-fifa), strictly bound to the upcoming match date.
+ */
+export function computeNextActionState(input: {
+  user: { id?: string; ownerUid?: string; name?: string; photoData?: string; photo?: string; seasonGoal?: string };
+  isCaptain: boolean;
+  pendingPlayersCount: number;
+  targetMatchDate: string;
+  attendance: AttendanceRecordLike[];
+  readiness: ReadinessRecordLike[];
+  reportsCountForUser: number;
+  nowMs?: number;
+}): NextActionRecommendation {
+  const scopedAtt = resolveMatchScopedAttendance(input.attendance, input.targetMatchDate);
+  const myAttendStatus = scopedAtt.getStatusForPlayer(input.user);
+  const myReadiness = findMatchScopedReadiness(
+    input.readiness,
+    input.user,
+    input.targetMatchDate,
+    input.nowMs
+  );
+  const hasPhotoOrGoal = Boolean(
+    (input.user.photoData && input.user.photoData.length > 20) ||
+      (input.user.photo && input.user.photo.length > 20) ||
+      (input.user.seasonGoal && input.user.seasonGoal.trim().length > 2)
+  );
+
+  if (input.isCaptain && input.pendingPlayersCount > 0) {
+    return {
+      key: 'pending_joins',
+      tag: 'إجراء الكابتن • مطلوب الآن',
+      title: `راجع ${input.pendingPlayersCount} طلب انضمام معلّق`,
+      desc: 'أصدقاؤك ينتظرون موافقتك للانضمام لقائمة الفريق والمباراة القادمة.',
+      btnText: '🤝 مراجعة الطلبات',
+      targetTab: 'team',
+      scrollTargetId: 'teamPendingRequestsBox',
+    };
+  }
+
+  if (!myAttendStatus) {
+    return {
+      key: 'attend',
+      tag: 'الأولوية 1 • قبل المباراة',
+      title: 'أكّد حضورك للمباراة القادمة',
+      desc: input.targetMatchDate
+        ? `مباراة ${input.targetMatchDate} بانتظار ردّك (جاي / محتمل / معتذر) لاكتمال التشكيلة والقطّة.`
+        : 'حدّد موقفك بلمسة واحدة لتكتمل تشكيلة السداسي.',
+      btnText: '✅ تأكيد الحضور',
+      targetTab: 'team',
+      scrollTargetId: 'teamQuickAttendRow',
+    };
+  }
+
+  if (!myReadiness) {
+    return {
+      key: 'readiness',
+      tag: 'الأولوية 2 • 30 ثانية',
+      title: 'سجّل جاهزيتك البدنية للمباراة القادمة',
+      desc: 'أدخل مؤشر النوم والراحة العضلية لمساعدة الكابتن في تقسيمة متوازنة وآمنة.',
+      btnText: '🚦 سجّل جاهزيتك',
+      targetTab: 'ready',
+    };
+  }
+
+  if (input.reportsCountForUser === 0) {
+    return {
+      key: 'report',
+      tag: 'الأولوية 3 • تطوير البطاقة',
+      title: 'وثّق أداءك في آخر مباراة',
+      desc: 'سجّل أهدافك وتمريراتك في تقرير الدقيقتين لرفع تقييمك وXP.',
+      btnText: '⚽ افتح تقرير المباراة',
+      targetTab: 'live',
+    };
+  }
+
+  if (!hasPhotoOrGoal) {
+    return {
+      key: 'profile',
+      tag: 'الأولوية 4 • لمستك الملكية',
+      title: 'أكمل بطاقتك الملكية (صورة أو هدف الموسم)',
+      desc: 'ادمج صورتك داخل درع ميدان الذهبي أو اكتب هدفك الشخصي للموسم.',
+      btnText: '🛡️ تخصيص بطاقتي',
+      targetTab: 'fifa',
+      scrollTargetId: 'pfGoal',
+    };
+  }
+
+  return {
+    key: 'tactics',
+    tag: 'جاهز 100% للميدان',
+    title: 'كل أمورك جاهزة! راجع خطة الفريق',
+    desc: `حالتك للمباراة القادمة: (${myAttendStatus}) • استعرض تمركزك في تكتيك 6 ضد 6 قبل الصافرة.`,
+    btnText: '📋 استعراض التكتيك',
+    targetTab: 'tactics',
+  };
+}
+
 export function buildWhatsAppReminder(input: {
   teamName: string;
   matchTitle: string;
@@ -152,17 +471,11 @@ export function buildWhatsAppReminder(input: {
   matchTime: string;
   venue: string;
   players: Array<{ id: string; name: string; availableStatus?: string }>;
-  attendance: Array<{ playerId?: string; playerName?: string; date?: string; status?: string }>;
+  attendance: Array<{ playerId?: string; ownerUid?: string; playerName?: string; date?: string; matchDate?: string; status?: string }>;
 }): WhatsAppReminderResult {
   const targetDate = String(input.matchDate || '').trim();
-  // Match attendance rows for targetDate (or latest entries if date is unset)
-  const latestByPlayer = new Map<string, string>();
-  for (const row of input.attendance || []) {
-    if (targetDate && row.date && row.date !== targetDate) continue;
-    const key = String(row.playerId || row.playerName || '').trim();
-    if (!key) continue;
-    latestByPlayer.set(key, String(row.status || ''));
-  }
+  const scoped = resolveMatchScopedAttendance(input.attendance || [], targetDate, input.players);
+  const latestByPlayer = scoped.latestStatusByKey;
 
   const confirmedNames: string[] = [];
   const declinedNames: string[] = [];
@@ -549,22 +862,10 @@ class MaydanPreMatchHubUI {
 
   private getConfirmedPlayerIds(matchDate: string): string[] {
     const st = (this.hooks?.getState() || {}) as Record<string, unknown>;
-    const players = (st.players || []) as Array<Record<string, unknown>>;
-    const attendance = (st.attendance || []) as Array<Record<string, unknown>>;
-    const statusByKey = new Map<string, string>();
-    for (const row of attendance) {
-      if (matchDate && row.date && String(row.date) !== matchDate) continue;
-      const k = String(row.playerId || row.playerName || '');
-      if (k) statusByKey.set(k, String(row.status || ''));
-    }
-    const ids: string[] = [];
-    for (const p of players) {
-      const pid = String(p.id || '');
-      const pname = String(p.name || '');
-      const status = statusByKey.get(pid) || statusByKey.get(pname) || '';
-      if (status === 'جاي') ids.push(pid);
-    }
-    return ids;
+    const players = (st.players || []) as Array<{ id?: string; ownerUid?: string; name?: string }>;
+    const attendance = (st.attendance || []) as AttendanceRecordLike[];
+    const scoped = resolveMatchScopedAttendance(attendance, matchDate, players);
+    return scoped.confirmedIds;
   }
 
   private computeCurrentReminder(): WhatsAppReminderResult {
@@ -930,14 +1231,12 @@ class MaydanPreMatchHubUI {
     const isCaptain = Boolean(this.hooks?.isCaptain());
     const pendingPlayers = (st.pendingPlayers || []) as Array<unknown>;
     const session = this.getSessionOrDefault();
-    const attendance = (st.attendance || []) as Array<Record<string, unknown>>;
+    const attendance = (st.attendance || []) as AttendanceRecordLike[];
     const uid = String(user?.id || '');
+    const ouid = String(user?.ownerUid || uid);
     const uname = String(user?.name || '');
-    const hasReplied = attendance.some(
-      (a) =>
-        (!session.matchDate || !a.date || String(a.date) === session.matchDate) &&
-        (String(a.playerId || '') === uid || String(a.playerName || '') === uname)
-    );
+    const scopedAtt = resolveMatchScopedAttendance(attendance, session.matchDate);
+    const hasReplied = Boolean(scopedAtt.getStatusForPlayer({ id: uid, ownerUid: ouid, name: uname }));
     const prog = user && this.hooks ? this.hooks.getUserProgress(user) : { xp: 0, lvl: 1 };
 
     return buildNotifications({
@@ -1010,6 +1309,9 @@ declare global {
       buildWhatsAppReminder: typeof buildWhatsAppReminder;
       generateMatchIcs: typeof generateMatchIcs;
       buildNotifications: typeof buildNotifications;
+      resolveMatchScopedAttendance: typeof resolveMatchScopedAttendance;
+      findMatchScopedReadiness: typeof findMatchScopedReadiness;
+      computeNextActionState: typeof computeNextActionState;
     };
   }
 }
@@ -1022,5 +1324,8 @@ if (typeof window !== 'undefined') {
     buildWhatsAppReminder,
     generateMatchIcs,
     buildNotifications,
+    resolveMatchScopedAttendance,
+    findMatchScopedReadiness,
+    computeNextActionState,
   };
 }

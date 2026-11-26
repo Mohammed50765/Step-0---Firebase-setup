@@ -1,0 +1,30 @@
+# Dependencies & build outputs
+node_modules/
+dist/
+coverage/
+
+# Logs & Firebase Emulator artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firestore-debug.log*
+ui-debug.log*
+firebase-debug.log*
+database-debug.log*
+pubsub-debug.log*
+.firebase/
+firebase-export-*/
+
+# Environment secrets (keep .env.example tracked)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Local tooling, browser verification & OS files
+.playwright-cli/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

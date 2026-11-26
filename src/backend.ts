@@ -29,23 +29,36 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import {
+  applyAuthPersistencePreference,
   auth,
   authPersistenceReady,
   db,
   deleteUser,
   diagnoseConnection,
+  disableTrustedDeviceCacheSafely,
   getAppCheckStatus,
+  getAuthPersistenceMode,
   getLocalCacheMode,
   getRedirectResult,
   googleProvider,
   handleFirestoreError,
+  isTrustedDeviceAuthEnabled,
   isTrustedDeviceCacheEnabled,
   OperationType,
   setTrustedDeviceCachePreference,
   signInWithRedirect,
   testConnection,
 } from './firebase';
-import { scrubAllAccountLocalCaches } from './localCachePrivacy';
+import {
+  classifyAccountCleanupError,
+  purgePersistentTeamSnapshots,
+  resolveSnapshotCacheTarget,
+  scrubAllAccountLocalCaches,
+  shouldAllowAuthAccountDeletion,
+  type AccountCleanupFailure,
+  type AppCheckStatus,
+  type AuthPersistenceMode,
+} from './localCachePrivacy';
 import './teamMultiplayer';
 import {
   applyReportConfirmation,
@@ -329,15 +342,44 @@ class MaydanBackendService {
     return getLocalCacheMode();
   }
 
+  getAuthPersistenceMode(): AuthPersistenceMode {
+    return getAuthPersistenceMode();
+  }
+
+  isTrustedDeviceAuthEnabled(): boolean {
+    return isTrustedDeviceAuthEnabled();
+  }
+
+  async applyAuthPersistencePreference(
+    rememberOnTrustedDevice: boolean
+  ): Promise<{ enabled: boolean; mode: AuthPersistenceMode }> {
+    return applyAuthPersistencePreference(rememberOnTrustedDevice);
+  }
+
   isTrustedDeviceCacheEnabled(): boolean {
     return isTrustedDeviceCacheEnabled();
   }
 
   setTrustedDeviceCachePreference(enabled: boolean): { enabled: boolean; requiresReload: boolean } {
+    if (!enabled) {
+      purgePersistentTeamSnapshots();
+    }
     return setTrustedDeviceCachePreference(enabled);
   }
 
-  getAppCheckStatus(): { configured: boolean; active: boolean; mode: 'recaptcha-v3' | 'not-configured' } {
+  async disableTrustedDeviceCacheSafely(): Promise<{
+    enabled: false;
+    indexedDbAttempted: boolean;
+    indexedDbCleared: boolean;
+    requiresReload: boolean;
+    errorCode?: string;
+    messageAr: string;
+  }> {
+    this.stopListeners();
+    return disableTrustedDeviceCacheSafely();
+  }
+
+  getAppCheckStatus(): AppCheckStatus {
     return getAppCheckStatus();
   }
 
@@ -405,7 +447,23 @@ class MaydanBackendService {
 
   private saveTeamSnapshotCache(state: BackendState): void {
     try {
-      if (typeof localStorage === 'undefined' || !this.activeUid) return;
+      if (!this.activeUid) return;
+      const target = resolveSnapshotCacheTarget();
+      const store =
+        target === 'local'
+          ? typeof localStorage !== 'undefined'
+            ? localStorage
+            : null
+          : typeof sessionStorage !== 'undefined'
+            ? sessionStorage
+            : null;
+
+      // In shared-device safe mode ('session'), actively ensure zero team snapshots linger in localStorage.
+      if (target === 'session') {
+        purgePersistentTeamSnapshots();
+      }
+      if (!store) return;
+
       const leanPlayers = (state.players || []).map((p) => {
         const copy = { ...p };
         delete copy.photo;
@@ -414,7 +472,7 @@ class MaydanBackendService {
       const safeSettings = { ...(state.settings || {}) };
       delete safeSettings.inviteCode;
       const key = this.getSnapshotCacheKey(this.activeUid, this.activeTeamId);
-      localStorage.setItem(
+      store.setItem(
         key,
         JSON.stringify({
           ownerUid: this.activeUid,
@@ -439,15 +497,27 @@ class MaydanBackendService {
     cachedAt?: number;
   } | null {
     try {
-      if (typeof localStorage === 'undefined') return null;
+      const target = resolveSnapshotCacheTarget();
+      if (target === 'session') {
+        purgePersistentTeamSnapshots();
+      }
+      const store =
+        target === 'local'
+          ? typeof localStorage !== 'undefined'
+            ? localStorage
+            : null
+          : typeof sessionStorage !== 'undefined'
+            ? sessionStorage
+            : null;
+      if (!store) return null;
       const uid = expectedUid || this.activeUid || '';
       const tid = teamId || this.activeTeamId || TEAM_ID;
       const key = this.getSnapshotCacheKey(uid, tid);
-      const raw = localStorage.getItem(key);
+      const raw = store.getItem(key);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (expectedUid && parsed?.ownerUid !== expectedUid) {
-        localStorage.removeItem(key);
+        store.removeItem(key);
         return null;
       }
       return parsed;
@@ -5005,19 +5075,47 @@ class MaydanBackendService {
     return deletedCount;
   }
 
+  private async deleteDocIfExistsStrict(
+    ref: ReturnType<typeof doc>,
+    step: string,
+    path: string,
+    failures: AccountCleanupFailure[]
+  ): Promise<boolean> {
+    try {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return false;
+      await deleteDoc(ref);
+      return true;
+    } catch (err: unknown) {
+      const classified = classifyAccountCleanupError(err);
+      if (classified.ignorableForOptionalDoc) return false;
+      failures.push({
+        step,
+        path,
+        kind: classified.kind,
+        code: classified.code,
+        message: classified.message,
+      });
+      return false;
+    }
+  }
+
   /**
-   * Real Account & Personal Data Deletion:
+   * Real Account & Personal Data Deletion (Strict Verification):
    * - Guards founders of active multi-member teams (must transfer leadership or delete team first).
-   * - Deletes all user-owned Multi-Team private records, leaves non-founder teams atomically,
-   *   deletes Legacy personal docs if non-captain, removes /users/{uid}, scrubs local caches,
-   *   and deletes the Firebase Auth account (gracefully guiding re-auth on auth/requires-recent-login).
+   * - Distinguishes missing optional documents (`not-found`) from real permission/network failures.
+   * - NEVER ignores real cleanup failures and NEVER deletes Firebase Auth until all required
+   *   Firestore cleanup steps succeed. Returns an accurate partial-failure report with safe retry.
    */
   async deleteMyAccountAndData(): Promise<{
     firestoreCleaned: boolean;
+    partialFailure: boolean;
+    canRetryCleanup: boolean;
     authDeleted: boolean;
     requiresRecentLogin: boolean;
     teamsLeft: number;
     privateRecordsDeleted: number;
+    failedSteps: AccountCleanupFailure[];
     messageAr: string;
   }> {
     const fbUser = auth.currentUser;
@@ -5038,16 +5136,34 @@ class MaydanBackendService {
 
     let teamsLeft = 0;
     let privateRecordsDeleted = 0;
+    const failedSteps: AccountCleanupFailure[] = [];
+
+    const recordError = (step: string, path: string, err: unknown, ignorableIfMissing = false) => {
+      const classified = classifyAccountCleanupError(err);
+      if (ignorableIfMissing && classified.ignorableForOptionalDoc) return;
+      failedSteps.push({
+        step,
+        path,
+        kind: classified.kind,
+        code: classified.code,
+        message: classified.message,
+      });
+    };
 
     // 2. Soft-delete any solo-owned teams (memberCount <= 1) and clean own private records
     for (const soloTeam of ownedActive) {
+      const tid = soloTeam.id;
       try {
-        privateRecordsDeleted += await this.deleteMyPrivateTeamData(soloTeam.id);
-      } catch {
-        // Ignore if no private records exist
+        privateRecordsDeleted += await this.deleteMyPrivateTeamData(tid);
+      } catch (err: unknown) {
+        recordError('delete_solo_team_private', `teams/${tid}/members/${uid}/private`, err, true);
       }
-      await this.softDeleteMultiTeam(soloTeam.id);
-      teamsLeft++;
+      try {
+        await this.softDeleteMultiTeam(tid);
+        teamsLeft++;
+      } catch (err: unknown) {
+        recordError('soft_delete_solo_team', `teams/${tid}`, err, false);
+      }
     }
 
     // 3. Leave all non-founder Multi-Teams & delete own private docs / joinRequests / votes
@@ -5064,89 +5180,136 @@ class MaydanBackendService {
           });
           await b.commit();
         }
-      } catch {
-        // Continue cleanup even if private subcollection is empty
+      } catch (err: unknown) {
+        recordError('delete_team_private', `teams/${tid}/members/${uid}/private`, err, true);
       }
 
-      try {
-        await deleteDoc(doc(db, 'teams', tid, 'lineupVotes', uid));
-      } catch {
-        // Optional doc may not exist
-      }
+      await this.deleteDocIfExistsStrict(
+        doc(db, 'teams', tid, 'lineupVotes', uid),
+        'delete_team_lineup_vote',
+        `teams/${tid}/lineupVotes/${uid}`,
+        failedSteps
+      );
+
+      await this.deleteDocIfExistsStrict(
+        doc(db, 'teams', tid, 'joinRequests', uid),
+        'delete_team_join_request',
+        `teams/${tid}/joinRequests/${uid}`,
+        failedSteps
+      );
 
       try {
-        await deleteDoc(doc(db, 'teams', tid, 'joinRequests', uid));
-      } catch {
-        // Optional doc may not exist
-      }
-
-      try {
-        const leaveBatch = writeBatch(db);
-        leaveBatch.delete(doc(db, 'teams', tid, 'members', uid));
-        leaveBatch.update(doc(db, 'teams', tid), {
-          memberCount: increment(-1),
-          organizerUids: arrayRemove(uid),
-          updatedAt: serverTimestamp(),
-        });
-        await leaveBatch.commit();
-        teamsLeft++;
-      } catch {
-        // Team may already be deleted or user already removed
+        const memberRef = doc(db, 'teams', tid, 'members', uid);
+        const memberSnap = await getDoc(memberRef);
+        if (memberSnap.exists()) {
+          const leaveBatch = writeBatch(db);
+          leaveBatch.delete(memberRef);
+          leaveBatch.update(doc(db, 'teams', tid), {
+            memberCount: increment(-1),
+            organizerUids: arrayRemove(uid),
+            updatedAt: serverTimestamp(),
+          });
+          await leaveBatch.commit();
+          teamsLeft++;
+        }
+      } catch (err: unknown) {
+        recordError('leave_team_member', `teams/${tid}/members/${uid}`, err, true);
       }
     }
 
-    // 4. Clean legacy single-team personal records (if user is a non-captain legacy player)
+    // 4. Clean legacy single-team personal records (only if user has a legacy player doc or joinRequest)
     if (!this.isPlatformOwner) {
-      const legacyOwnerCollections = ['readiness', 'injuries'] as const;
-      for (const colName of legacyOwnerCollections) {
-        try {
-          const snap = await getDocs(query(collection(db, colName), where('ownerUid', '==', uid)));
-          for (const chunk of chunkItemsForBatch(snap.docs, 400)) {
-            const b = writeBatch(db);
-            chunk.forEach((d) => {
-              b.delete(d.ref);
-              privateRecordsDeleted++;
-            });
-            await b.commit();
+      let hasLegacyPlayer = false;
+      try {
+        const legacyPlayerSnap = await getDoc(doc(db, 'players', uid));
+        hasLegacyPlayer = legacyPlayerSnap.exists();
+      } catch (err: unknown) {
+        const classified = classifyAccountCleanupError(err);
+        // Non-legacy Multi-Team users are expected to get permission-denied on legacy /players/{uid};
+        // only treat network errors as real cleanup failures here.
+        if (classified.kind === 'network') {
+          recordError('check_legacy_player', `players/${uid}`, err, false);
+        }
+      }
+
+      if (hasLegacyPlayer) {
+        const legacyOwnerCollections = ['readiness', 'injuries'] as const;
+        for (const colName of legacyOwnerCollections) {
+          try {
+            const snap = await getDocs(query(collection(db, colName), where('ownerUid', '==', uid)));
+            for (const chunk of chunkItemsForBatch(snap.docs, 400)) {
+              const b = writeBatch(db);
+              chunk.forEach((d) => {
+                b.delete(d.ref);
+                privateRecordsDeleted++;
+              });
+              await b.commit();
+            }
+          } catch (err: unknown) {
+            recordError(`delete_legacy_${colName}`, `${colName}?ownerUid=${uid}`, err, true);
           }
-        } catch {
-          // Non-legacy user or empty collection
         }
-      }
-      for (const pathParts of [
-        ['playerPhotos', uid],
-        ['lineupVotes', uid],
-        ['joinRequests', uid],
-        ['players', uid],
-      ] as const) {
-        try {
-          await deleteDoc(doc(db, pathParts[0], pathParts[1]));
-        } catch {
-          // Optional legacy doc may not exist
+        for (const [colName, docId] of [
+          ['playerPhotos', uid],
+          ['lineupVotes', uid],
+          ['joinRequests', uid],
+          ['players', uid],
+        ] as const) {
+          await this.deleteDocIfExistsStrict(
+            doc(db, colName, docId),
+            `delete_legacy_${colName}`,
+            `${colName}/${docId}`,
+            failedSteps
+          );
         }
       }
     }
 
-    // 5. Delete /users/{uid} registry doc (strictly self-only in firestore.rules)
-    try {
-      await deleteDoc(doc(db, 'users', uid));
-    } catch {
-      // May not exist for legacy-only accounts
+    // 5. Delete /users/{uid} registry doc ONLY if earlier team/private steps succeeded
+    if (shouldAllowAuthAccountDeletion(failedSteps)) {
+      await this.deleteDocIfExistsStrict(
+        doc(db, 'users', uid),
+        'delete_user_registry',
+        `users/${uid}`,
+        failedSteps
+      );
     }
 
-    // 6. Stop listeners & scrub all local caches
+    // 6. Strict gate: NEVER delete Firebase Auth account if any real Firestore cleanup failed
+    if (!shouldAllowAuthAccountDeletion(failedSteps)) {
+      const summary = failedSteps
+        .slice(0, 3)
+        .map((f) => `${f.path} (${f.code})`)
+        .join('، ');
+      return {
+        firestoreCleaned: false,
+        partialFailure: true,
+        canRetryCleanup: true,
+        authDeleted: false,
+        requiresRecentLogin: false,
+        teamsLeft,
+        privateRecordsDeleted,
+        failedSteps,
+        messageAr: `تعذّر إتمام تنظيف بعض البيانات السحابية (${failedSteps.length} خطوات: ${summary})، لذلك تم إيقاف حذف حساب الدخول حفاظاً على إمكانية استكمال التنظيف. تحقّق من الاتصال وأعد المحاولة بأمان.`,
+      };
+    }
+
+    // 7. Stop listeners & scrub all local caches only after verified cloud cleanup
     this.clearSessionData();
 
-    // 7. Delete Firebase Authentication account
+    // 8. Delete Firebase Authentication account
     try {
       await deleteUser(fbUser);
       return {
         firestoreCleaned: true,
+        partialFailure: false,
+        canRetryCleanup: false,
         authDeleted: true,
         requiresRecentLogin: false,
         teamsLeft,
         privateRecordsDeleted,
-        messageAr: 'تم حذف حسابك وجميع بياناتك الشخصية وسجلاتك الخاصة بنجاح.',
+        failedSteps: [],
+        messageAr: 'تم التحقق من حذف بياناتك السحابية وسجلاتك الخاصة وحساب الدخول نهائياً ✓',
       };
     } catch (err: unknown) {
       const code =
@@ -5157,15 +5320,37 @@ class MaydanBackendService {
         await signOut(auth).catch(() => {});
         return {
           firestoreCleaned: true,
+          partialFailure: false,
+          canRetryCleanup: false,
           authDeleted: false,
           requiresRecentLogin: true,
           teamsLeft,
           privateRecordsDeleted,
+          failedSteps: [],
           messageAr:
             'تم حذف بياناتك وسجلاتك الخاصة من قاعدة البيانات بنجاح. لإكمال إزالة حساب الدخول نهائياً، سجّل الدخول مجدداً ثم اضغط «حذف الحساب» مرة أخيرة (متطلب أمني من Google/Firebase).',
         };
       }
-      throw new Error('تم تنظيف بياناتك من قاعدة البيانات، لكن تعذّر حذف حساب المصادقة حالياً. أعد تسجيل الدخول وحاول مجدداً.');
+      return {
+        firestoreCleaned: true,
+        partialFailure: true,
+        canRetryCleanup: true,
+        authDeleted: false,
+        requiresRecentLogin: false,
+        teamsLeft,
+        privateRecordsDeleted,
+        failedSteps: [
+          {
+            step: 'delete_firebase_auth',
+            path: `auth/${uid}`,
+            kind: classifyAccountCleanupError(err).kind,
+            code: code || 'auth-delete-failed',
+            message: err instanceof Error ? err.message : String(err),
+          },
+        ],
+        messageAr:
+          'تم تنظيف بياناتك من قاعدة البيانات، لكن تعذّر حذف حساب المصادقة حالياً. أعد تسجيل الدخول وحاول مجدداً لإكمال الإزالة.',
+      };
     }
   }
 

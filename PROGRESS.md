@@ -198,3 +198,31 @@
 - [x] **تحسين الأصول والـ PWA وCI:** ضغط الشعار من `3.0 MB` إلى `69 KB` WebP (`97.7%` توفير)، وتحديث `public/sw.js` (`maydan-static-v3`) و`firebase.json` (Hosting)، وإضافة `/.github/workflows/ci.yml` الصارم والتحقق من تطابق `bun.lock`.
 - [x] **التحقق الشامل:** `npm run typecheck` (0 أخطاء)، `npm run lint` (0 أخطاء)، `npm test` (**110/110**)، محاكي القواعد (**41/41**)، `npm run build` (ناجح)، واختبار Chromium E2E على المقاسات `360/390/412/1440` (`0` أخطاء، `0px` طفح، `0` ظهور لـ FIFA/فيفا، `0` مفاتيح متبقية بعد الخروج).
 - **الحالة النهائية:** **`READY FOR CLOSED BETA`** — لم يتم نشر القواعد أو الاستضافة تلقائياً؛ راجع قائمة خطوات Firebase Console اليدوية في `RELEASE_READINESS_REPORT.md`.
+
+---
+
+# سجل التقدم — المرحلة النهائية للتطوير والاستقرار (FINAL DEVELOPMENT PHASE — MIDAN 6v6)
+
+تاريخ التنفيذ: 2026-11-26
+
+- [x] **الإصلاحات الأمنية والتقنية المعروفة (3A–3G):**
+  - **3A (`deleteMyAccountAndData` في `src/backend.ts` و`src/localCachePrivacy.ts`):** التمييز الصارم بين `not-found` وأخطاء الصلاحيات/الشبكة عبر `deleteDocIfExistsStrict()` و`classifyAccountCleanupError()`؛ منع حذف Firebase Auth عند فشل أي خطوة تنظيف لازمة في Firestore؛ وإرجاع تقرير فشل جزئي مع زر إعادة المحاولة الآمنة في `#teamSettingsModal`.
+  - **3B (استمرارية الجلسة للأجهزة المشتركة في `src/firebase.ts` و`src/backend.ts` و`index.html`):** اعتماد `browserSessionPersistence` افتراضياً؛ إتاحة خيار صريح `#chkRememberDevice` في شاشة الدخول ومفتاح `#btnToggleAuthPersist` في إعدادات الفريق لتفعيل `browserLocalPersistence` للأجهزة الشخصية فقط.
+  - **3C (الكاش المحلي للقطات الفريق في `src/backend.ts` و`src/localCachePrivacy.ts`):** توجيه `saveTeamSnapshotCache()` و`loadTeamSnapshotCache()` إلى `sessionStorage` افتراضياً مع مسح `maydan_team_cache_v1*` من `localStorage` (`purgePersistentTeamSnapshots`)، وحصر الكتابة في `localStorage` عند تفعيل وضع الجهاز الموثوق فقط مع الحفاظ على تفضيلات الواجهة غير الحساسة.
+  - **3D (الانتقال الآمن من التخزين الدائم إلى الذاكرة المؤقتة في `src/firebase.ts` و`src/backend.ts`):** تنفيذ `disableTrustedDeviceCacheSafely()` بإيقاف المستمعين ثم `terminate(db)` ثم `clearIndexedDbPersistence(db)`، والإبلاغ الصريح والصادق عند تعذّر مسح IndexedDB (`#tsCacheStatusNote`).
+  - **3E (تنظيف المستودع):** حذف `/firestore-debug.log` وإضافة `/.gitignore` مع الحفاظ على `backups/` و`bun.lock`.
+  - **3F (حالة App Check الدقيقة في `src/firebase.ts`):** دورة حياة رباعية (`'unconfigured' | 'initializing' | 'active' | 'failed'`) ترفض القيم الوهمية عبر `isValidRecaptchaSiteKey()` ولا تُبلغ عن `active` إلا بعد نجاح `initializeAppCheck()`؛ مع بقاء `VITE_RECAPTCHA_SITE_KEY` اختيارياً بالكامل.
+  - **3G (حصر الحضور والجاهزية بتاريخ المباراة القادمة في `src/preMatchHub.ts` و`src/preMatchHub.test.ts` و`index.html`):** إضافة `resolveMatchScopedAttendance()` و`findMatchScopedReadiness()` و`computeNextActionState()`؛ عزل سجلات المباريات السابقة والقديمة غير المؤرخة عن العداد ورسائل واتساب والتنبيهات وبطاقة الخطوة التالية، مع اختبارات تراجع مخصصة.
+- [x] **ترقية تجربة المستخدم والواجهة والموبايل (4A–6):**
+  - تحويل الشاشة الرئيسية (`#tab-team`) إلى **مركز قيادة الفريق (Team Command Center)** مع لافتة المباراة القادمة، ومؤشرات الحضور المحصورة بالمباراة، وأزرار الحضور بلمسة واحدة مع إبراز الحالة المختارة (`.is-selected`)، ونقل وتوحيد `#nextActionCard` (إزالة التكرار من `#tab-fifa`)، و4 اختصارات سريعة (`[data-cmd-tab]`).
+  - إبقاء 5 تبويبات سفلية (تسمية `الإحصائيات` بدلاً من `اللوحة`) وتنظيم `#moreSheet` إلى 3 مجموعات واضحة (`المباراة والجاهزية`، `التطوير والترفيه`، `الفريق والخصوصية`).
+  - تحسين استوديو التكتيك على الهواتف عبر أكورديونات `<details>` قابلة للطي (`#tacScenariosAccordion` و`#tacCaptainAccordion`) مطوية تلقائياً على شاشات `< 768px` (مع احترام النقر اليدوي وتوسّع تلقائي على الشاشات العريضة) دون المساس بأي ميزة تكتيكية أو Pointer Events.
+- [x] **التحقق الشامل بعد آخر تعديل:**
+  - `npm run typecheck`: **0** أخطاء.
+  - `npm run lint` (`check-html.mjs` + `eslint firestore.rules`): **0** أخطاء.
+  - `npm test`: **116/116** اختبار وحدة ناجح.
+  - `firebase emulators:exec --only firestore --project maydan-6v6-rules-test "npm run test:rules"`: **41/41** اختبار قواعد أمان ناجح على المحاكي الحقيقي.
+  - `npm run build` (`compile_applet`): ناجح.
+  - تحقق Chromium حقيقي عبر `playwright-cli` على المقاسات `360×780` و`390×844` و`412×915` و`1440×900`: **0** أخطاء كونسول/صفحة، **0px** طفح أفقي، **0** ظهور لكلمة FIFA/فيفا، تأكيد `chkRememberDevice` غير محدد افتراضياً، تأكيد تحديث الحضور المحصور بالمباراة (`2 -> 1 -> 2`)، تأكيد طي أكورديونات التكتيك على `390×844` وفتحها عند النقر، وتأكيد خلو `localStorage` من `maydan_team_cache_v1*` في الوضع الآمن وبعد الخروج.
+- **حالة النشر:** لم يتم نشر قواعد أو استضافة على الإنتاج تلقائياً — جاهز للمراجعة اليدوية والإطلاق التدريجي (Closed Beta).
+

@@ -4,8 +4,11 @@ import {
   buildNotifications,
   buildWhatsAppReminder,
   computeFatigueSignal,
+  computeNextActionState,
   computePitchSplit,
+  findMatchScopedReadiness,
   generateMatchIcs,
+  resolveMatchScopedAttendance,
 } from './preMatchHub';
 
 test('computeFatigueSignal accurately classifies green, yellow, and red fatigue states', () => {
@@ -122,4 +125,100 @@ test('buildNotifications enforces strict privacy for pending join requests and t
   });
   assert.equal(captainNotifs.items.some((i) => i.category === 'join'), true);
   assert.equal(captainNotifs.items.some((i) => i.category === 'fatigue'), true);
+});
+
+test('resolveMatchScopedAttendance ignores past-match & undated records and honors status updates for the upcoming match', () => {
+  const players = [
+    { id: 'p1', ownerUid: 'u1', name: 'يمان' },
+    { id: 'p2', ownerUid: 'u2', name: 'كريم' },
+    { id: 'p3', ownerUid: 'u3', name: 'زيد' },
+  ];
+  const attendance = [
+    // Past match records — must NEVER count toward 2026-11-26!
+    { playerId: 'p1', date: '2026-11-18', status: 'جاي' },
+    { playerId: 'p2', date: '2026-11-18', status: 'جاي' },
+    // Undated legacy record — must NOT bleed into scheduled match
+    { playerId: 'p3', status: 'جاي' },
+    // Upcoming match 2026-11-26: p1 confirmed, p2 first said 'جاي' then switched to 'معتذر'
+    { playerId: 'p1', date: '2026-11-26', status: 'جاي', updatedAt: 1000 },
+    { playerId: 'p2', date: '2026-11-26', status: 'جاي', updatedAt: 1000 },
+    { playerId: 'p2', date: '2026-11-26', status: 'معتذر', updatedAt: 2000 },
+  ];
+
+  const scoped = resolveMatchScopedAttendance(attendance, '2026-11-26', players);
+  assert.deepEqual(scoped.confirmedIds, ['p1']);
+  assert.deepEqual(scoped.declinedIds, ['p2']);
+  assert.equal(scoped.getStatusForPlayer(players[0]), 'جاي');
+  assert.equal(scoped.getStatusForPlayer(players[1]), 'معتذر');
+  assert.equal(scoped.getStatusForPlayer(players[2]), null);
+});
+
+test('findMatchScopedReadiness ignores stale readiness logs from past weeks and matches upcoming-match readiness', () => {
+  const player = { id: 'p1', ownerUid: 'u1', name: 'يمان' };
+  const staleOnly = [
+    { playerId: 'p1', date: '2026-11-10', sleep: 8, fatigue: 8 },
+    { playerId: 'p1', sleep: 7, fatigue: 7 }, // undated legacy row
+  ];
+  assert.equal(findMatchScopedReadiness(staleOnly, player, '2026-11-27'), null);
+
+  // Readiness logged 1 day before the upcoming match counts as valid
+  const withFresh = [
+    ...staleOnly,
+    { playerId: 'p1', date: '2026-11-26', sleep: 9, fatigue: 8 },
+  ];
+  const found = findMatchScopedReadiness(withFresh, player, '2026-11-27');
+  assert.ok(found !== null);
+  assert.equal(found?.date, '2026-11-26');
+});
+
+test('computeNextActionState shares single priority flow and never treats past-match logs as current', () => {
+  const user = { id: 'p1', ownerUid: 'u1', name: 'يمان', seasonGoal: '15 هدفاً' };
+
+  // 1. Captain with pending join requests sees approval priority first
+  const capAction = computeNextActionState({
+    user,
+    isCaptain: true,
+    pendingPlayersCount: 2,
+    targetMatchDate: '2026-11-27',
+    attendance: [],
+    readiness: [],
+    reportsCountForUser: 0,
+  });
+  assert.equal(capAction.key, 'pending_joins');
+
+  // 2. Old attendance + old readiness from last week must still prompt upcoming attendance
+  const staleUserAction = computeNextActionState({
+    user,
+    isCaptain: false,
+    pendingPlayersCount: 0,
+    targetMatchDate: '2026-11-27',
+    attendance: [{ playerId: 'p1', date: '2026-11-19', status: 'جاي' }],
+    readiness: [{ playerId: 'p1', date: '2026-11-19', sleep: 8, fatigue: 8 }],
+    reportsCountForUser: 2,
+  });
+  assert.equal(staleUserAction.key, 'attend');
+
+  // 3. Replied for upcoming match, but readiness is still stale -> prompts readiness
+  const needReadiness = computeNextActionState({
+    user,
+    isCaptain: false,
+    pendingPlayersCount: 0,
+    targetMatchDate: '2026-11-27',
+    attendance: [{ playerId: 'p1', date: '2026-11-27', status: 'جاي' }],
+    readiness: [{ playerId: 'p1', date: '2026-11-19', sleep: 8, fatigue: 8 }],
+    reportsCountForUser: 2,
+  });
+  assert.equal(needReadiness.key, 'readiness');
+
+  // 4. Both attendance & readiness current for 2026-11-27 + has reports & goal -> ready for tactics
+  const allReady = computeNextActionState({
+    user,
+    isCaptain: false,
+    pendingPlayersCount: 0,
+    targetMatchDate: '2026-11-27',
+    attendance: [{ playerId: 'p1', date: '2026-11-27', status: 'جاي' }],
+    readiness: [{ playerId: 'p1', matchDate: '2026-11-27', date: '2026-11-26', sleep: 8, fatigue: 8 }],
+    reportsCountForUser: 2,
+  });
+  assert.equal(allReady.key, 'tactics');
 });

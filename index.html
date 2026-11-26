@@ -3260,6 +3260,153 @@
       flex-shrink: 0;
       font-size: 0.82rem;
     }
+    /* ==================== FINAL PHASE: COMMAND CENTER, PRIVACY & MOBILE UX ==================== */
+    .auth-remember-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      margin-top: 8px;
+      padding: 9px 11px;
+      border-radius: 12px;
+      background: rgba(15, 17, 25, 0.86);
+      border: 1px solid rgba(250, 204, 21, 0.18);
+      cursor: pointer;
+      text-align: right;
+    }
+    .auth-remember-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      min-height: 18px;
+      margin-top: 2px;
+      accent-color: #FACC15;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .cmd-match-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      border-radius: 13px;
+      background: linear-gradient(135deg, rgba(250, 204, 21, 0.12) 0%, rgba(15, 17, 24, 0.94) 100%);
+      border: 1px solid rgba(250, 204, 21, 0.34);
+    }
+    .cmd-quick-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    @media (max-width: 520px) {
+      .cmd-quick-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    .cmd-quick-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 46px;
+      padding: 8px 10px;
+      border-radius: 13px;
+      background: linear-gradient(180deg, rgba(22, 24, 34, 0.96) 0%, rgba(13, 14, 21, 0.98) 100%);
+      border: 1px solid rgba(250, 204, 21, 0.22);
+      color: #f8fafc;
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-align: center;
+      transition: border-color 0.18s ease, transform 0.15s ease, background 0.18s ease;
+    }
+    .cmd-quick-btn:hover,
+    .cmd-quick-btn:focus-visible {
+      border-color: rgba(250, 204, 21, 0.65);
+      background: rgba(250, 204, 21, 0.12);
+      color: #FEF08A;
+    }
+    .cmd-attend-btn {
+      min-height: 42px !important;
+      padding: 6px 12px !important;
+      font-size: 0.78rem !important;
+      border-width: 1.5px;
+      transition: transform 0.14s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    }
+    .cmd-attend-btn.is-selected {
+      box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.85), 0 6px 14px rgba(0, 0, 0, 0.35);
+      transform: translateY(-1px);
+    }
+    .sheet-group-lbl {
+      font-size: 0.7rem;
+      font-weight: 800;
+      color: #a1a1aa;
+      margin: 10px 2px 6px;
+      letter-spacing: 0.02em;
+    }
+    .sheet-group-lbl:first-of-type {
+      margin-top: 2px;
+    }
+    .sheet-item {
+      min-height: 46px;
+    }
+    .tac-side-accordion {
+      background: var(--card, #11131b);
+      border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .tac-side-accordion > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 48px;
+      padding: 12px 14px;
+      font-weight: 900;
+      font-size: 0.92rem;
+      color: #f8fafc;
+      user-select: none;
+    }
+    .tac-side-accordion > summary::-webkit-details-marker {
+      display: none;
+    }
+    .tac-side-accordion > summary .tac-acc-chev {
+      font-size: 0.85rem;
+      color: var(--primary);
+      transition: transform 0.2s ease;
+    }
+    .tac-side-accordion[open] > summary .tac-acc-chev {
+      transform: rotate(180deg);
+    }
+    .tac-side-accordion-body {
+      padding: 0 14px 14px;
+    }
+    @media (max-width: 640px) {
+      #tab-tactics .tac-studio-shell {
+        gap: 6px;
+      }
+      #tab-tactics .tac-phase-btn {
+        min-height: 42px;
+        padding: 0 11px;
+      }
+      #tab-tactics .tac-options-trigger,
+      #tab-tactics .tac-formation-select {
+        min-height: 42px;
+      }
+      #tab-tactics .tac-view-tab {
+        min-height: 40px;
+      }
+      #tab-tactics .tac-pitch-stage {
+        margin-inline: -4px;
+      }
+      .bnav-btn {
+        min-height: 52px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -3383,6 +3530,13 @@
             </span>
             <span id="btnGoogleSignInLabel">الدخول بحساب Google (للعب الجماعي مع الأصدقاء)</span>
           </button>
+          <label id="authRememberDeviceLabel" for="chkRememberDevice" class="auth-remember-row">
+            <input id="chkRememberDevice" type="checkbox" />
+            <span style="font-size:0.74rem;line-height:1.45;color:#e4e4e7;">
+              <strong>تذكر تسجيلي على هذا الجهاز الشخصي الموثوق</strong>
+              <span class="muted" style="display:block;font-size:0.68rem;margin-top:1px;">الوضع الافتراضي ينهي الجلسة عند إغلاق المتصفح لحماية خصوصيتك على الأجهزة المشتركة.</span>
+            </span>
+          </label>
           <button id="btnOpenJoinModal" type="button" class="btn-amber hidden" style="width:100%;min-height:48px;">
             🤝 الانضمام لفريق بكود دعوة
           </button>
@@ -3480,7 +3634,7 @@
 
     <main class="container">
 
-      <!-- 0. LIVE TEAM HUB (NEW MULTIPLAYER HOME TAB) -->
+      <!-- 0. LIVE TEAM COMMAND CENTER (MULTIPLAYER HOME TAB) -->
       <section id="tab-team" class="tab-panel">
         <div class="card" style="border-color:rgba(250,204,21,0.36);background:linear-gradient(145deg,rgba(250,204,21,0.08) 0%,rgba(16,17,24,0.97) 100%);">
           <div class="row between" style="gap:10px;margin-bottom:10px;">
@@ -3493,14 +3647,23 @@
               <p id="teamHubSubtitle" class="muted" style="margin-top:4px;">قائمة الفريق المباشرة • تحديث فوري للجميع</p>
             </div>
             <div class="row" style="gap:6px;">
-              <button id="btnTeamHubInvite" type="button" class="btn-primary" style="min-height:36px;padding:6px 12px;font-size:0.78rem;">💬 دعوة أصدقاء + QR</button>
-              <button id="btnOpenTeamSettings" type="button" class="hdr-btn-labeled" style="min-height:36px;">⚙️ إعدادات الفريق</button>
+              <button id="btnTeamHubInvite" type="button" class="btn-primary" style="min-height:42px;padding:6px 12px;font-size:0.78rem;">💬 دعوة أصدقاء + QR</button>
+              <button id="btnOpenTeamSettings" type="button" class="hdr-btn-labeled" style="min-height:42px;">⚙️ إعدادات الفريق</button>
             </div>
+          </div>
+
+          <!-- Upcoming Match Spotlight Banner -->
+          <div id="teamHubMatchBanner" class="cmd-match-banner">
+            <div style="min-width:0;flex:1 1 200px;">
+              <div id="teamHubMatchTitle" style="font-weight:900;font-size:0.9rem;color:#FEF08A;">⚽ المباراة القادمة</div>
+              <div id="teamHubMatchMeta" class="muted" style="font-size:0.75rem;margin-top:2px;">جاري تحميل موعد المباراة القادمة...</div>
+            </div>
+            <button id="btnTeamHubScheduleMatch" type="button" class="icon-btn" style="min-height:38px;font-size:0.74rem;white-space:nowrap;">📅 إدارة الموعد والقطّة</button>
           </div>
 
           <div class="grid-3" style="gap:8px;margin-bottom:10px;">
             <div class="item-box" style="margin:0;text-align:center;">
-              <div class="muted" style="font-size:0.7rem;">الحاضرون المؤكّدون</div>
+              <div class="muted" style="font-size:0.7rem;">مؤكّدون لهذه المباراة</div>
               <div id="teamHubConfirmedKpi" style="font-size:1.15rem;font-weight:900;color:#22c55e;">0</div>
             </div>
             <div class="item-box" style="margin:0;text-align:center;">
@@ -3513,15 +3676,38 @@
             </div>
           </div>
 
-          <div class="row between" style="gap:8px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--border-subtle);">
-            <span class="muted" style="font-size:0.76rem;font-weight:700;">حضورك للمباراة القادمة:</span>
-            <div class="row" style="gap:6px;">
-              <button type="button" data-quick-attend="جاي" class="btn-emerald" style="min-height:34px;padding:4px 11px;font-size:0.76rem;">✅ جاي</button>
-              <button type="button" data-quick-attend="محتمل" class="btn-amber" style="min-height:34px;padding:4px 11px;font-size:0.76rem;">🤔 محتمل</button>
-              <button type="button" data-quick-attend="معتذر" class="btn-rose" style="min-height:34px;padding:4px 11px;font-size:0.76rem;">❌ معتذر</button>
-              <button id="btnTeamHubManagePitch" type="button" class="icon-btn" style="min-height:34px;font-size:0.74rem;">💳 تفاصيل القطّة</button>
+          <div id="teamQuickAttendRow" class="row between" style="gap:8px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--border-subtle);">
+            <span class="muted" style="font-size:0.78rem;font-weight:700;">حضورك للمباراة القادمة:</span>
+            <div class="row" style="gap:6px;flex-wrap:wrap;">
+              <button type="button" data-quick-attend="جاي" class="btn-emerald cmd-attend-btn">✅ جاي</button>
+              <button type="button" data-quick-attend="محتمل" class="btn-amber cmd-attend-btn">🤔 محتمل</button>
+              <button type="button" data-quick-attend="معتذر" class="btn-rose cmd-attend-btn">❌ معتذر</button>
+              <button id="btnTeamHubManagePitch" type="button" class="icon-btn" style="min-height:42px;font-size:0.74rem;">💳 تفاصيل القطّة</button>
             </div>
           </div>
+        </div>
+
+        <!-- Unified Smart Action Card (Single Source of Truth via computeNextActionState) -->
+        <div id="nextActionCard" class="card" style="margin-bottom:12px;padding:12px 14px;border-color:rgba(250,204,21,0.44);background:linear-gradient(135deg,rgba(250,204,21,0.1) 0%,rgba(17,18,24,0.97) 100%);">
+          <div class="row between" style="gap:10px;">
+            <div style="flex:1;min-width:180px;">
+              <div class="row" style="gap:6px;margin-bottom:3px;">
+                <span class="badge" style="font-size:0.68rem;background:rgba(250,204,21,0.18);color:var(--primary);">🎯 شو المطلوب منك الآن؟</span>
+                <span id="nextActionTag" class="muted" style="font-size:0.7rem;">خطوة واحدة سريعة</span>
+              </div>
+              <strong id="nextActionTitle" style="display:block;font-size:0.92rem;color:#fff;">أكّد حضورك للمباراة القادمة</strong>
+              <p id="nextActionDesc" class="muted" style="font-size:0.76rem;margin-top:2px;">حدد موقفك بلمسة واحدة حتى تكتمل تشكيلة السداسي.</p>
+            </div>
+            <button id="btnNextActionCta" type="button" class="btn-primary" style="width:auto;min-height:42px;white-space:nowrap;padding:8px 14px;font-size:0.78rem;">✅ سجّل حضورك</button>
+          </div>
+        </div>
+
+        <!-- Quick Command Shortcuts -->
+        <div class="cmd-quick-grid" role="group" aria-label="اختصارات مركز التحكم">
+          <button type="button" data-cmd-tab="tactics" class="cmd-quick-btn"><span>📋</span><span>التشكيلة والتكتيك</span></button>
+          <button type="button" data-cmd-tab="ready" class="cmd-quick-btn"><span>🚦</span><span>الجاهزية والقطّة</span></button>
+          <button type="button" data-cmd-tab="live" class="cmd-quick-btn"><span>⚽</span><span>تسجيل مباراة</span></button>
+          <button type="button" data-cmd-tab="stats" class="cmd-quick-btn"><span>📊</span><span>الإحصائيات</span></button>
         </div>
 
         <div id="teamPendingCard" class="pending-status-card hidden" style="margin-bottom:12px;">
@@ -3530,8 +3716,8 @@
             <span class="muted" style="font-size:0.75rem;">طلب انضمامك قيد المراجعة الآن — فور موافقة المؤسس ستنضم تلقائياً لقائمة الفريق السحابية.</span>
           </div>
           <div class="row" style="gap:6px;flex-wrap:wrap;">
-            <button id="btnTeamPendingWaNudge" type="button" class="btn-emerald" style="min-height:38px;padding:6px 12px;font-size:0.76rem;">💬 نبّه المؤسس عبر واتساب</button>
-            <button id="btnTeamPendingRefresh" type="button" class="btn-amber" style="min-height:38px;padding:6px 12px;font-size:0.76rem;">🔄 تحديث الحالة</button>
+            <button id="btnTeamPendingWaNudge" type="button" class="btn-emerald" style="min-height:42px;padding:6px 12px;font-size:0.76rem;">💬 نبّه المؤسس عبر واتساب</button>
+            <button id="btnTeamPendingRefresh" type="button" class="btn-amber" style="min-height:42px;padding:6px 12px;font-size:0.76rem;">🔄 تحديث الحالة</button>
           </div>
         </div>
 
@@ -3549,7 +3735,7 @@
         <div class="card">
           <div class="row between" style="margin-bottom:10px;">
             <h3 style="margin:0;">📋 أعضاء الفريق المباشرون</h3>
-            <span class="muted" style="font-size:0.72rem;">الصورة • المركز • الجاهزية</span>
+            <span class="muted" style="font-size:0.72rem;">الصورة • المركز • حضور المباراة القادمة</span>
           </div>
           <div id="teamMembersList"></div>
         </div>
@@ -3557,20 +3743,6 @@
 
       <!-- 1. FIFA CARD & PROFILE (STEP 3: GOLD & CRYSTAL SHIELD + SEAMLESS PHOTO + POINT BUDGET) -->
       <section id="tab-fifa" class="tab-panel hidden">
-        <!-- Contextual Single-Action Card: شو المطلوب منك الآن؟ -->
-        <div id="nextActionCard" class="card" style="margin-bottom:12px;padding:11px 14px;border-color:rgba(250,204,21,0.42);background:linear-gradient(135deg,rgba(250,204,21,0.09) 0%,rgba(17,18,24,0.96) 100%);">
-          <div class="row between" style="gap:10px;">
-            <div style="flex:1;min-width:180px;">
-              <div class="row" style="gap:6px;margin-bottom:3px;">
-                <span class="badge" style="font-size:0.68rem;background:rgba(250,204,21,0.18);color:var(--primary);">🎯 شو المطلوب منك الآن؟</span>
-                <span id="nextActionTag" class="muted" style="font-size:0.7rem;">خطوة واحدة سريعة</span>
-              </div>
-              <strong id="nextActionTitle" style="display:block;font-size:0.9rem;color:#fff;">أكّد حضورك للمباراة القادمة</strong>
-              <p id="nextActionDesc" class="muted" style="font-size:0.75rem;margin-top:2px;">حدد موقفك بلمسة واحدة حتى تكتمل تشكيلة السداسي.</p>
-            </div>
-            <button id="btnNextActionCta" type="button" class="btn-primary" style="width:auto;white-space:nowrap;padding:8px 14px;font-size:0.78rem;">✅ سجّل حضورك</button>
-          </div>
-        </div>
         <div class="split-2">
           <div>
             <!-- AAA 3D Protruding Faceted Crystal Shield (درع ميدان الأسطوري) -->
@@ -4422,32 +4594,42 @@
             <button id="btnSaveTactics" type="button" class="btn-primary hidden" style="width:100%;margin-top:4px;">💾 حفظ التشكيلة الرسمية للفريق (<bdi dir="ltr">6v6</bdi>)</button>
           </div>
 
-          <!-- RIGHT COLUMN: 10 ANIMATED SCENARIOS + CAPTAIN TACTICAL TOOLS -->
+          <!-- RIGHT COLUMN: COLLAPSIBLE 10 ANIMATED SCENARIOS + CAPTAIN TACTICAL TOOLS -->
           <div style="display:flex;flex-direction:column;gap:12px;">
-            <div class="card" style="margin:0;">
-              <div class="row between" style="margin-bottom:6px;">
-                <h2>📚 الحالات التكتيكية الـ 10 (بالأنيميشن)</h2>
-                <span class="badge">خطوة بخطوة</span>
+            <details id="tacScenariosAccordion" class="tac-side-accordion" open>
+              <summary>
+                <span class="row" style="gap:8px;flex-wrap:wrap;">
+                  <span>📚 الحالات التكتيكية الـ 10 (بالأنيميشن)</span>
+                  <span class="badge">خطوة بخطوة</span>
+                </span>
+                <span class="tac-acc-chev" aria-hidden="true">▾</span>
+              </summary>
+              <div class="tac-side-accordion-body">
+                <button type="button" id="btnTacCompareInline" class="tac-compare-inline-btn">
+                  <span>⚖️ مقارنة: ✓ الصحيح ⇄ ⚠️ الخطأ (<bdi dir="ltr">6v6</bdi>)</span>
+                  <span class="tac-compare-inline-cta">ابدأ ←</span>
+                </button>
+                <div id="tacScenarioFilters" class="star-filter-bar" style="margin-bottom:6px;"></div>
+                <div id="scenariosList" class="scenario-list-grid"></div>
               </div>
-              <button type="button" id="btnTacCompareInline" class="tac-compare-inline-btn">
-                <span>⚖️ مقارنة: ✓ الصحيح ⇄ ⚠️ الخطأ (<bdi dir="ltr">6v6</bdi>)</span>
-                <span class="tac-compare-inline-cta">ابدأ ←</span>
-              </button>
-              <div id="tacScenarioFilters" class="star-filter-bar" style="margin-bottom:6px;"></div>
-              <div id="scenariosList" class="scenario-list-grid"></div>
-            </div>
+            </details>
 
-            <div class="card" style="margin:0;">
-              <h2 style="margin-bottom:8px;">👑 أدوات الكابتن والتقسيمة العادلة</h2>
-              <div class="tac-pill-bar" style="margin-bottom:10px;">
-                <button type="button" data-cap-tab="smart" class="tac-pill active">🧠 مقترح التشكيلة</button>
-                <button type="button" data-cap-tab="split" class="tac-pill">⚖️ تقسيمة عادلة</button>
-                <button type="button" data-cap-tab="roles" class="tac-pill">🎯 الأدوار الثابتة</button>
-                <button type="button" data-cap-tab="gk" class="tac-pill">🧤 دليل الحارس</button>
-                <button type="button" data-cap-tab="rotate" class="tac-pill">⏱️ تبديلات + منبّه</button>
+            <details id="tacCaptainAccordion" class="tac-side-accordion" open>
+              <summary>
+                <span>👑 أدوات الكابتن والتقسيمة العادلة</span>
+                <span class="tac-acc-chev" aria-hidden="true">▾</span>
+              </summary>
+              <div class="tac-side-accordion-body">
+                <div class="tac-pill-bar" style="margin-bottom:10px;">
+                  <button type="button" data-cap-tab="smart" class="tac-pill active">🧠 مقترح التشكيلة</button>
+                  <button type="button" data-cap-tab="split" class="tac-pill">⚖️ تقسيمة عادلة</button>
+                  <button type="button" data-cap-tab="roles" class="tac-pill">🎯 الأدوار الثابتة</button>
+                  <button type="button" data-cap-tab="gk" class="tac-pill">🧤 دليل الحارس</button>
+                  <button type="button" data-cap-tab="rotate" class="tac-pill">⏱️ تبديلات + منبّه</button>
+                </div>
+                <div id="tacCaptainBody"></div>
               </div>
-              <div id="tacCaptainBody"></div>
-            </div>
+            </details>
           </div>
         </div>
       </section>
@@ -4868,7 +5050,7 @@
       <button type="button" data-btab="team" class="bnav-btn active"><span class="bnav-ico">👥</span><span>الفريق</span></button>
       <button type="button" data-btab="tactics" class="bnav-btn"><span class="bnav-ico">📋</span><span>التشكيلة</span></button>
       <button type="button" data-btab="live" class="bnav-btn"><span class="bnav-ico">⚽</span><span>المباراة</span></button>
-      <button type="button" data-btab="stats" class="bnav-btn"><span class="bnav-ico">📊</span><span>اللوحة</span></button>
+      <button type="button" data-btab="stats" class="bnav-btn"><span class="bnav-ico">📊</span><span>الإحصائيات</span></button>
       <button type="button" data-btab="fifa" class="bnav-btn"><span class="bnav-ico">🪪</span><span>بطاقتي</span></button>
     </nav>
   </div>
@@ -4876,21 +5058,27 @@
   <!-- More Menu & Secondary Tools Sheet -->
   <div id="moreSheet" class="modal-bg sheet-bg hidden">
     <div class="card sheet-box">
-      <div class="row between" style="margin-bottom:12px;">
+      <div class="row between" style="margin-bottom:10px;">
         <h3>المزيد والأدوات</h3>
         <button id="closeMoreSheet" type="button" class="icon-btn">إغلاق ✕</button>
       </div>
-      <button type="button" id="btnSheetTeamSettings" class="sheet-item"><span>⚙️ إعدادات الفريق وإدارة الأعضاء</span><span class="muted">←</span></button>
+      <div class="sheet-group-lbl">المباراة والجاهزية</div>
       <button type="button" data-sheet-tab="ready" class="sheet-item"><span>✅ الجاهزية والحضور وحاسبة القطّة</span><span class="muted">←</span></button>
+      <button type="button" data-sheet-tab="injuries" class="sheet-item"><span>🩹 الإصابات والإسعافات والتوعية</span><span class="muted">←</span></button>
+
+      <div class="sheet-group-lbl">التطوير والترفيه</div>
       <button type="button" data-sheet-tab="library" class="sheet-item"><span>🌍 المكتبة الكروية العالمية</span><span class="muted">←</span></button>
-      <button type="button" data-sheet-tab="injuries" class="sheet-item"><span>🩹 الإصابات والتوعية</span><span class="muted">←</span></button>
       <button type="button" data-sheet-tab="social" class="sheet-item"><span>🏆 المرح والمشاهير والاقتراحات</span><span class="muted">←</span></button>
+
+      <div class="sheet-group-lbl">الفريق والخصوصية</div>
+      <button type="button" id="btnSheetTeamSettings" class="sheet-item"><span>⚙️ إعدادات الفريق وإدارة الأعضاء</span><span class="muted">←</span></button>
       <button type="button" data-sheet-tab="admin" id="sheetAdminBtn" class="sheet-item hidden"><span>🛡️ لوحة الكابتن المتقدمة</span><span class="muted">←</span></button>
       <button type="button" id="btnSheetLegalPrivacy" class="sheet-item"><span>📜 الخصوصية والشروط والدعم الفني</span><span class="muted">←</span></button>
+
       <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;">
-        <button id="btnFontToggle" type="button" class="icon-btn" title="تكبير أو تصغير حجم الخط">أ+ تكبير الخط</button>
-        <button id="btnDataSaver" type="button" class="icon-btn" title="تخفيف المؤثرات البصرية">⚡ توفير البيانات</button>
-        <button id="btnTourOpen" type="button" class="icon-btn" title="جولة سريعة في التطبيق">؟ جولة سريعة</button>
+        <button id="btnFontToggle" type="button" class="icon-btn" style="min-height:42px;" title="تكبير أو تصغير حجم الخط">أ+ تكبير الخط</button>
+        <button id="btnDataSaver" type="button" class="icon-btn" style="min-height:42px;" title="تخفيف المؤثرات البصرية">⚡ توفير البيانات</button>
+        <button id="btnTourOpen" type="button" class="icon-btn" style="min-height:42px;" title="جولة سريعة في التطبيق">؟ جولة سريعة</button>
       </div>
     </div>
   </div>
@@ -5299,56 +5487,69 @@
         <div id="tsQuotaBody"></div>
       </div>
 
-      <!-- Local Offline Cache Privacy Control (Shared-Device Safe Default) -->
+      <!-- Local Offline Cache & Auth Session Privacy Control (Shared-Device Safe Default) -->
       <div id="tsTrustedCacheSection" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-subtle);">
-        <div class="row between" style="margin-bottom:6px;">
+        <div class="row between" style="margin-bottom:6px;gap:6px;">
+          <strong style="font-size:0.84rem;color:#FEF08A;">🔐 خصوصية الجلسة على هذا الجهاز</strong>
+          <span id="tsAuthPersistBadge" class="badge">جلسة مؤقتة (آمن)</span>
+        </div>
+        <p class="muted" style="font-size:0.72rem;line-height:1.5;margin-bottom:8px;">
+          افتراضياً ينتهي تسجيل الدخول عند إغلاق المتصفح لحماية حسابك على الأجهزة المشتركة.
+        </p>
+        <button id="btnToggleAuthPersist" type="button" class="icon-btn" style="min-height:40px;font-size:0.75rem;margin-bottom:12px;">
+          تفعيل تذكّر تسجيل الدخول لهذا الجهاز الشخصي
+        </button>
+
+        <div class="row between" style="margin-bottom:6px;gap:6px;">
           <strong style="font-size:0.84rem;color:#FEF08A;">💾 خصوصية التخزين المحلي على هذا الجهاز</strong>
           <span id="tsCacheModeBadge" class="badge">ذاكرة مؤقتة (آمن)</span>
         </div>
         <p class="muted" style="font-size:0.73rem;line-height:1.55;margin-bottom:8px;">
-          الوضع الافتراضي لا يحفظ بيانات فريقك في IndexedDB على المتصفح لحماية خصوصيتك على الأجهزة المشتركة. فعّل التخزين الدائم فقط على هاتفك أو حاسوبك الشخصي لتقليل القراءات عند ضعف الشبكة.
+          الوضع الافتراضي لا يحفظ بيانات فريقك في IndexedDB أو localStorage لحماية خصوصيتك على الأجهزة المشتركة. فعّل التخزين الدائم فقط على هاتفك أو حاسوبك الشخصي لتقليل القراءات عند ضعف الشبكة.
         </p>
         <div class="row" style="gap:8px;flex-wrap:wrap;">
-          <button id="btnToggleTrustedCache" type="button" class="icon-btn" style="min-height:36px;font-size:0.75rem;">
+          <button id="btnToggleTrustedCache" type="button" class="icon-btn" style="min-height:40px;font-size:0.75rem;">
             تفعيل التخزين الدائم لهذا الجهاز الشخصي
           </button>
-          <button id="btnReloadForCacheMode" type="button" class="btn-amber hidden" style="min-height:36px;padding:4px 12px;font-size:0.74rem;">
+          <button id="btnReloadForCacheMode" type="button" class="btn-amber hidden" style="min-height:40px;padding:4px 12px;font-size:0.74rem;">
             🔄 إعادة التحميل لتطبيق التغيير
           </button>
         </div>
+        <div id="tsCacheStatusNote" class="muted hidden" style="font-size:0.72rem;line-height:1.5;margin-top:7px;padding:8px 10px;border-radius:10px;background:rgba(250,204,21,0.08);border:1px solid rgba(250,204,21,0.28);color:#FEF08A;"></div>
       </div>
 
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(244,63,94,0.3);display:flex;flex-direction:column;gap:8px;">
-        <button id="btnSettingsOpenLegal" type="button" class="icon-btn" style="width:100%;justify-content:center;">📜 عرض سياسة الخصوصية والشروط والدعم</button>
-        <button id="btnDeleteMyPrivateData" type="button" class="icon-btn hidden" style="width:100%;justify-content:center;border-color:rgba(245,158,11,0.45);color:#fde68a;">🧹 احذف بياناتي الخاصة (الجاهزية والإصابات) من هذا الفريق</button>
-        <button id="btnSettingsLeaveTeam" type="button" class="btn-rose" style="width:100%;">🚪 مغادرة الفريق</button>
+        <button id="btnSettingsOpenLegal" type="button" class="icon-btn" style="width:100%;justify-content:center;min-height:42px;">📜 عرض سياسة الخصوصية والشروط والدعم</button>
+        <button id="btnDeleteMyPrivateData" type="button" class="icon-btn hidden" style="width:100%;justify-content:center;min-height:42px;border-color:rgba(245,158,11,0.45);color:#fde68a;">🧹 احذف بياناتي الخاصة (الجاهزية والإصابات) من هذا الفريق</button>
+        <button id="btnSettingsLeaveTeam" type="button" class="btn-rose" style="width:100%;min-height:42px;">🚪 مغادرة الفريق</button>
         <div id="tsLeaveConfirmBox" class="leave-confirm-box hidden">
           <div style="font-size:0.78rem;color:#fecdd3;font-weight:700;">هل أنت متأكد من مغادرة الفريق؟ سيتم حذف بطاقتك من قائمة الفريق ويمكنك العودة لاحقاً بدعوة جديدة.</div>
           <div class="grid-2" style="gap:6px;">
-            <button id="btnConfirmLeaveTeam" type="button" class="btn-rose" style="min-height:38px;">نعم، غادر الفريق الآن</button>
-            <button id="btnCancelLeaveTeam" type="button" style="min-height:38px;">تراجع</button>
+            <button id="btnConfirmLeaveTeam" type="button" class="btn-rose" style="min-height:40px;">نعم، غادر الفريق الآن</button>
+            <button id="btnCancelLeaveTeam" type="button" style="min-height:40px;">تراجع</button>
           </div>
         </div>
-        <button id="btnSettingsDeleteTeam" type="button" class="btn-rose hidden" style="width:100%;border-color:#f43f5e;">🗑️ أرشفة / حذف الفريق (لمؤسس الفريق فقط)</button>
+        <button id="btnSettingsDeleteTeam" type="button" class="btn-rose hidden" style="width:100%;min-height:42px;border-color:#f43f5e;">🗑️ أرشفة / حذف الفريق (لمؤسس الفريق فقط)</button>
         <div id="tsSoftDeleteConfirmBox" class="leave-confirm-box hidden">
           <div style="font-size:0.78rem;color:#fecdd3;font-weight:700;">سيتم تعطيل وأرشفة الفريق وإلغاء أكواد دعوته دون كسر باقي فرقك. هل تريد المتابعة؟</div>
           <div class="grid-2" style="gap:6px;">
-            <button id="btnConfirmSoftDeleteTeam" type="button" class="btn-rose" style="min-height:38px;">نعم، أرشف الفريق</button>
-            <button id="btnCancelSoftDeleteTeam" type="button" style="min-height:36px;">تراجع</button>
+            <button id="btnConfirmSoftDeleteTeam" type="button" class="btn-rose" style="min-height:40px;">نعم، أرشف الفريق</button>
+            <button id="btnCancelSoftDeleteTeam" type="button" style="min-height:40px;">تراجع</button>
           </div>
         </div>
-        <button id="btnOpenDeleteAccount" type="button" class="btn-rose hidden" style="width:100%;background:rgba(159,18,57,0.35);border-color:rgba(244,63,94,0.75);">
+        <button id="btnOpenDeleteAccount" type="button" class="btn-rose hidden" style="width:100%;min-height:42px;background:rgba(159,18,57,0.35);border-color:rgba(244,63,94,0.75);">
           ⚠️ حذف حسابي وجميع بياناتي نهائياً
         </button>
         <div id="tsDeleteAccountConfirmBox" class="leave-confirm-box hidden" style="border-color:rgba(244,63,94,0.75);background:rgba(159,18,57,0.22);">
           <div style="font-size:0.76rem;color:#fecdd3;font-weight:800;line-height:1.55;">
-            إجراء نهائي لا يمكن التراجع عنه: سيتم حذف ملفك الشخصي وبياناتك الخاصة (الجاهزية والإصابات) وطلباتك ومغادرة فرقك وحذف حساب الدخول من ميدان 6v6.
+            إجراء نهائي لا يمكن التراجع عنه: سيتم التحقق من حذف ملفك الشخصي وبياناتك الخاصة (الجاهزية والإصابات) وطلباتك ومغادرة فرقك قبل إزالة حساب الدخول من ميدان 6v6.
           </div>
+          <div id="tsDeleteAccountStatusBox" class="hidden" style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(127,29,29,0.55);border:1px solid rgba(248,113,113,0.65);font-size:0.74rem;line-height:1.55;color:#fecaca;"></div>
           <label for="tsDeleteAccountInput" class="muted" style="font-size:0.72rem;display:block;margin-top:6px;">اكتب كلمة <strong>حذف</strong> للتأكيد:</label>
           <input id="tsDeleteAccountInput" type="text" placeholder="حذف" autocomplete="off" style="margin-top:4px;margin-bottom:8px;" />
           <div class="grid-2" style="gap:6px;">
-            <button id="btnConfirmDeleteAccount" type="button" class="btn-rose" style="min-height:38px;">تأكيد الحذف النهائي</button>
-            <button id="btnCancelDeleteAccount" type="button" style="min-height:38px;">إلغاء</button>
+            <button id="btnConfirmDeleteAccount" type="button" class="btn-rose" style="min-height:42px;">تأكيد الحذف النهائي</button>
+            <button id="btnCancelDeleteAccount" type="button" style="min-height:42px;">إلغاء</button>
           </div>
         </div>
       </div>
@@ -6908,19 +7109,47 @@
             : (isGoogleStandardMode ? 'مساحتك المحلية • انضم للفريق السحابي بكود الدعوة' : 'الوضع التجريبي المحلي (على جهازك فقط)');
         }
 
-        // KPIs: confirmed attendees, flexible pitch fee share, next match
-        const matchDate = (db.pitchSession && db.pitchSession.matchDate) || new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-        const confirmedSet = new Set();
-        (db.attendance || []).forEach(a => {
-          if (a && a.status === 'جاي') confirmedSet.add(a.playerId || a.ownerUid || a.playerName);
-        });
-        const confirmedCount = confirmedSet.size;
+        // Match-scoped KPIs: strictly bind attendance to upcoming matchDate (zero past-match leakage)
         const ps = db.pitchSession || { totalCost: meta.defaultPitchCost || 0, currency: meta.defaultCurrency || 'ريال' };
+        const hasScheduledMatch = Boolean(ps.matchDate && String(ps.matchDate).trim());
+        const matchDate = hasScheduledMatch ? String(ps.matchDate).trim() : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+        const scopedAtt = (window.MaydanPreMatch && typeof window.MaydanPreMatch.resolveMatchScopedAttendance === 'function')
+          ? window.MaydanPreMatch.resolveMatchScopedAttendance(db.attendance || [], matchDate, players)
+          : null;
+        const confirmedCount = scopedAtt ? scopedAtt.confirmedIds.length : 0;
         const totalCost = Math.max(0, Number(ps.totalCost || 0));
         const currency = ps.currency || meta.defaultCurrency || 'ريال';
         const shareText = totalCost <= 0
           ? 'مجاني'
           : (confirmedCount > 0 ? `${Math.round((totalCost / confirmedCount) * 10) / 10} ${currency}` : `${totalCost} ${currency}`);
+
+        // Upcoming Match Spotlight Banner + Empty State
+        const matchTitleEl = document.getElementById('teamHubMatchTitle');
+        const matchMetaEl = document.getElementById('teamHubMatchMeta');
+        const matchBtnEl = document.getElementById('btnTeamHubScheduleMatch');
+        if (matchTitleEl && matchMetaEl) {
+          if (hasScheduledMatch) {
+            matchTitleEl.textContent = `⚽ ${ps.title || 'مباراة السداسي القادمة'}`;
+            const venueTxt = ps.venue ? ` • 🏟️ ${ps.venue}` : '';
+            matchMetaEl.textContent = `📅 ${matchDate} • ⏰ ${ps.matchTime || '20:30'}${venueTxt}`;
+            if (matchBtnEl) matchBtnEl.textContent = '📅 إدارة الموعد والقطّة';
+          } else {
+            matchTitleEl.textContent = '📅 لم يُحدَّد موعد المباراة القادمة بعد';
+            matchMetaEl.textContent = 'حدّد التاريخ والملعب وتكلفة القطّة ليبدأ الأعضاء بتأكيد حضورهم.';
+            if (matchBtnEl) matchBtnEl.textContent = '+ تحديد موعد المباراة';
+          }
+        }
+
+        // Highlight current user's match-scoped quick attendance button
+        const myAttStatus = scopedAtt
+          ? scopedAtt.getStatusForPlayer({ id: user.id, ownerUid: user.ownerUid || getCurrentUid(), name: user.name })
+          : null;
+        document.querySelectorAll('[data-quick-attend]').forEach(btn => {
+          const val = btn.dataset.quickAttend || '';
+          const active = Boolean(myAttStatus && (myAttStatus === val || (val === 'محتمل' && myAttStatus === 'مو أكيد') || (val === 'معتذر' && myAttStatus === 'ما فيني')));
+          btn.classList.toggle('is-selected', active);
+          btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
 
         const kpiConf = document.getElementById('teamHubConfirmedKpi');
         const kpiShare = document.getElementById('teamHubShareKpi');
@@ -6928,7 +7157,7 @@
         if (kpiConf) kpiConf.textContent = String(confirmedCount);
         if (kpiShare) kpiShare.textContent = shareText;
         if (kpiNext) {
-          kpiNext.innerHTML = ps.matchDate
+          kpiNext.innerHTML = hasScheduledMatch
             ? `<div dir="ltr" style="font-size:0.78rem;line-height:1.25;">${esc(ps.matchDate)}</div><div dir="ltr" style="font-size:0.72rem;color:var(--primary);margin-top:2px;">${esc(ps.matchTime || '20:30')}</div>`
             : 'غير محدّد';
         }
@@ -6938,43 +7167,45 @@
             <div style="font-weight:800;margin-bottom:6px;">لا يوجد أعضاء بعد</div>
             <p class="muted" style="margin-bottom:10px;">شارك كود الفريق أو رمز QR مع أصدقائك لينضموا فوراً.</p>
           </div>`;
-          return;
-        }
-
-        listEl.innerHTML = players.map(p => {
-          const uid = p.ownerUid || p.id;
-          const isCreator = Boolean(p.role === 'admin' || (meta.creatorUid && uid === meta.creatorUid));
-          const isOrg = !isCreator && Array.isArray(meta.organizerUids) && meta.organizerUids.includes(uid);
-          const isMe = p.id === user.id || uid === getCurrentUid();
-          const roleTag = isCreator
-            ? '<span class="role-badge-creator">👑 منشئ الفريق</span>'
-            : (isOrg ? '<span class="role-badge-org">📋 منظّم التشكيلة</span>' : '');
-          const isReady = p.availableStatus !== 'unavailable';
-          const statusTag = isReady
-            ? '<span class="status-pill-ready">جاهز ✓</span>'
-            : '<span class="status-pill-injured">غير متاح</span>';
-          const cleanPhoto = safeImg(p.photo, 250000);
-          const avatarHtml = cleanPhoto
-            ? `<img src="${esc(cleanPhoto)}" alt="${esc(p.name)}" />`
-            : `<span>#${esc(p.jersey || '★')}</span>`;
-          const attRec = (db.attendance || []).slice().reverse().find(a => a && (a.playerId === p.id || a.ownerUid === uid));
-          const attLabel = attRec ? ` • ${esc(attRec.status)}` : '';
-          return `
-            <div class="team-member-card">
-              <div class="row" style="gap:10px;flex-wrap:nowrap;min-width:0;">
-                <div class="team-member-avatar">${avatarHtml}</div>
-                <div style="min-width:0;">
-                  <div class="row" style="gap:6px;flex-wrap:wrap;">
-                    <strong style="font-size:0.88rem;color:${isMe ? 'var(--primary)' : '#fff'};">${esc(p.name)}${isMe ? ' (أنت)' : ''}</strong>
-                    ${roleTag}
+        } else {
+          listEl.innerHTML = players.map(p => {
+            const uid = p.ownerUid || p.id;
+            const isCreator = Boolean(p.role === 'admin' || (meta.creatorUid && uid === meta.creatorUid));
+            const isOrg = !isCreator && Array.isArray(meta.organizerUids) && meta.organizerUids.includes(uid);
+            const isMe = p.id === user.id || uid === getCurrentUid();
+            const roleTag = isCreator
+              ? '<span class="role-badge-creator">👑 منشئ الفريق</span>'
+              : (isOrg ? '<span class="role-badge-org">📋 منظّم التشكيلة</span>' : '');
+            const isReady = p.availableStatus !== 'unavailable';
+            const statusTag = isReady
+              ? '<span class="status-pill-ready">جاهز ✓</span>'
+              : '<span class="status-pill-injured">غير متاح</span>';
+            const cleanPhoto = safeImg(p.photo, 250000);
+            const avatarHtml = cleanPhoto
+              ? `<img src="${esc(cleanPhoto)}" alt="${esc(p.name)}" />`
+              : `<span>#${esc(p.jersey || '★')}</span>`;
+            const attStatus = scopedAtt
+              ? scopedAtt.getStatusForPlayer({ id: p.id, ownerUid: uid, name: p.name })
+              : null;
+            const attLabel = attStatus ? ` • ${esc(attStatus)}` : ' • لم يرد بعد';
+            return `
+              <div class="team-member-card">
+                <div class="row" style="gap:10px;flex-wrap:nowrap;min-width:0;">
+                  <div class="team-member-avatar">${avatarHtml}</div>
+                  <div style="min-width:0;">
+                    <div class="row" style="gap:6px;flex-wrap:wrap;">
+                      <strong style="font-size:0.88rem;color:${isMe ? 'var(--primary)' : '#fff'};">${esc(p.name)}${isMe ? ' (أنت)' : ''}</strong>
+                      ${roleTag}
+                    </div>
+                    <div class="muted" style="font-size:0.73rem;">#${esc(p.jersey || '—')} • ${esc(p.primaryPos || 'لاعب')}${attLabel}</div>
                   </div>
-                  <div class="muted" style="font-size:0.73rem;">#${esc(p.jersey || '—')} • ${esc(p.primaryPos || 'لاعب')}${attLabel}</div>
                 </div>
+                ${statusTag}
               </div>
-              ${statusTag}
-            </div>
-          `;
-        }).join('');
+            `;
+          }).join('');
+        }
+        renderNextActionCard();
 
         // Captain inline Pending Join Requests box in #tab-team
         const pendBox = document.getElementById('teamPendingRequestsBox');
@@ -7506,65 +7737,59 @@
         const ctaBtn = document.getElementById('btnNextActionCta');
         if (!cardEl || !titleEl || !descEl || !ctaBtn || !db || !user) return;
 
-        const myAttend = (db.attendance || []).find(a => a && (a.playerId === user.id || a.playerName === user.name));
-        const myReadiness = (db.readiness || []).find(r => r && (r.playerId === user.id || r.playerName === user.name));
+        const targetMatchDate = (db.pitchSession && db.pitchSession.matchDate)
+          ? String(db.pitchSession.matchDate).trim()
+          : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
         const myReportsCount = (db.reports || []).filter(r => r && r.playerId === user.id).length;
-        const hasPhotoOrGoal = Boolean((user.photoData && user.photoData.length > 20) || (user.seasonGoal && user.seasonGoal.trim().length > 2));
+        const pendingCount = Array.isArray(db.pendingPlayers) ? db.pendingPlayers.length : 0;
 
-        let state = null;
-        if (!myAttend) {
-          state = {
-            tag: 'الأولوية 1 • قبل المباراة',
-            title: 'أكّد حضورك للمباراة القادمة',
-            desc: 'حدّد موقفك (جاي / محتمل) بلمسة واحدة لتكتمل تشكيلة السداسي.',
-            btnText: '✅ سجّل حضورك الآن',
-            onClick: () => switchTab('ready')
-          };
-        } else if (!myReadiness) {
-          state = {
-            tag: 'الأولوية 2 • 30 ثانية',
-            title: 'سجّل جاهزيتك البدنية اليوم',
-            desc: 'أدخل مؤشر النوم والراحة العضلية لمساعدة الكابتن في التقسيمة العادلة.',
-            btnText: '🚦 سجّل جاهزيتك',
-            onClick: () => switchTab('ready')
-          };
-        } else if (myReportsCount === 0) {
-          state = {
-            tag: 'الأولوية 3 • تطوير البطاقة',
-            title: 'وثّق أداءك في آخر مباراة',
-            desc: 'سجّل أهدافك وتمريراتك في تقرير الدقيقتين لرفع تقييمك وXP.',
-            btnText: '⚽ افتح تقرير المباراة',
-            onClick: () => switchTab('live')
-          };
-        } else if (!hasPhotoOrGoal) {
-          state = {
-            tag: 'الأولوية 4 • لمستك الملكية',
-            title: 'أكمل بطاقتك الملكية (صورة أو هدف الموسم)',
-            desc: 'ادمج صورتك داخل الدرع الذهبي أو اكتب هدفك الشخصي للموسم.',
-            btnText: '🛡️ تخصيص بطاقتي',
-            onClick: () => {
-              const goalInp = document.getElementById('pfGoal');
-              if (goalInp) {
-                goalInp.scrollIntoView({ behavior: document.body.classList.contains('data-saver') ? 'auto' : 'smooth', block: 'center' });
-                goalInp.focus();
+        const rec = (window.MaydanPreMatch && typeof window.MaydanPreMatch.computeNextActionState === 'function')
+          ? window.MaydanPreMatch.computeNextActionState({
+              user: {
+                id: user.id,
+                ownerUid: user.ownerUid || getCurrentUid(),
+                name: user.name,
+                photoData: user.photoData,
+                photo: user.photo,
+                seasonGoal: user.seasonGoal
+              },
+              isCaptain: isVerifiedCaptain(),
+              pendingPlayersCount: pendingCount,
+              targetMatchDate,
+              attendance: db.attendance || [],
+              readiness: db.readiness || [],
+              reportsCountForUser: myReportsCount
+            })
+          : {
+              key: 'attend',
+              tag: 'الأولوية 1 • قبل المباراة',
+              title: 'أكّد حضورك للمباراة القادمة',
+              desc: 'حدّد موقفك بلمسة واحدة لتكتمل تشكيلة السداسي.',
+              btnText: '✅ تأكيد الحضور',
+              targetTab: 'team',
+              scrollTargetId: 'teamQuickAttendRow'
+            };
+
+        if (tagEl) tagEl.textContent = rec.tag;
+        titleEl.textContent = rec.title;
+        descEl.textContent = rec.desc;
+        ctaBtn.textContent = rec.btnText;
+        ctaBtn.onclick = () => {
+          if (rec.targetTab && rec.targetTab !== 'team') {
+            switchTab(rec.targetTab);
+          }
+          if (rec.scrollTargetId) {
+            setTimeout(() => {
+              const target = document.getElementById(rec.scrollTargetId);
+              if (target) {
+                target.scrollIntoView({ behavior: document.body.classList.contains('data-saver') ? 'auto' : 'smooth', block: 'center' });
+                if (typeof target.focus === 'function' && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+                  target.focus();
+                }
               }
-            }
-          };
-        } else {
-          state = {
-            tag: 'جاهز 100% للميدان',
-            title: 'كل أمورك جاهزة! راجع خطة الفريق',
-            desc: `حالتك: (${myAttend.status}) • استعرض تمركزك في تكتيك 6 ضد 6 قبل الصافرة.`,
-            btnText: '📋 استعراض التكتيك',
-            onClick: () => switchTab('tactics')
-          };
-        }
-
-        if (tagEl) tagEl.textContent = state.tag;
-        titleEl.textContent = state.title;
-        descEl.textContent = state.desc;
-        ctaBtn.textContent = state.btnText;
-        ctaBtn.onclick = state.onClick;
+            }, 60);
+          }
+        };
       }
 
       function switchTab(id) {
@@ -9478,9 +9703,24 @@
         toast(next ? 'تم تفعيل وضع توفير البيانات والخفة ⚡' : 'تم إرجاع المؤثرات الملكية ✨');
       });
 
+      const chkRememberDeviceEl = document.getElementById('chkRememberDevice');
+      if (chkRememberDeviceEl) {
+        if (window.MaydanBackend && typeof window.MaydanBackend.isTrustedDeviceAuthEnabled === 'function') {
+          chkRememberDeviceEl.checked = window.MaydanBackend.isTrustedDeviceAuthEnabled();
+        }
+        chkRememberDeviceEl.addEventListener('change', async () => {
+          if (window.MaydanBackend && typeof window.MaydanBackend.applyAuthPersistencePreference === 'function') {
+            await window.MaydanBackend.applyAuthPersistencePreference(chkRememberDeviceEl.checked);
+          }
+        });
+      }
+
       document.getElementById('btnGoogleSignIn').addEventListener('click', async () => {
         if (!window.MaydanBackend) { toast('جاري تهيئة Firebase، حاول بعد لحظة', true); return; }
         try {
+          if (chkRememberDeviceEl && typeof window.MaydanBackend.applyAuthPersistencePreference === 'function') {
+            await window.MaydanBackend.applyAuthPersistencePreference(chkRememberDeviceEl.checked);
+          }
           toast('جاري فتح تسجيل دخول Google...');
           await window.MaydanBackend.signInWithGoogle();
         } catch (err) {
@@ -10918,7 +11158,7 @@
         await handlePublishCurrentLineup();
       });
 
-      // Readiness & Attendance (Step 5ب synced with Fatigue Light, Pitch Fee Split & Bell)
+      // Readiness & Attendance (Step 5ب synced with Fatigue Light, Pitch Fee Split, Bell & Home Command Center)
       document.getElementById('readyForm').addEventListener('submit', async e => {
         e.preventDefault();
         const r = { playerId: user.id, ownerUid: user.ownerUid || user.id, date: new Date().toISOString().slice(0, 10), sleep: Number(document.getElementById('rd1').value), fatigue: Number(document.getElementById('rd2').value), mood: Number(document.getElementById('rd3').value) };
@@ -10926,6 +11166,8 @@
         if (!res.ok) return;
         if (!isFirebaseMode) { db.readiness.push(r); saveLocal(db); }
         renderPreMatch();
+        renderTeamHub();
+        renderNextActionCard();
         toast(`تم إرسال جاهزيتك ${res.mode === 'cloud' ? '(سحابي ✓)' : '(محلي ✓)'}`);
       });
       async function setAttend(st) {
@@ -10940,7 +11182,9 @@
         }
         renderAttendance();
         renderPreMatch();
+        renderTeamHub();
         renderFifaAndProfile();
+        renderNextActionCard();
         toast(`تم تسجيل حضورك: ${st} ${res.mode === 'cloud' ? '(سحابي ✓)' : '(محلي ✓)'}`);
       }
       document.getElementById('btnAttendYes').addEventListener('click', () => setAttend('جاي'));
@@ -11722,6 +11966,35 @@
       if (btnTeamHubInvite) btnTeamHubInvite.addEventListener('click', () => openInviteSheetModal('share'));
       const btnTeamHubManagePitch = document.getElementById('btnTeamHubManagePitch');
       if (btnTeamHubManagePitch) btnTeamHubManagePitch.addEventListener('click', () => switchTab('ready'));
+      const btnTeamHubScheduleMatch = document.getElementById('btnTeamHubScheduleMatch');
+      if (btnTeamHubScheduleMatch) btnTeamHubScheduleMatch.addEventListener('click', () => switchTab('ready'));
+      document.querySelectorAll('[data-cmd-tab]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const target = btn.dataset.cmdTab;
+          if (target) switchTab(target);
+        });
+      });
+
+      // Collapse secondary Tactics side accordions by default on narrow mobile screens so pitch takes focus
+      function syncTacticsSideAccordions() {
+        const isWide = window.innerWidth >= 768;
+        ['tacScenariosAccordion', 'tacCaptainAccordion'].forEach(accId => {
+          const el = document.getElementById(accId);
+          if (!el || el.dataset.userToggled === '1') return;
+          if (isWide) el.setAttribute('open', '');
+          else el.removeAttribute('open');
+        });
+      }
+      ['tacScenariosAccordion', 'tacCaptainAccordion'].forEach(accId => {
+        const el = document.getElementById(accId);
+        const sum = el && el.querySelector('summary');
+        if (sum) sum.addEventListener('click', () => { el.dataset.userToggled = '1'; });
+      });
+      syncTacticsSideAccordions();
+      if (typeof window.matchMedia === 'function') {
+        const tacMq = window.matchMedia('(max-width: 767px)');
+        if (typeof tacMq.addEventListener === 'function') tacMq.addEventListener('change', syncTacticsSideAccordions);
+      }
 
       const btnDemoSwitchToGoogle = document.getElementById('btnDemoSwitchToGoogle');
       if (btnDemoSwitchToGoogle) {
@@ -11905,10 +12178,22 @@
         }
 
         renderQuotaEstimator();
-        // Sync Trusted-Device Cache & Permanent Account Deletion UI
+        // Sync Auth Session Persistence, Trusted-Device Cache & Permanent Account Deletion UI
+        const authBadge = document.getElementById('tsAuthPersistBadge');
+        const authBtn = document.getElementById('btnToggleAuthPersist');
+        const authTrusted = (bk && typeof bk.isTrustedDeviceAuthEnabled === 'function') ? bk.isTrustedDeviceAuthEnabled() : false;
+        if (authBadge) {
+          authBadge.textContent = authTrusted ? 'جهاز شخصي (تذكّر الدخول)' : 'جلسة مؤقتة (آمن)';
+        }
+        if (authBtn) {
+          authBtn.textContent = authTrusted
+            ? 'العودة لوضع الجلسة المؤقتة (إلغاء تذكّر الدخول)'
+            : 'تفعيل تذكّر تسجيل الدخول لهذا الجهاز الشخصي';
+        }
         const cacheBadge = document.getElementById('tsCacheModeBadge');
         const cacheBtn = document.getElementById('btnToggleTrustedCache');
         const cacheReloadBtn = document.getElementById('btnReloadForCacheMode');
+        const cacheNote = document.getElementById('tsCacheStatusNote');
         const trustedPref = (bk && typeof bk.isTrustedDeviceCacheEnabled === 'function') ? bk.isTrustedDeviceCacheEnabled() : false;
         if (cacheBadge) {
           cacheBadge.textContent = trustedPref ? 'تخزين دائم (جهاز شخصي)' : 'ذاكرة مؤقتة (آمن)';
@@ -11919,11 +12204,22 @@
             : 'تفعيل التخزين الدائم لهذا الجهاز الشخصي';
         }
         if (cacheReloadBtn) cacheReloadBtn.classList.add('hidden');
+        if (cacheNote) {
+          cacheNote.textContent = '';
+          cacheNote.classList.add('hidden');
+        }
         const delAccBtn = document.getElementById('btnOpenDeleteAccount');
         const delAccBox = document.getElementById('tsDeleteAccountConfirmBox');
+        const delAccStatus = document.getElementById('tsDeleteAccountStatusBox');
+        const delAccConfirmBtn = document.getElementById('btnConfirmDeleteAccount');
         const delAccInp = document.getElementById('tsDeleteAccountInput');
         if (delAccBtn) delAccBtn.classList.toggle('hidden', !isFirebaseMode);
         if (delAccBox) delAccBox.classList.add('hidden');
+        if (delAccStatus) {
+          delAccStatus.textContent = '';
+          delAccStatus.classList.add('hidden');
+        }
+        if (delAccConfirmBtn) delAccConfirmBtn.textContent = 'تأكيد الحذف النهائي';
         if (delAccInp) delAccInp.value = '';
         document.getElementById('teamSettingsModal').classList.remove('hidden');
       }
@@ -12168,31 +12464,81 @@
         });
       }
 
-      // Trusted Personal Device Cache Preference Handler
+      // Auth Session Persistence Toggle Handler (Shared-Device Safe Default)
+      const btnToggleAuthPersist = document.getElementById('btnToggleAuthPersist');
+      if (btnToggleAuthPersist) {
+        btnToggleAuthPersist.addEventListener('click', async () => {
+          const bk = window.MaydanBackend;
+          if (!bk || typeof bk.applyAuthPersistencePreference !== 'function') return;
+          const nextVal = !bk.isTrustedDeviceAuthEnabled();
+          btnToggleAuthPersist.disabled = true;
+          try {
+            const applied = await bk.applyAuthPersistencePreference(nextVal);
+            const authBadge = document.getElementById('tsAuthPersistBadge');
+            if (authBadge) authBadge.textContent = applied.enabled ? 'جهاز شخصي (تذكّر الدخول)' : 'جلسة مؤقتة (آمن)';
+            btnToggleAuthPersist.textContent = applied.enabled
+              ? 'العودة لوضع الجلسة المؤقتة (إلغاء تذكّر الدخول)'
+              : 'تفعيل تذكّر تسجيل الدخول لهذا الجهاز الشخصي';
+            const loginChk = document.getElementById('chkRememberDevice');
+            if (loginChk) loginChk.checked = applied.enabled;
+            toast(applied.enabled
+              ? 'تم تفعيل تذكّر تسجيل الدخول لهذا الجهاز الشخصي ✓'
+              : 'تم التبديل لوضع الجلسة المؤقتة الآمن (ينتهي الدخول بإغلاق المتصفح) ✓');
+          } finally {
+            btnToggleAuthPersist.disabled = false;
+          }
+        });
+      }
+
+      // Trusted Personal Device Cache Preference Handler (with Honest IndexedDB Teardown)
       const btnToggleTrustedCache = document.getElementById('btnToggleTrustedCache');
       const btnReloadForCacheMode = document.getElementById('btnReloadForCacheMode');
       if (btnToggleTrustedCache) {
-        btnToggleTrustedCache.addEventListener('click', () => {
+        btnToggleTrustedCache.addEventListener('click', async () => {
           const bk = window.MaydanBackend;
           if (!bk || typeof bk.isTrustedDeviceCacheEnabled !== 'function') return;
           const nextVal = !bk.isTrustedDeviceCacheEnabled();
-          bk.setTrustedDeviceCachePreference(nextVal);
           const badge = document.getElementById('tsCacheModeBadge');
-          if (badge) badge.textContent = nextVal ? 'تخزين دائم (جهاز شخصي)' : 'ذاكرة مؤقتة (آمن)';
-          btnToggleTrustedCache.textContent = nextVal
-            ? 'العودة لوضع الذاكرة المؤقتة الآمن (إلغاء التخزين الدائم)'
-            : 'تفعيل التخزين الدائم لهذا الجهاز الشخصي';
-          if (btnReloadForCacheMode) btnReloadForCacheMode.classList.remove('hidden');
-          toast(nextVal
-            ? 'تم حفظ خيار التخزين الدائم للجهاز الشخصي — أعد التحميل لتفعيله ✓'
-            : 'تم العودة للذاكرة المؤقتة الآمنة — أعد التحميل لتفعيله ✓');
+          const cacheNote = document.getElementById('tsCacheStatusNote');
+          btnToggleTrustedCache.disabled = true;
+          try {
+            if (nextVal) {
+              bk.setTrustedDeviceCachePreference(true);
+              if (badge) badge.textContent = 'تخزين دائم (جهاز شخصي)';
+              btnToggleTrustedCache.textContent = 'العودة لوضع الذاكرة المؤقتة الآمن (إلغاء التخزين الدائم)';
+              if (btnReloadForCacheMode) btnReloadForCacheMode.classList.remove('hidden');
+              if (cacheNote) {
+                cacheNote.textContent = 'تم حفظ خيار التخزين الدائم لهذا الجهاز الشخصي — أعد التحميل لتفعيله.';
+                cacheNote.classList.remove('hidden');
+              }
+              toast('تم حفظ خيار التخزين الدائم للجهاز الشخصي — أعد التحميل لتفعيله ✓');
+            } else if (typeof bk.disableTrustedDeviceCacheSafely === 'function') {
+              const res = await bk.disableTrustedDeviceCacheSafely();
+              if (badge) badge.textContent = 'ذاكرة مؤقتة (آمن)';
+              btnToggleTrustedCache.textContent = 'تفعيل التخزين الدائم لهذا الجهاز الشخصي';
+              if (btnReloadForCacheMode) btnReloadForCacheMode.classList.toggle('hidden', !res.requiresReload);
+              if (cacheNote) {
+                cacheNote.textContent = res.messageAr;
+                cacheNote.classList.remove('hidden');
+              }
+              toast(res.messageAr, Boolean(res.indexedDbAttempted && !res.indexedDbCleared));
+            } else {
+              bk.setTrustedDeviceCachePreference(false);
+              if (badge) badge.textContent = 'ذاكرة مؤقتة (آمن)';
+              btnToggleTrustedCache.textContent = 'تفعيل التخزين الدائم لهذا الجهاز الشخصي';
+              if (btnReloadForCacheMode) btnReloadForCacheMode.classList.remove('hidden');
+              toast('تم العودة للذاكرة المؤقتة الآمنة — أعد التحميل لتفعيله ✓');
+            }
+          } finally {
+            btnToggleTrustedCache.disabled = false;
+          }
         });
       }
       if (btnReloadForCacheMode) {
         btnReloadForCacheMode.addEventListener('click', () => location.reload());
       }
 
-      // Permanent Account & Personal Data Deletion Handler
+      // Permanent Account & Personal Data Deletion Handler (Strict Partial-Failure & Safe Retry)
       const btnOpenDeleteAccount = document.getElementById('btnOpenDeleteAccount');
       const tsDeleteAccountConfirmBox = document.getElementById('tsDeleteAccountConfirmBox');
       const btnCancelDeleteAccount = document.getElementById('btnCancelDeleteAccount');
@@ -12212,24 +12558,56 @@
         btnConfirmDeleteAccount.addEventListener('click', async () => {
           if (!isFirebaseMode || !window.MaydanBackend || typeof window.MaydanBackend.deleteMyAccountAndData !== 'function') return;
           const inp = document.getElementById('tsDeleteAccountInput');
+          const statusBox = document.getElementById('tsDeleteAccountStatusBox');
           const typed = inp ? String(inp.value || '').trim() : '';
           if (typed !== 'حذف') {
             toast('اكتب كلمة «حذف» بالضبط للتأكيد', true);
             return;
           }
           btnConfirmDeleteAccount.disabled = true;
+          if (statusBox) {
+            statusBox.textContent = 'جاري التحقق من تنظيف بياناتك السحابية خطوة بخطوة...';
+            statusBox.classList.remove('hidden');
+          }
           try {
             const result = await window.MaydanBackend.deleteMyAccountAndData();
-            if (result && result.requiresRecentLogin) {
-              toast('تم مسح بياناتك السحابية، لكن حذف حساب الدخول يتطلب إعادة تسجيل الدخول بحساب Google للتأكيد الأمني.', true);
+            if (result && result.partialFailure) {
+              if (statusBox) {
+                statusBox.textContent = result.messageAr || 'تعذّر إتمام بعض خطوات التنظيف — أعد المحاولة بأمان.';
+                statusBox.classList.remove('hidden');
+              }
+              btnConfirmDeleteAccount.textContent = '🔄 إعادة محاولة استكمال التنظيف والحذف';
+              toast(result.messageAr || 'فشل جزئي في تنظيف البيانات — لم يُحذف حساب الدخول حتى يكتمل التنظيف.', true);
               return;
             }
-            document.getElementById('teamSettingsModal').classList.add('hidden');
-            resetAppSessionState({ resetTab: true, clearTeamCache: true });
-            showLoginScreenState('signed_out', 'تم حذف حسابك وجميع بياناتك بنجاح.');
-            toast('تم حذف حسابك وجميع بياناتك نهائياً ✓');
+            if (result && result.requiresRecentLogin) {
+              if (statusBox) {
+                statusBox.textContent = result.messageAr;
+                statusBox.classList.remove('hidden');
+              }
+              toast(result.messageAr || 'تم مسح بياناتك السحابية، لكن حذف حساب الدخول يتطلب إعادة تسجيل الدخول بحساب Google للتأكيد الأمني.', true);
+              return;
+            }
+            if (result && result.authDeleted && result.firestoreCleaned) {
+              document.getElementById('teamSettingsModal').classList.add('hidden');
+              resetAppSessionState({ resetTab: true, clearTeamCache: true });
+              showLoginScreenState('signed_out', result.messageAr || 'تم حذف حسابك وجميع بياناتك بنجاح.');
+              toast(result.messageAr || 'تم حذف حسابك وجميع بياناتك نهائياً ✓');
+            } else {
+              const fallbackMsg = (result && result.messageAr) || 'لم يكتمل التحقق من حذف الحساب — حاول مجدداً.';
+              if (statusBox) {
+                statusBox.textContent = fallbackMsg;
+                statusBox.classList.remove('hidden');
+              }
+              toast(fallbackMsg, true);
+            }
           } catch (err) {
-            toast((err && err.message) || 'تعذّر إتمام حذف الحساب — حاول مجدداً', true);
+            const errMsg = (err && err.message) || 'تعذّر إتمام حذف الحساب — حاول مجدداً';
+            if (statusBox) {
+              statusBox.textContent = errMsg;
+              statusBox.classList.remove('hidden');
+            }
+            toast(errMsg, true);
           } finally {
             btnConfirmDeleteAccount.disabled = false;
           }
