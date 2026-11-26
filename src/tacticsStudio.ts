@@ -162,10 +162,19 @@ export interface StudioContext {
   getCurrentUser?: () => MinimalPlayer | null;
   getPlayerOvr?: (p: MinimalPlayer) => number | null;
   getReadiness?: () => MinimalReadinessLog[];
-  getTactics: () => { formation: string; slots: Record<string, string> };
+  getTactics: () => {
+    formation: string;
+    slots: Record<string, string>;
+    publishedByName?: string;
+    publishedAtMs?: number;
+    votes?: Record<string, string>;
+  };
   setTactics: (next: { formation: string; slots: Record<string, string> }) => void;
-  getTeamSettings: () => { teamName?: string; logo?: string };
+  getTeamSettings: () => { teamName?: string; logo?: string; lineupPermission?: string };
   isAdmin: () => boolean;
+  canPublishLineup?: () => boolean;
+  onPublishLineup?: (next: { formation: string; slots: Record<string, string> }) => Promise<void> | void;
+  onVoteLineup?: (vote: 'approve' | 'swap') => Promise<void> | void;
   isFirebaseMode: () => boolean;
   openSlotPicker: (slotLabel: string, currentPlayerId: string | undefined, onPick: (playerId: string) => void) => void;
   openPngPreview: (dataUrl: string, blob: Blob | null, fileName: string, title: string) => void;
@@ -1957,6 +1966,38 @@ class TacticsStudioController {
       img.onerror = () => resolve(null);
       img.src = src;
     });
+  }
+
+  public async shareLineupOnWhatsApp(): Promise<void> {
+    if (!this.ctx) return;
+    const form = this.getCurrentFormation();
+    const assigned = this.getAssignedPlayersForCurrentFormation();
+    const settings = this.ctx.getTeamSettings();
+    const teamName = settings.teamName || 'فريق السداسي';
+    const lines = [
+      `⚽ *تشكيلة ${teamName} (${form.name})*`,
+      ...form.slots.map((s, idx) => {
+        const pl = assigned[idx];
+        return `• ${s.label}: ${pl ? `${pl.name}${pl.jersey ? ` (#${pl.jersey})` : ''}` : 'غير محدد'}`;
+      }),
+      '— عبر تطبيق ميدان 6v6 🏆',
+    ];
+    const text = lines.join('\n');
+    await this.exportLineupPosterPng();
+    const a = document.createElement('a');
+    a.href = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.click();
+  }
+
+  public getCurrentLineupPayload(): { formation: string; slots: Record<string, string> } {
+    const form = this.getCurrentFormation();
+    const t = this.ctx?.getTactics() || { formation: form.id, slots: {} };
+    return {
+      formation: form.id,
+      slots: { ...(t.slots || {}) },
+    };
   }
 
   private async exportLineupPosterPng(): Promise<void> {

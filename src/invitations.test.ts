@@ -37,8 +37,26 @@ test('Smart Invitations: creates MDN-XXXX-XXXX CSPRNG code with default single-u
   const meta = computeInviteStatus(inv, now + 1000);
   assert.equal(meta.status, 'active');
   assert.equal(meta.labelAr, 'فعالة');
+  assert.ok(meta.reasonAr.length > 0);
   assert.equal(meta.canUse, true);
   assert.equal(meta.remainingUses, 1);
+  assert.equal('createdBy' in inv, false);
+
+  const shareInv = createSmartInvitationRecord(
+    {
+      teamName: 'فريق النخبة',
+      usageType: 'multi',
+      maxUses: 100,
+      durationDays: 90,
+      requireApproval: false,
+      isMemberShareCode: true,
+      nowMs: now,
+    },
+    { isFirebaseMode: true, isCaptainSession: true }
+  );
+  assert.equal(shareInv.isMemberShareCode, true);
+  assert.equal(shareInv.requireApproval, true);
+  assert.match(computeInviteStatus(shareInv, now + 1000).reasonAr, /موافقة/);
 });
 
 test('Smart Invitations: blocks unauthorized non-captain player from creating or revoking invitations', () => {

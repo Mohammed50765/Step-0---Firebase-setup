@@ -1,13 +1,77 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import {
+  browserLocalPersistence,
+  browserSessionPersistence,
+  getAuth,
+  getRedirectResult,
+  GoogleAuthProvider,
+  indexedDBLocalPersistence,
+  setPersistence,
+  signInWithRedirect,
+} from 'firebase/auth';
+import {
+  doc,
+  getDocFromServer,
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+function initPersistentDb(): Firestore {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch {
+    try {
+      return initializeFirestore(
+        app,
+        {
+          localCache: persistentLocalCache({}),
+        },
+        firebaseConfig.firestoreDatabaseId
+      );
+    } catch {
+      return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    }
+  }
+}
+
+export const db: Firestore = initPersistentDb();
 export const auth = getAuth(app);
+
+async function initAuthPersistence(): Promise<void> {
+  const candidates = [
+    browserLocalPersistence,
+    indexedDBLocalPersistence,
+    browserSessionPersistence,
+  ];
+  for (const mode of candidates) {
+    try {
+      await setPersistence(auth, mode);
+      return;
+    } catch {
+      // Try next supported persistence layer
+    }
+  }
+  console.warn('Firebase Auth could not configure explicit persistence; using SDK default.');
+}
+
+export const authPersistenceReady: Promise<void> = initAuthPersistence();
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+export { getRedirectResult, signInWithRedirect };
 
 export enum OperationType {
   CREATE = 'create',

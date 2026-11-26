@@ -18,6 +18,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -33,6 +34,7 @@ import {
 
 const PROJECT_ID = 'maydan-6v6-rules-test';
 const ACTIVE_INVITE_CODE = 'K9M2-P4Q7-X8V3';
+const MEMBER_SHARE_CODE = 'MDN-S9H8-A7R6';
 const SHORT_INVITE_CODE = 'MDN-606';
 
 const BASE_SKILLS = {
@@ -68,7 +70,8 @@ async function seedTeamState(): Promise<void> {
       createdAt: now,
     });
 
-    // 2. Team settings + active 12-char CSPRNG invite code
+    // 2. Team settings + active 12-char CSPRNG invite code + permanent member share code
+    const nowMs = Date.now();
     await setDoc(doc(db, 'settings', 'team'), {
       teamId: 'main',
       appName: 'ميدان 6v6',
@@ -77,15 +80,51 @@ async function seedTeamState(): Promise<void> {
       secondaryColor: '#EAB308',
       logo: '',
       inviteCode: ACTIVE_INVITE_CODE,
+      memberShareCode: MEMBER_SHARE_CODE,
       requireApproval: true,
       lockSkills: false,
       themeVersion: 'royal_v2',
+      creatorUid: 'captain_uid',
+      organizerUids: [],
+      lineupPermission: 'all',
+      defaultCurrency: 'ريال',
+      defaultPitchCost: 180,
       updatedAt: now,
     });
     await setDoc(doc(db, 'inviteCodes', ACTIVE_INVITE_CODE), {
       code: ACTIVE_INVITE_CODE,
       active: true,
       requireApproval: true,
+      isMemberShareCode: false,
+      teamId: 'main',
+      teamName: 'فريق السداسي',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'multi',
+      maxUses: 20,
+      usedCount: 0,
+      durationDays: 7,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 7 * 86400000,
+      status: 'active',
+      updatedAt: now,
+    });
+    await setDoc(doc(db, 'inviteCodes', MEMBER_SHARE_CODE), {
+      code: MEMBER_SHARE_CODE,
+      active: true,
+      requireApproval: true,
+      isMemberShareCode: true,
+      teamId: 'main',
+      teamName: 'فريق السداسي',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'multi',
+      maxUses: 50,
+      usedCount: 0,
+      durationDays: 365,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 365 * 86400000,
+      status: 'active',
       updatedAt: now,
     });
 
@@ -515,28 +554,47 @@ test('Dirty Dozen #12: short invite codes (<8 chars), forged timestamps, and una
   );
 
   // Forged client timestamp (!= request.time) MUST fail
+  const nowMs = Date.now();
   await assertFails(
     setDoc(doc(captainDb, 'inviteCodes', 'Q2W3-E4R5-T6Y7'), {
       code: 'Q2W3-E4R5-T6Y7',
       active: true,
       requireApproval: true,
+      isMemberShareCode: false,
+      teamId: 'main',
+      teamName: 'فريق السداسي',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'multi',
+      maxUses: 10,
+      usedCount: 0,
+      durationDays: 7,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 7 * 86400000,
+      status: 'active',
       updatedAt: Timestamp.fromMillis(1700000000000),
     })
   );
 
   // Outsider trying to self-approve joinRequest when requireApproval == true MUST fail
-  await assertFails(
-    setDoc(doc(outsiderDb, 'joinRequests', 'outsider_uid'), {
-      uid: 'outsider_uid',
-      name: 'غريب',
-      jersey: 14,
-      primaryPos: 'مهاجم',
-      inviteCode: ACTIVE_INVITE_CODE,
-      status: 'approved',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    })
-  );
+  const approveAbuseBatch = writeBatch(outsiderDb);
+  approveAbuseBatch.set(doc(outsiderDb, 'joinRequests', 'outsider_uid'), {
+    uid: 'outsider_uid',
+    name: 'غريب',
+    jersey: 14,
+    primaryPos: 'مهاجم',
+    inviteCode: ACTIVE_INVITE_CODE,
+    status: 'approved',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  approveAbuseBatch.update(doc(outsiderDb, 'inviteCodes', ACTIVE_INVITE_CODE), {
+    usedCount: 1,
+    active: true,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(approveAbuseBatch.commit());
 
   // Outsider with bogus invite code MUST fail
   await assertFails(
@@ -552,8 +610,8 @@ test('Dirty Dozen #12: short invite codes (<8 chars), forged timestamps, and una
     })
   );
 
-  // Outsider submitting valid pending joinRequest with active 12-char invite code MUST succeed
-  await assertSucceeds(
+  // Standalone non-atomic joinRequest without incrementing inviteCodes.usedCount MUST fail
+  await assertFails(
     setDoc(doc(outsiderDb, 'joinRequests', 'outsider_uid'), {
       uid: 'outsider_uid',
       name: 'لاعب جديد',
@@ -565,6 +623,26 @@ test('Dirty Dozen #12: short invite codes (<8 chars), forged timestamps, and una
       updatedAt: serverTimestamp(),
     })
   );
+
+  // Valid atomic pending joinRequest + inviteCodes quota consumption MUST succeed
+  const validJoinBatch = writeBatch(outsiderDb);
+  validJoinBatch.set(doc(outsiderDb, 'joinRequests', 'outsider_uid'), {
+    uid: 'outsider_uid',
+    name: 'لاعب جديد',
+    jersey: 14,
+    primaryPos: 'مهاجم',
+    inviteCode: ACTIVE_INVITE_CODE,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  validJoinBatch.update(doc(outsiderDb, 'inviteCodes', ACTIVE_INVITE_CODE), {
+    usedCount: 1,
+    active: true,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(validJoinBatch.commit());
 });
 
 // ==================== STEP 5ب #13: Private Pitch Payment Isolation ====================
@@ -660,28 +738,40 @@ test('Step 5ب #14: team members can read pitchSessions/current aggregate only; 
 });
 
 // ==================== SECURITY FIX #15: IDOR Impersonation Blocked Across Reports/Attendance/Readiness/Injuries ====================
-test('Security Fix #15 (IDOR): non-captain cannot forge playerId of another player on create; own playerId succeeds', async () => {
+test('Security Fix #15 (IDOR): non-captain cannot forge playerId of another player on create; own playerId atomic report succeeds', async () => {
   const playerADb = testEnv
     .authenticatedContext('player_a', { email_verified: true })
     .firestore();
+  const nowMs = Date.now();
 
   // Impersonating player_b in reports -> MUST fail
-  await assertFails(
-    setDoc(doc(playerADb, 'reports', 'rep_idor_1'), {
-      teamId: 'main',
-      playerId: 'player_b',
-      ownerUid: 'player_a',
-      opponent: 'النسور',
-      goals: 10,
-      assists: 5,
-      minutes: 50,
-      rating: 10,
-      pitchMode: '6v6',
-      matchResult: 'فوز',
-      goalsConceded: 1,
-      createdAt: serverTimestamp(),
-    })
-  );
+  const idorReportBatch = writeBatch(playerADb);
+  idorReportBatch.set(doc(playerADb, 'reports', 'rep_idor_1'), {
+    teamId: 'main',
+    playerId: 'player_b',
+    ownerUid: 'player_a',
+    playerName: 'لاعب أ',
+    opponent: 'النسور',
+    goals: 10,
+    assists: 5,
+    minutes: 50,
+    rating: 10,
+    pitchMode: '6v6',
+    matchResult: 'فوز',
+    goalsConceded: 1,
+    confirmedByUids: [],
+    verified: false,
+    createdAtMs: nowMs,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  idorReportBatch.set(doc(playerADb, 'reportThrottle', 'player_a'), {
+    uid: 'player_a',
+    teamId: 'main',
+    lastReportAtMs: nowMs,
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(idorReportBatch.commit());
 
   // Impersonating player_b in attendance -> MUST fail
   await assertFails(
@@ -692,8 +782,9 @@ test('Security Fix #15 (IDOR): non-captain cannot forge playerId of another play
       playerName: 'لاعب ب',
       date: '2026-11-24',
       type: 'مباراة',
-      status: 'ما فيني',
+      status: 'معتذر',
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     })
   );
 
@@ -726,23 +817,34 @@ test('Security Fix #15 (IDOR): non-captain cannot forge playerId of another play
     })
   );
 
-  // Valid own-identity report with Phase A fields -> MUST succeed
-  await assertSucceeds(
-    setDoc(doc(playerADb, 'reports', 'rep_own_ok'), {
-      teamId: 'main',
-      playerId: 'player_a',
-      ownerUid: 'player_a',
-      opponent: 'النسور',
-      goals: 2,
-      assists: 1,
-      minutes: 50,
-      rating: 8,
-      pitchMode: '11v11',
-      matchResult: 'فوز',
-      goalsConceded: 1,
-      createdAt: serverTimestamp(),
-    })
-  );
+  // Valid own-identity report paired with reportThrottle -> MUST succeed
+  const okReportBatch = writeBatch(playerADb);
+  okReportBatch.set(doc(playerADb, 'reports', 'rep_own_ok'), {
+    teamId: 'main',
+    playerId: 'player_a',
+    ownerUid: 'player_a',
+    playerName: 'لاعب أ',
+    opponent: 'النسور',
+    goals: 2,
+    assists: 1,
+    minutes: 50,
+    rating: 8,
+    pitchMode: '11v11',
+    matchResult: 'فوز',
+    goalsConceded: 1,
+    confirmedByUids: [],
+    verified: false,
+    createdAtMs: nowMs,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  okReportBatch.set(doc(playerADb, 'reportThrottle', 'player_a'), {
+    uid: 'player_a',
+    teamId: 'main',
+    lastReportAtMs: nowMs,
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(okReportBatch.commit());
 });
 
 // ==================== PHASE A #16: 360-Point Budget & Role Override Validation ====================
@@ -1155,6 +1257,11 @@ test('Smart Invitations #22: enforces Captain-only create/list/revoke, atomic qu
       code: smartCode,
       active: true,
       requireApproval: true,
+      isMemberShareCode: false,
+      teamId: 'main',
+      teamName: 'فريق السداسي',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
       usageType: 'single',
       maxUses: 1,
       usedCount: 0,
@@ -1168,27 +1275,33 @@ test('Smart Invitations #22: enforces Captain-only create/list/revoke, atomic qu
   await assertFails(getDocs(collection(playerADb, 'inviteCodes')));
   await assertFails(getDocs(collection(outsider1Db, 'inviteCodes')));
 
-  // Captain creates single-use Smart Invite and lists invitations log
-  await assertSucceeds(
-    setDoc(doc(captainDb, 'inviteCodes', smartCode), {
-      code: smartCode,
-      active: true,
-      requireApproval: true,
-      teamId: 'main',
-      teamName: 'فريق السداسي',
-      appName: 'ميدان 6v6',
-      primaryColor: '#FACC15',
-      usageType: 'single',
-      maxUses: 1,
-      usedCount: 0,
-      durationDays: 7,
-      createdAtMs: nowMs,
-      expiresAtMs: nowMs + 7 * 86400000,
-      status: 'active',
-      createdBy: 'captain_uid',
-      updatedAt: serverTimestamp(),
-    })
-  );
+  // Captain creates PII-free single-use Smart Invite + private inviteAdminLogs and lists invitations
+  const capBatch = writeBatch(captainDb);
+  capBatch.set(doc(captainDb, 'inviteCodes', smartCode), {
+    code: smartCode,
+    active: true,
+    requireApproval: true,
+    isMemberShareCode: false,
+    teamId: 'main',
+    teamName: 'فريق السداسي',
+    appName: 'ميدان 6v6',
+    primaryColor: '#FACC15',
+    usageType: 'single',
+    maxUses: 1,
+    usedCount: 0,
+    durationDays: 7,
+    createdAtMs: nowMs,
+    expiresAtMs: nowMs + 7 * 86400000,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  });
+  capBatch.set(doc(captainDb, 'inviteAdminLogs', smartCode), {
+    code: smartCode,
+    createdBy: 'captain_uid',
+    createdAtMs: nowMs,
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(capBatch.commit());
   await assertSucceeds(getDocs(collection(captainDb, 'inviteCodes')));
 
   // Existing team member (player_a) cannot submit a duplicate joinRequest
@@ -1220,7 +1333,7 @@ test('Smart Invitations #22: enforces Captain-only create/list/revoke, atomic qu
     })
   );
 
-  // Outsider #1 atomically consumes the single-use invite (usedCount 0 -> 1, active -> false, status -> completed)
+  // Outsider #1 atomically consumes the single-use invite WITHOUT writing PII (lastUsedBy)
   const joinBatch1 = writeBatch(outsider1Db);
   joinBatch1.set(doc(outsider1Db, 'joinRequests', 'outsider_1'), {
     uid: 'outsider_1',
@@ -1237,7 +1350,6 @@ test('Smart Invitations #22: enforces Captain-only create/list/revoke, atomic qu
     usedCount: 1,
     active: false,
     status: 'completed',
-    lastUsedBy: 'outsider_1',
     updatedAt: serverTimestamp(),
   });
   await assertSucceeds(joinBatch1.commit());
@@ -1258,11 +1370,998 @@ test('Smart Invitations #22: enforces Captain-only create/list/revoke, atomic qu
     usedCount: 2,
     active: false,
     status: 'completed',
-    lastUsedBy: 'outsider_2',
     updatedAt: serverTimestamp(),
   });
   await assertFails(joinBatch2.commit());
 });
 
+// ==================== HARDENED #23: Member Share Code Pending-Only Enforcement ====================
+test('Hardened #23: isMemberShareCode enforces requireApproval==true and blocks direct players/{uid} join', async () => {
+  const captainDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+  const outsider1Db = testEnv.authenticatedContext('outsider_m1', { email_verified: true }).firestore();
+  const outsider2Db = testEnv.authenticatedContext('outsider_m2', { email_verified: true }).firestore();
+  const nowMs = Date.now();
+
+  // Captain cannot create isMemberShareCode: true with requireApproval: false
+  await assertFails(
+    setDoc(doc(captainDb, 'inviteCodes', 'MDN-BAD-SHARE1'), {
+      code: 'MDN-BAD-SHARE1',
+      active: true,
+      requireApproval: false,
+      isMemberShareCode: true,
+      teamId: 'main',
+      teamName: 'فريق السداسي',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'multi',
+      maxUses: 50,
+      usedCount: 0,
+      durationDays: 30,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 30 * 86400000,
+      status: 'active',
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Outsider trying direct status=='approved' + players/{uid} via memberShareCode MUST fail
+  const directAbuseBatch = writeBatch(outsider1Db);
+  directAbuseBatch.set(doc(outsider1Db, 'joinRequests', 'outsider_m1'), {
+    uid: 'outsider_m1',
+    name: 'متسلل مباشر',
+    jersey: 20,
+    primaryPos: 'مهاجم',
+    inviteCode: MEMBER_SHARE_CODE,
+    status: 'approved',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  directAbuseBatch.set(doc(outsider1Db, 'players', 'outsider_m1'), {
+    id: 'outsider_m1',
+    teamId: 'main',
+    ownerUid: 'outsider_m1',
+    name: 'متسلل مباشر',
+    role: 'player',
+    jersey: 20,
+    primaryPos: 'مهاجم',
+    skills: BASE_SKILLS,
+    availableStatus: 'available',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  directAbuseBatch.update(doc(outsider1Db, 'inviteCodes', MEMBER_SHARE_CODE), {
+    usedCount: 1,
+    active: true,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(directAbuseBatch.commit());
+
+  // Outsider using memberShareCode with status=='pending' + atomic quota increment MUST succeed
+  const pendingOkBatch = writeBatch(outsider2Db);
+  pendingOkBatch.set(doc(outsider2Db, 'joinRequests', 'outsider_m2'), {
+    uid: 'outsider_m2',
+    name: 'طالب انضمام',
+    jersey: 21,
+    primaryPos: 'مدافع',
+    inviteCode: MEMBER_SHARE_CODE,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  pendingOkBatch.update(doc(outsider2Db, 'inviteCodes', MEMBER_SHARE_CODE), {
+    usedCount: 1,
+    active: true,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(pendingOkBatch.commit());
+});
+
+// ==================== HARDENED #24: Public Invite PII Isolation & inviteAdminLogs Captain-Only ====================
+test('Hardened #24: inviteCodes rejects createdBy/lastUsedBy PII and inviteAdminLogs is Captain-only', async () => {
+  const captainDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+  const playerADb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+  const outsiderDb = testEnv.authenticatedContext('outsider_pii', { email_verified: true }).firestore();
+  const nowMs = Date.now();
+
+  // Even Captain cannot write createdBy onto public inviteCodes doc
+  await assertFails(
+    setDoc(doc(captainDb, 'inviteCodes', 'MDN-PII-9991'), {
+      code: 'MDN-PII-9991',
+      active: true,
+      requireApproval: true,
+      isMemberShareCode: false,
+      teamId: 'main',
+      teamName: 'فريق السداسي',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'multi',
+      maxUses: 10,
+      usedCount: 0,
+      durationDays: 7,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 7 * 86400000,
+      status: 'active',
+      createdBy: 'captain_uid',
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Outsider cannot inject lastUsedBy onto inviteCodes during join
+  const piiJoinBatch = writeBatch(outsiderDb);
+  piiJoinBatch.set(doc(outsiderDb, 'joinRequests', 'outsider_pii'), {
+    uid: 'outsider_pii',
+    name: 'ضيف',
+    jersey: 22,
+    primaryPos: 'لاعب وسط',
+    inviteCode: ACTIVE_INVITE_CODE,
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  piiJoinBatch.update(doc(outsiderDb, 'inviteCodes', ACTIVE_INVITE_CODE), {
+    usedCount: 1,
+    active: true,
+    status: 'active',
+    lastUsedBy: 'outsider_pii',
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(piiJoinBatch.commit());
+
+  // Captain reads/writes inviteAdminLogs; regular player & outsider cannot
+  await assertSucceeds(
+    setDoc(doc(captainDb, 'inviteAdminLogs', ACTIVE_INVITE_CODE), {
+      code: ACTIVE_INVITE_CODE,
+      createdBy: 'captain_uid',
+      createdAtMs: nowMs,
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(getDoc(doc(captainDb, 'inviteAdminLogs', ACTIVE_INVITE_CODE)));
+  await assertFails(getDoc(doc(playerADb, 'inviteAdminLogs', ACTIVE_INVITE_CODE)));
+  await assertFails(
+    setDoc(doc(playerADb, 'inviteAdminLogs', ACTIVE_INVITE_CODE), {
+      code: ACTIVE_INVITE_CODE,
+      createdBy: 'player_a',
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertFails(getDoc(doc(outsiderDb, 'inviteAdminLogs', ACTIVE_INVITE_CODE)));
+});
+
+// ==================== HARDENED #25: 45-Min Report Cooldown & Peer-Only Verification ====================
+test('Hardened #25: reportThrottle blocks rapid repeat reports within 45m and peer confirmReport blocks self-confirmation', async () => {
+  const playerADb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+  const playerBDb = testEnv.authenticatedContext('player_b', { email_verified: true }).firestore();
+  const nowMs = Date.now();
+
+  // First atomic report by player_a + reportThrottle create MUST succeed
+  const batch1 = writeBatch(playerADb);
+  batch1.set(doc(playerADb, 'reports', 'rep_cd_1'), {
+    teamId: 'main',
+    playerId: 'player_a',
+    ownerUid: 'player_a',
+    playerName: 'لاعب أ',
+    opponent: 'النسور',
+    goals: 2,
+    assists: 1,
+    minutes: 45,
+    rating: 8,
+    confirmedByUids: [],
+    verified: false,
+    createdAtMs: nowMs,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  batch1.set(doc(playerADb, 'reportThrottle', 'player_a'), {
+    uid: 'player_a',
+    teamId: 'main',
+    lastReportAtMs: nowMs,
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(batch1.commit());
+
+  // Immediate 2nd report within 45 minutes MUST fail server-side
+  const batch2 = writeBatch(playerADb);
+  batch2.set(doc(playerADb, 'reports', 'rep_cd_2'), {
+    teamId: 'main',
+    playerId: 'player_a',
+    ownerUid: 'player_a',
+    playerName: 'لاعب أ',
+    opponent: 'الصقور',
+    goals: 3,
+    assists: 0,
+    minutes: 45,
+    rating: 8,
+    confirmedByUids: [],
+    verified: false,
+    createdAtMs: nowMs + 1000,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  batch2.set(doc(playerADb, 'reportThrottle', 'player_a'), {
+    uid: 'player_a',
+    teamId: 'main',
+    lastReportAtMs: nowMs + 1000,
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(batch2.commit());
+
+  // Self-confirmation by owner (player_a) MUST fail
+  await assertFails(
+    updateDoc(doc(playerADb, 'reports', 'rep_cd_1'), {
+      confirmedByUids: ['player_a'],
+      verified: true,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Teammate confirmation by player_b MUST succeed
+  await assertSucceeds(
+    updateDoc(doc(playerBDb, 'reports', 'rep_cd_1'), {
+      confirmedByUids: ['player_b'],
+      verified: true,
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== HARDENED #26: Tactics Permissions, Lineup Votes & Self-Leave ====================
+test('Hardened #26: tactics obeys lineupPermission, lineupVotes blocks impersonation, and non-captain can self-leave', async () => {
+  const playerADb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+  const playerBDb = testEnv.authenticatedContext('player_b', { email_verified: true }).firestore();
+  const captainDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+
+  // When lineupPermission == 'organizers', regular non-organizer player cannot write tactics/current
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await updateDoc(doc(ctx.firestore(), 'settings', 'team'), { lineupPermission: 'organizers' });
+  });
+  await assertFails(
+    setDoc(doc(playerADb, 'tactics', 'current'), {
+      teamId: 'main',
+      formation: '2-2-1',
+      slots: { GK: 'captain_uid', ST: 'player_a' },
+      publishedByUid: 'player_a',
+      publishedByName: 'لاعب أ',
+      publishedAtMs: Date.now(),
+      previousSnapshot: null,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // When lineupPermission == 'all', team member can publish & undo tactics/current
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await updateDoc(doc(ctx.firestore(), 'settings', 'team'), { lineupPermission: 'all' });
+  });
+  await assertSucceeds(
+    setDoc(doc(playerADb, 'tactics', 'current'), {
+      teamId: 'main',
+      formation: '2-2-1',
+      slots: { GK: 'captain_uid', ST: 'player_a' },
+      publishedByUid: 'player_a',
+      publishedByName: 'لاعب أ',
+      publishedAtMs: Date.now(),
+      previousSnapshot: { formation: '1-2-2', slots: { GK: 'captain_uid' } },
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Impersonating another UID in lineupVotes MUST fail; voting under own UID succeeds
+  await assertFails(
+    setDoc(doc(playerADb, 'lineupVotes', 'player_b'), {
+      teamId: 'main',
+      uid: 'player_b',
+      vote: 'approve',
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    setDoc(doc(playerBDb, 'lineupVotes', 'player_b'), {
+      teamId: 'main',
+      uid: 'player_b',
+      vote: 'swap',
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Non-captain player_a CAN self-delete their own player doc (leave team), whereas Captain CANNOT self-delete
+  await assertFails(deleteDoc(doc(captainDb, 'players', 'captain_uid')));
+  await assertSucceeds(deleteDoc(doc(playerADb, 'players', 'player_a')));
+});
+
+// ==================== HARDENED #27: Tier 2 Organizer Limited Settings & Pitch Management ====================
+test('Hardened #27: Tier 2 organizer updates allowed settings & pitchSessions, but cannot tamper inviteCode/organizerUids', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await updateDoc(doc(ctx.firestore(), 'settings', 'team'), { organizerUids: ['player_a'] });
+  });
+
+  const organizerDb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+
+  // Organizer CAN update allowed team settings subset
+  await assertSucceeds(
+    updateDoc(doc(organizerDb, 'settings', 'team'), {
+      defaultCurrency: 'د.إ',
+      defaultPitchCost: 220,
+      lineupPermission: 'organizers',
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Organizer CANNOT tamper inviteCode, lockSkills, or organizerUids
+  await assertFails(
+    updateDoc(doc(organizerDb, 'settings', 'team'), {
+      inviteCode: 'Z8X7-C6V5-B4N3',
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertFails(
+    updateDoc(doc(organizerDb, 'settings', 'team'), {
+      organizerUids: ['player_a', 'player_b'],
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertFails(
+    updateDoc(doc(organizerDb, 'settings', 'team'), {
+      lockSkills: true,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Organizer CAN update pitchSessions/current
+  await assertSucceeds(
+    updateDoc(doc(organizerDb, 'pitchSessions', 'current'), {
+      totalCost: 220,
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== HARDENED #28: Normalized Attendance Statuses ====================
+test('Hardened #28: attendance allows جاي/محتمل/معتذر and rejects legacy disallowed values', async () => {
+  const playerADb = testEnv.authenticatedContext('player_a', { email_verified: true }).firestore();
+
+  // Legacy 'ما فيني' MUST fail
+  await assertFails(
+    setDoc(doc(playerADb, 'attendance', 'att_bad_status'), {
+      teamId: 'main',
+      playerId: 'player_a',
+      ownerUid: 'player_a',
+      playerName: 'لاعب أ',
+      date: '2026-11-26',
+      type: 'مباراة',
+      status: 'ما فيني',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Valid 'محتمل' create + update to 'جاي' MUST succeed
+  await assertSucceeds(
+    setDoc(doc(playerADb, 'attendance', 'att_player_a_2026-11-26'), {
+      teamId: 'main',
+      playerId: 'player_a',
+      ownerUid: 'player_a',
+      playerName: 'لاعب أ',
+      date: '2026-11-26',
+      type: 'مباراة',
+      status: 'محتمل',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    updateDoc(doc(playerADb, 'attendance', 'att_player_a_2026-11-26'), {
+      status: 'جاي',
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+async function seedMultiTeamPair(): Promise<void> {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    const now = Timestamp.now();
+    const nowMs = Date.now();
+
+    await setDoc(doc(db, 'platform', 'config'), {
+      allowNewTeams: true,
+      updatedAt: now,
+    });
+
+    await setDoc(doc(db, 'teams', 'team_alpha'), {
+      id: 'team_alpha',
+      teamName: 'فريق ألفا',
+      appName: 'ميدان 6v6',
+      founderUid: 'founder_a',
+      organizerUids: ['org_a'],
+      primaryColor: '#FACC15',
+      secondaryColor: '#EAB308',
+      logo: '',
+      joinMode: 'approval',
+      lineupPublishMode: 'all',
+      defaultCurrency: 'ريال',
+      defaultPitchCost: 180,
+      maxMembersPerTeam: 25,
+      memberCount: 3,
+      inviteCode: 'MT-ALPH-1111',
+      memberShareCode: 'MS-ALPH-1111',
+      lockSkills: false,
+      deletedAt: null,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await setDoc(doc(db, 'teams', 'team_beta'), {
+      id: 'team_beta',
+      teamName: 'فريق بيتا',
+      appName: 'ميدان 6v6',
+      founderUid: 'founder_b',
+      organizerUids: [],
+      primaryColor: '#22C55E',
+      secondaryColor: '#16A34A',
+      logo: '',
+      joinMode: 'instant',
+      lineupPublishMode: 'organizers',
+      defaultCurrency: 'ريال',
+      defaultPitchCost: 160,
+      maxMembersPerTeam: 25,
+      memberCount: 1,
+      inviteCode: 'MT-BETA-2222',
+      memberShareCode: 'MS-BETA-2222',
+      lockSkills: false,
+      deletedAt: null,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const mkMember = (uid: string, teamId: string, name: string, role: 'founder' | 'organizer' | 'member', isOrg: boolean, jersey: number) => ({
+      id: uid,
+      uid,
+      ownerUid: uid,
+      teamId,
+      name,
+      role,
+      isOrganizer: isOrg,
+      jersey,
+      primaryPos: 'مهاجم',
+      skills: BASE_SKILLS,
+      availableStatus: 'متاح',
+      joinedAtMs: nowMs,
+      updatedAtMs: nowMs,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await setDoc(doc(db, 'teams', 'team_alpha', 'members', 'founder_a'), mkMember('founder_a', 'team_alpha', 'مؤسس ألفا', 'founder', true, 10));
+    await setDoc(doc(db, 'teams', 'team_alpha', 'members', 'org_a'), mkMember('org_a', 'team_alpha', 'منظم ألفا', 'organizer', true, 8));
+    await setDoc(doc(db, 'teams', 'team_alpha', 'members', 'mem_a'), mkMember('mem_a', 'team_alpha', 'عضو ألفا', 'member', false, 9));
+    await setDoc(doc(db, 'teams', 'team_beta', 'members', 'founder_b'), mkMember('founder_b', 'team_beta', 'مؤسس بيتا', 'founder', true, 7));
+
+    await setDoc(doc(db, 'users', 'founder_a'), {
+      uid: 'founder_a',
+      displayName: 'مؤسس ألفا',
+      teamIds: ['team_alpha'],
+      ownedTeamIds: ['team_alpha'],
+      activeTeamId: 'team_alpha',
+      updatedAt: now,
+    });
+    await setDoc(doc(db, 'users', 'org_a'), {
+      uid: 'org_a',
+      displayName: 'منظم ألفا',
+      teamIds: ['team_alpha'],
+      ownedTeamIds: [],
+      activeTeamId: 'team_alpha',
+      updatedAt: now,
+    });
+    await setDoc(doc(db, 'users', 'mem_a'), {
+      uid: 'mem_a',
+      displayName: 'عضو ألفا',
+      teamIds: ['team_alpha'],
+      ownedTeamIds: [],
+      activeTeamId: 'team_alpha',
+      updatedAt: now,
+    });
+
+    await setDoc(doc(db, 'inviteCodes', 'MT-ALPH-1111'), {
+      code: 'MT-ALPH-1111',
+      active: true,
+      joinMode: 'approval',
+      requireApproval: true,
+      isMemberShareCode: false,
+      teamId: 'team_alpha',
+      teamName: 'فريق ألفا',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'multi',
+      maxUses: 25,
+      usedCount: 0,
+      durationDays: 14,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 14 * 86400000,
+      status: 'active',
+      updatedAt: now,
+    });
+
+    await setDoc(doc(db, 'inviteCodes', 'MT-BETA-2222'), {
+      code: 'MT-BETA-2222',
+      active: true,
+      joinMode: 'instant',
+      requireApproval: false,
+      isMemberShareCode: false,
+      teamId: 'team_beta',
+      teamName: 'فريق بيتا',
+      appName: 'ميدان 6v6',
+      primaryColor: '#22C55E',
+      usageType: 'multi',
+      maxUses: 25,
+      usedCount: 0,
+      durationDays: 14,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 14 * 86400000,
+      status: 'active',
+      updatedAt: now,
+    });
+
+    await setDoc(doc(db, 'teams', 'team_alpha', 'reports', 'rep_alpha_seed'), {
+      teamId: 'team_alpha',
+      playerId: 'mem_a',
+      ownerUid: 'mem_a',
+      playerName: 'عضو ألفا',
+      opponent: 'النجوم',
+      goals: 1,
+      assists: 1,
+      minutes: 45,
+      rating: 8,
+      confirmedByUids: [],
+      verified: false,
+      createdAtMs: nowMs,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+}
+
+// ==================== MULTI-TEAM #29: Cross-Team & Platform-Owner Isolation ====================
+test('Multi-Team #29: blocks cross-team reads/writes, blocks listing /teams, and denies non-member Platform Owner access', async () => {
+  await seedMultiTeamPair();
+  const founderBDb = testEnv.authenticatedContext('founder_b', { email_verified: true }).firestore();
+  const captainOwnerDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+  const founderADb = testEnv.authenticatedContext('founder_a', { email_verified: true }).firestore();
+
+  // Member of team_beta CANNOT read or write team_alpha docs
+  await assertFails(getDoc(doc(founderBDb, 'teams', 'team_alpha')));
+  await assertFails(getDoc(doc(founderBDb, 'teams', 'team_alpha', 'members', 'mem_a')));
+  await assertFails(getDoc(doc(founderBDb, 'teams', 'team_alpha', 'reports', 'rep_alpha_seed')));
+  await assertFails(
+    setDoc(doc(founderBDb, 'teams', 'team_alpha', 'tactics', 'current'), {
+      teamId: 'team_alpha',
+      formation: '2-2-1',
+      slots: {},
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Listing /teams root is blocked for everyone (even Platform Owner)
+  await assertFails(getDocs(collection(founderADb, 'teams')));
+  await assertFails(getDocs(collection(captainOwnerDb, 'teams')));
+
+  // Platform Owner (admins/captain_uid) who is NOT a member of team_alpha has ZERO access
+  await assertFails(getDoc(doc(captainOwnerDb, 'teams', 'team_alpha')));
+  await assertFails(getDoc(doc(captainOwnerDb, 'teams', 'team_alpha', 'members', 'mem_a')));
+  await assertFails(getDoc(doc(captainOwnerDb, 'teams', 'team_alpha', 'reports', 'rep_alpha_seed')));
+});
+
+// ==================== MULTI-TEAM #30: Zero-Health-Leak, Anti-Escalation & lockSkills ====================
+test('Multi-Team #30: members doc rejects health/PIN fields, role self-escalation, and lockSkills bypass', async () => {
+  await seedMultiTeamPair();
+  const memADb = testEnv.authenticatedContext('mem_a', { email_verified: true }).firestore();
+
+  // Injecting health/medical/PIN fields onto public members/{uid} MUST fail
+  await assertFails(updateDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a'), { sleep: 7, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a'), { injury: 'شد عضلي', updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a'), { pin: '1234', updatedAt: serverTimestamp() }));
+
+  // Role self-escalation MUST fail
+  await assertFails(updateDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a'), { role: 'founder', updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a'), { isOrganizer: true, updatedAt: serverTimestamp() }));
+
+  // When lockSkills == true, non-founder CANNOT modify skills, while jersey update succeeds
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await updateDoc(doc(ctx.firestore(), 'teams', 'team_alpha'), { lockSkills: true });
+  });
+  await assertFails(
+    updateDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a'), {
+      skills: { ...BASE_SKILLS, speed: 10 },
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    updateDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a'), {
+      jersey: 14,
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== MULTI-TEAM #31: Strictly Isolated /private/* Records ====================
+test('Multi-Team #31: /private/* allows owner + team founder only, denying teammates, organizers, and platform owner', async () => {
+  await seedMultiTeamPair();
+  const memADb = testEnv.authenticatedContext('mem_a', { email_verified: true }).firestore();
+  const orgADb = testEnv.authenticatedContext('org_a', { email_verified: true }).firestore();
+  const founderADb = testEnv.authenticatedContext('founder_a', { email_verified: true }).firestore();
+  const captainOwnerDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+
+  const privRef = doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a', 'private', 'rd_1');
+  await assertSucceeds(
+    setDoc(privRef, {
+      kind: 'readiness',
+      uid: 'mem_a',
+      teamId: 'team_alpha',
+      date: '2026-12-01',
+      sleep: 8,
+      fatigue: 3,
+      mood: 9,
+      updatedAtMs: Date.now(),
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // Owner + Team Founder succeed
+  await assertSucceeds(getDoc(privRef));
+  await assertSucceeds(getDocs(collection(founderADb, 'teams', 'team_alpha', 'members', 'mem_a', 'private')));
+
+  // Teammate / Organizer (non-founder) / Platform Owner (non-member) fail
+  await assertFails(getDoc(doc(orgADb, 'teams', 'team_alpha', 'members', 'mem_a', 'private', 'rd_1')));
+  await assertFails(getDocs(collection(orgADb, 'teams', 'team_alpha', 'members', 'mem_a', 'private')));
+  await assertFails(getDoc(doc(captainOwnerDb, 'teams', 'team_alpha', 'members', 'mem_a', 'private', 'rd_1')));
+});
+
+// ==================== MULTI-TEAM #32: Spark Kill-Switch, 3-Owned/5-Joined Caps & 50KB Logo ====================
+test('Multi-Team #32: enforces platform/config allowNewTeams, 3-owned / 5-joined team caps, and 50KB logo limit', async () => {
+  await seedMultiTeamPair();
+  const captainOwnerDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+  const founderADb = testEnv.authenticatedContext('founder_a', { email_verified: true }).firestore();
+  const freshUserDb = testEnv.authenticatedContext('fresh_u', { email_verified: true }).firestore();
+  const nowMs = Date.now();
+
+  // Only Platform Owner can toggle platform/config; regular founder fails
+  await assertFails(setDoc(doc(founderADb, 'platform', 'config'), { allowNewTeams: false, updatedAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(captainOwnerDb, 'platform', 'config'), { allowNewTeams: false, updatedAt: serverTimestamp() }));
+
+  // Creating a team when allowNewTeams == false fails
+  const buildTeamCreateBatch = (userDb: ReturnType<typeof testEnv.authenticatedContext>['firestore'] extends () => infer R ? R : never, uid: string, tid: string, ownedIds: string[], teamIds: string[], logo = '') => {
+    const batch = writeBatch(userDb);
+    batch.set(doc(userDb, 'teams', tid), {
+      id: tid,
+      teamName: 'فريق جديد',
+      appName: 'ميدان 6v6',
+      founderUid: uid,
+      organizerUids: [],
+      primaryColor: '#FACC15',
+      secondaryColor: '#EAB308',
+      logo,
+      joinMode: 'approval',
+      lineupPublishMode: 'all',
+      maxMembersPerTeam: 25,
+      memberCount: 1,
+      inviteCode: 'MT-NEW1-1234',
+      memberShareCode: 'MS-NEW1-1234',
+      lockSkills: false,
+      deletedAt: null,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(
+      doc(userDb, 'users', uid),
+      {
+        uid,
+        displayName: 'مستخدم',
+        teamIds: [...teamIds, tid],
+        ownedTeamIds: [...ownedIds, tid],
+        activeTeamId: tid,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return batch;
+  };
+
+  await assertFails(buildTeamCreateBatch(freshUserDb, 'fresh_u', 'team_blocked', [], []).commit());
+
+  // Re-enable allowNewTeams and verify oversized logo (> 68,500 chars) & 3-owned cap fail
+  await assertSucceeds(setDoc(doc(captainOwnerDb, 'platform', 'config'), { allowNewTeams: true, updatedAt: serverTimestamp() }));
+  const hugeLogo = 'data:image/jpeg;base64,' + 'A'.repeat(69000);
+  await assertFails(buildTeamCreateBatch(freshUserDb, 'fresh_u', 'team_biglogo', [], [], hugeLogo).commit());
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'users', 'maxed_owner'), {
+      uid: 'maxed_owner',
+      teamIds: ['t1', 't2', 't3'],
+      ownedTeamIds: ['t1', 't2', 't3'],
+      updatedAt: Timestamp.now(),
+    });
+  });
+  const maxedDb = testEnv.authenticatedContext('maxed_owner', { email_verified: true }).firestore();
+  await assertFails(buildTeamCreateBatch(maxedDb, 'maxed_owner', 'team_fourth', ['t1', 't2', 't3'], ['t1', 't2', 't3']).commit());
+});
+
+// ==================== MULTI-TEAM #33: Join Modes, Team Cap & Organizer Boundary ====================
+test('Multi-Team #33: enforces approval vs instant join, team maxMembersPerTeam cap, and organizer field lock', async () => {
+  await seedMultiTeamPair();
+  const joiner1Db = testEnv.authenticatedContext('joiner_1', { email_verified: true }).firestore();
+  const orgADb = testEnv.authenticatedContext('org_a', { email_verified: true }).firestore();
+
+  // Attempt instant join onto approval-mode team_alpha MUST fail
+  const badBatch = writeBatch(joiner1Db);
+  badBatch.set(doc(joiner1Db, 'teams', 'team_alpha', 'joinRequests', 'joiner_1'), {
+    uid: 'joiner_1',
+    teamId: 'team_alpha',
+    name: 'منضم غير مصرح',
+    jersey: 17,
+    primaryPos: 'مهاجم',
+    inviteCode: 'MT-ALPH-1111',
+    status: 'approved',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  badBatch.set(doc(joiner1Db, 'teams', 'team_alpha', 'members', 'joiner_1'), {
+    id: 'joiner_1',
+    uid: 'joiner_1',
+    ownerUid: 'joiner_1',
+    teamId: 'team_alpha',
+    name: 'منضم غير مصرح',
+    role: 'member',
+    isOrganizer: false,
+    jersey: 17,
+    primaryPos: 'مهاجم',
+    skills: BASE_SKILLS,
+    availableStatus: 'متاح',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  badBatch.update(doc(joiner1Db, 'teams', 'team_alpha'), { memberCount: increment(1), updatedAt: serverTimestamp() });
+  badBatch.update(doc(joiner1Db, 'inviteCodes', 'MT-ALPH-1111'), { usedCount: 1, active: true, status: 'active', updatedAt: serverTimestamp() });
+  badBatch.set(doc(joiner1Db, 'users', 'joiner_1'), { uid: 'joiner_1', teamIds: ['team_alpha'], updatedAt: serverTimestamp() });
+  await assertFails(badBatch.commit());
+
+  // Valid atomic instant join onto team_beta MUST succeed
+  const okBatch = writeBatch(joiner1Db);
+  okBatch.set(doc(joiner1Db, 'teams', 'team_beta', 'joinRequests', 'joiner_1'), {
+    uid: 'joiner_1',
+    teamId: 'team_beta',
+    name: 'منضم فوري',
+    jersey: 18,
+    primaryPos: 'مدافع',
+    inviteCode: 'MT-BETA-2222',
+    status: 'approved',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  okBatch.set(doc(joiner1Db, 'teams', 'team_beta', 'members', 'joiner_1'), {
+    id: 'joiner_1',
+    uid: 'joiner_1',
+    ownerUid: 'joiner_1',
+    teamId: 'team_beta',
+    name: 'منضم فوري',
+    role: 'member',
+    isOrganizer: false,
+    jersey: 18,
+    primaryPos: 'مدافع',
+    skills: BASE_SKILLS,
+    availableStatus: 'متاح',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  okBatch.update(doc(joiner1Db, 'teams', 'team_beta'), { memberCount: increment(1), updatedAt: serverTimestamp() });
+  okBatch.update(doc(joiner1Db, 'inviteCodes', 'MT-BETA-2222'), { usedCount: 1, active: true, status: 'active', updatedAt: serverTimestamp() });
+  okBatch.set(doc(joiner1Db, 'users', 'joiner_1'), { uid: 'joiner_1', teamIds: ['team_beta'], activeTeamId: 'team_beta', updatedAt: serverTimestamp() }, { merge: true });
+  await assertSucceeds(okBatch.commit());
+
+  // Organizer can update allowed subset (defaultPitchCost), CANNOT tamper joinMode/lockSkills/founderUid
+  await assertSucceeds(updateDoc(doc(orgADb, 'teams', 'team_alpha'), { defaultPitchCost: 240, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(orgADb, 'teams', 'team_alpha'), { joinMode: 'instant', updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(orgADb, 'teams', 'team_alpha'), { lockSkills: true, updatedAt: serverTimestamp() }));
+});
+
+// ==================== MULTI-TEAM #34: Leadership Transfer, Soft Delete & Self-Leave ====================
+test('Multi-Team #34: enforces leadership transfer to existing member, founder-only soft delete, and atomic self-leave', async () => {
+  await seedMultiTeamPair();
+  const founderADb = testEnv.authenticatedContext('founder_a', { email_verified: true }).firestore();
+  const orgADb = testEnv.authenticatedContext('org_a', { email_verified: true }).firestore();
+  const memADb = testEnv.authenticatedContext('mem_a', { email_verified: true }).firestore();
+
+  // Transfer leadership to non-member fails; non-founder transfer fails
+  await assertFails(updateDoc(doc(founderADb, 'teams', 'team_alpha'), { founderUid: 'outsider_x', organizerUids: ['founder_a'], updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(orgADb, 'teams', 'team_alpha'), { founderUid: 'org_a', organizerUids: ['founder_a'], updatedAt: serverTimestamp() }));
+
+  // Founder transfers leadership to existing member mem_a
+  await assertSucceeds(
+    updateDoc(doc(founderADb, 'teams', 'team_alpha'), {
+      founderUid: 'mem_a',
+      organizerUids: ['org_a', 'founder_a'],
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Non-founder org_a can atomically self-leave; new founder (mem_a) cannot self-delete member doc
+  await assertFails(deleteDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a')));
+  const leaveBatch = writeBatch(orgADb);
+  leaveBatch.delete(doc(orgADb, 'teams', 'team_alpha', 'members', 'org_a'));
+  leaveBatch.update(doc(orgADb, 'teams', 'team_alpha'), {
+    memberCount: increment(-1),
+    organizerUids: ['founder_a'],
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(leaveBatch.commit());
+
+  // Soft delete succeeds only for current founder (mem_a)
+  await assertFails(updateDoc(doc(founderADb, 'teams', 'team_alpha'), { deletedAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(memADb, 'teams', 'team_alpha'), { deletedAt: serverTimestamp(), updatedAtMs: Date.now(), updatedAt: serverTimestamp() }));
+});
+
+// ==================== MULTI-TEAM #35: Consolidated Attendance Isolation & /users/{uid} Lock ====================
+test('Multi-Team #35: consolidated attendance isolates per-UID entries in responses map and /users/{uid} denies cross-user access', async () => {
+  await seedMultiTeamPair();
+  const memADb = testEnv.authenticatedContext('mem_a', { email_verified: true }).firestore();
+  const orgADb = testEnv.authenticatedContext('org_a', { email_verified: true }).firestore();
+
+  const attRefMem = doc(memADb, 'teams', 'team_alpha', 'attendance', '2026-12-01_match');
+  await assertSucceeds(
+    setDoc(attRefMem, {
+      matchKey: '2026-12-01_match',
+      teamId: 'team_alpha',
+      date: '2026-12-01',
+      type: 'مباراة',
+      responses: {
+        mem_a: { uid: 'mem_a', playerName: 'عضو ألفا', status: 'جاي', updatedAtMs: Date.now() },
+      },
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // mem_a CANNOT tamper with org_a's key inside responses map
+  await assertFails(
+    updateDoc(attRefMem, {
+      'responses.org_a': { uid: 'org_a', playerName: 'منظم ألفا', status: 'معتذر', updatedAtMs: Date.now() },
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // org_a CAN update their own key inside responses map
+  await assertSucceeds(
+    updateDoc(doc(orgADb, 'teams', 'team_alpha', 'attendance', '2026-12-01_match'), {
+      'responses.org_a': { uid: 'org_a', playerName: 'منظم ألفا', status: 'محتمل', updatedAtMs: Date.now() },
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // /users/{uid} strict self-only
+  await assertFails(getDoc(doc(memADb, 'users', 'org_a')));
+  await assertFails(getDocs(collection(memADb, 'users')));
+});
+
+// ==================== MULTI-TEAM #36: Multi-Team Cooldown, Peer Verify, Pitch Privacy & Quorum Lock ====================
+test('Multi-Team #36: enforces 45m reportThrottle, peer confirmReport, /pitchPayments owner/org isolation & 50% tally quorum', async () => {
+  await seedMultiTeamPair();
+  const memADb = testEnv.authenticatedContext('mem_a', { email_verified: true }).firestore();
+  const orgADb = testEnv.authenticatedContext('org_a', { email_verified: true }).firestore();
+  const founderADb = testEnv.authenticatedContext('founder_a', { email_verified: true }).firestore();
+  const nowMs = Date.now();
+
+  // First atomic report + throttle succeeds; 2nd within 45m fails; self-confirm fails; peer confirm succeeds
+  const r1 = writeBatch(memADb);
+  r1.set(doc(memADb, 'teams', 'team_alpha', 'reports', 'mt_rep_1'), {
+    teamId: 'team_alpha',
+    playerId: 'mem_a',
+    ownerUid: 'mem_a',
+    playerName: 'عضو ألفا',
+    opponent: 'الصقور',
+    goals: 2,
+    assists: 1,
+    minutes: 45,
+    rating: 8,
+    confirmedByUids: [],
+    verified: false,
+    createdAtMs: nowMs,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  r1.set(doc(memADb, 'teams', 'team_alpha', 'reportThrottle', 'mem_a'), {
+    uid: 'mem_a',
+    teamId: 'team_alpha',
+    lastReportAtMs: nowMs,
+    updatedAt: serverTimestamp(),
+  });
+  await assertSucceeds(r1.commit());
+
+  const r2 = writeBatch(memADb);
+  r2.set(doc(memADb, 'teams', 'team_alpha', 'reports', 'mt_rep_2'), {
+    teamId: 'team_alpha',
+    playerId: 'mem_a',
+    ownerUid: 'mem_a',
+    playerName: 'عضو ألفا',
+    opponent: 'النجوم',
+    goals: 3,
+    assists: 0,
+    minutes: 45,
+    rating: 8,
+    confirmedByUids: [],
+    verified: false,
+    createdAtMs: nowMs + 1000,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  r2.set(doc(memADb, 'teams', 'team_alpha', 'reportThrottle', 'mem_a'), {
+    uid: 'mem_a',
+    teamId: 'team_alpha',
+    lastReportAtMs: nowMs + 1000,
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(r2.commit());
+
+  await assertFails(updateDoc(doc(memADb, 'teams', 'team_alpha', 'reports', 'mt_rep_1'), { confirmedByUids: ['mem_a'], verified: true, updatedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(doc(orgADb, 'teams', 'team_alpha', 'reports', 'mt_rep_1'), { confirmedByUids: ['org_a'], verified: true, updatedAt: serverTimestamp() }));
+
+  // /pitchPayments: organizer reads/writes; mem_a reads own only, denied on org_a payment
+  await assertSucceeds(
+    setDoc(doc(orgADb, 'teams', 'team_alpha', 'pitchPayments', 'current__org_a'), {
+      teamId: 'team_alpha',
+      sessionId: 'current',
+      playerId: 'org_a',
+      ownerUid: 'org_a',
+      playerName: 'منظم ألفا',
+      amount: 30,
+      paid: true,
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertFails(getDoc(doc(memADb, 'teams', 'team_alpha', 'pitchPayments', 'current__org_a')));
+
+  // /matchVoteTallies: denied when voterUids < 50% of participantIds even if count >= 2
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    const now = Timestamp.now();
+    await setDoc(doc(db, 'teams', 'team_alpha', 'matchSessions', 'ms_q1'), {
+      id: 'ms_q1',
+      teamId: 'team_alpha',
+      date: '2026-12-01',
+      opponent: 'النسور',
+      pitchMode: '6v6',
+      ourScore: 4,
+      oppScore: 2,
+      result: 'فوز',
+      createdBy: 'founder_a',
+      participantIds: ['founder_a', 'org_a', 'mem_a', 'p4', 'p5', 'p6'],
+      confirmers: ['founder_a', 'org_a', 'mem_a'],
+      status: 'verified',
+      votingOpen: true,
+      voterUids: ['founder_a', 'org_a'], // 2/6 < 50%
+      createdAt: now,
+      updatedAt: now,
+    });
+    await setDoc(doc(db, 'teams', 'team_alpha', 'matchVoteTallies', 'ms_q1__mem_a'), {
+      teamId: 'team_alpha',
+      sessionId: 'ms_q1',
+      targetId: 'mem_a',
+      eligibleCount: 6,
+      count: 2,
+      totalScore: 17,
+      h1: 0, h2: 0, h3: 0, h4: 0, h5: 0, h6: 0, h7: 0, h8: 1, h9: 1, h10: 0,
+      updatedAt: now,
+    });
+  });
+  await assertFails(getDoc(doc(founderADb, 'teams', 'team_alpha', 'matchVoteTallies', 'ms_q1__mem_a')));
+});
 
 

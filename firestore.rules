@@ -12,6 +12,10 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidTeamId(tid) {
+      return isValidId(tid) && tid.size() >= 2 && tid.size() <= 64 && tid != 'main';
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -35,6 +39,77 @@ service cloud.firestore {
     function isTeamMember() {
       return isCaptain() ||
         (isVerifiedUser() && exists(/databases/$(database)/documents/players/$(request.auth.uid)));
+    }
+
+    function isOrganizer() {
+      return isTeamMember() &&
+        exists(/databases/$(database)/documents/settings/team) &&
+        ('organizerUids' in get(/databases/$(database)/documents/settings/team).data) &&
+        (request.auth.uid in get(/databases/$(database)/documents/settings/team).data.organizerUids);
+    }
+
+    function canPublishLineup() {
+      return isCaptain() || (
+        isTeamMember() && (
+          !exists(/databases/$(database)/documents/settings/team) ||
+          !('lineupPermission' in get(/databases/$(database)/documents/settings/team).data) ||
+          get(/databases/$(database)/documents/settings/team).data.lineupPermission == 'all' ||
+          isOrganizer()
+        )
+      );
+    }
+
+    // Multi-Team Helpers (Strictly Scoped Per teamId — Zero Cross-Team Leakage)
+    function isMultiFounder(tid) {
+      return isVerifiedUser() &&
+        isValidTeamId(tid) &&
+        exists(/databases/$(database)/documents/teams/$(tid)) &&
+        get(/databases/$(database)/documents/teams/$(tid)).data.founderUid == request.auth.uid;
+    }
+
+    function isMultiFounderAfter(tid) {
+      return isVerifiedUser() &&
+        isValidTeamId(tid) &&
+        existsAfter(/databases/$(database)/documents/teams/$(tid)) &&
+        getAfter(/databases/$(database)/documents/teams/$(tid)).data.founderUid == request.auth.uid;
+    }
+
+    function isMultiMember(tid) {
+      return isMultiFounder(tid) || (
+        isVerifiedUser() &&
+        isValidTeamId(tid) &&
+        exists(/databases/$(database)/documents/teams/$(tid)/members/$(request.auth.uid))
+      );
+    }
+
+    function isMultiOrganizer(tid) {
+      return isMultiMember(tid) &&
+        exists(/databases/$(database)/documents/teams/$(tid)) &&
+        ('organizerUids' in get(/databases/$(database)/documents/teams/$(tid)).data) &&
+        (request.auth.uid in get(/databases/$(database)/documents/teams/$(tid)).data.organizerUids);
+    }
+
+    function hasMultiJoinRequest(tid) {
+      return isVerifiedUser() &&
+        isValidTeamId(tid) &&
+        exists(/databases/$(database)/documents/teams/$(tid)/joinRequests/$(request.auth.uid));
+    }
+
+    function canMultiPublishLineup(tid) {
+      return isMultiFounder(tid) || (
+        isMultiMember(tid) && (
+          !exists(/databases/$(database)/documents/teams/$(tid)) ||
+          !('lineupPublishMode' in get(/databases/$(database)/documents/teams/$(tid)).data) ||
+          get(/databases/$(database)/documents/teams/$(tid)).data.lineupPublishMode == 'all' ||
+          isMultiOrganizer(tid)
+        )
+      );
+    }
+
+    function isPlatformNewTeamsAllowed() {
+      return !exists(/databases/$(database)/documents/platform/config) ||
+        !('allowNewTeams' in get(/databases/$(database)/documents/platform/config).data) ||
+        get(/databases/$(database)/documents/platform/config).data.allowNewTeams == true;
     }
 
     function isValidDateStr(d) {
@@ -116,6 +191,200 @@ service cloud.firestore {
 
     // ==================== 2. VALIDATION BLUEPRINTS ====================
 
+    function isValidPlatformConfig(data) {
+      return data.keys().hasAll(['allowNewTeams', 'updatedAt']) &&
+        data.keys().hasOnly(['allowNewTeams', 'updatedAt']) &&
+        data.allowNewTeams is bool &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidUserAccount(data, uid) {
+      return data.keys().hasAll(['uid', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'uid', 'displayName', 'teamIds', 'ownedTeamIds', 'activeTeamId',
+          'pendingJoinTeamId', 'migratedToTeamId', 'privacyAcceptedAt',
+          'privacyNoticeVersion', 'updatedAt'
+        ]) &&
+        isValidId(uid) &&
+        data.uid == uid &&
+        data.uid == request.auth.uid &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 80)) &&
+        (!('teamIds' in data) || (data.teamIds is list && data.teamIds.size() <= 5)) &&
+        (!('ownedTeamIds' in data) || (data.ownedTeamIds is list && data.ownedTeamIds.size() <= 3)) &&
+        (!('activeTeamId' in data) || (data.activeTeamId is string && data.activeTeamId.size() <= 64 && (data.activeTeamId == '' || isValidId(data.activeTeamId)))) &&
+        (!('pendingJoinTeamId' in data) || (data.pendingJoinTeamId is string && data.pendingJoinTeamId.size() <= 64 && (data.pendingJoinTeamId == '' || isValidId(data.pendingJoinTeamId)))) &&
+        (!('migratedToTeamId' in data) || (data.migratedToTeamId is string && data.migratedToTeamId.size() <= 64 && (data.migratedToTeamId == '' || isValidId(data.migratedToTeamId)))) &&
+        (!('privacyAcceptedAt' in data) || (data.privacyAcceptedAt is number && data.privacyAcceptedAt >= 0)) &&
+        (!('privacyNoticeVersion' in data) || (data.privacyNoticeVersion is string && data.privacyNoticeVersion.size() <= 40)) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidMultiTeam(data, tid) {
+      return data.keys().hasAll([
+          'id', 'teamName', 'appName', 'founderUid', 'organizerUids',
+          'primaryColor', 'secondaryColor', 'joinMode', 'lineupPublishMode',
+          'maxMembersPerTeam', 'memberCount', 'inviteCode', 'memberShareCode',
+          'lockSkills', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'teamName', 'appName', 'founderUid', 'organizerUids',
+          'primaryColor', 'secondaryColor', 'logo', 'joinMode', 'lineupPublishMode',
+          'defaultCurrency', 'defaultPitchCost', 'maxMembersPerTeam', 'memberCount',
+          'inviteCode', 'memberShareCode', 'lockSkills', 'deletedAt', 'migratedFrom',
+          'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidTeamId(tid) &&
+        data.id == tid &&
+        data.teamName is string && data.teamName.size() >= 1 && data.teamName.size() <= 80 &&
+        data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 60 &&
+        isValidId(data.founderUid) &&
+        data.organizerUids is list && data.organizerUids.size() <= 30 &&
+        isValidHexColor(data.primaryColor) &&
+        isValidHexColor(data.secondaryColor) &&
+        (!('logo' in data) || (data.logo is string && data.logo.size() <= 68500 && (data.logo == '' || data.logo.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')))) &&
+        data.joinMode in ['approval', 'instant'] &&
+        data.lineupPublishMode in ['organizers', 'all'] &&
+        (!('defaultCurrency' in data) || (data.defaultCurrency is string && data.defaultCurrency.size() >= 1 && data.defaultCurrency.size() <= 20)) &&
+        (!('defaultPitchCost' in data) || (data.defaultPitchCost is number && data.defaultPitchCost >= 0 && data.defaultPitchCost <= 100000)) &&
+        data.maxMembersPerTeam is int && data.maxMembersPerTeam >= 6 && data.maxMembersPerTeam <= 100 &&
+        data.memberCount is int && data.memberCount >= 0 && data.memberCount <= data.maxMembersPerTeam &&
+        isValidInviteCodeStr(data.inviteCode) &&
+        isValidInviteCodeStr(data.memberShareCode) &&
+        data.lockSkills is bool &&
+        (!('deletedAt' in data) || data.deletedAt == null || data.deletedAt is timestamp) &&
+        (!('migratedFrom' in data) || data.migratedFrom == 'main') &&
+        (!('createdAtMs' in data) || (data.createdAtMs is int && data.createdAtMs >= 0)) &&
+        (!('updatedAtMs' in data) || (data.updatedAtMs is int && data.updatedAtMs >= 0)) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidMultiTeamMember(data, memberId, tid) {
+      return data.keys().hasAll([
+          'id', 'uid', 'ownerUid', 'teamId', 'name', 'role', 'isOrganizer',
+          'jersey', 'primaryPos', 'skills', 'availableStatus', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'uid', 'ownerUid', 'teamId', 'name', 'role', 'isOrganizer',
+          'jersey', 'age', 'height', 'weight', 'foot', 'primaryPos', 'secondaryPos',
+          'photo', 'hasPhoto', 'photoZoom', 'photoY', 'skills', 'stats6', 'roleOverride',
+          'top3Strengths', 'weak3Points', 'seasonGoal', 'availableStatus',
+          'roleModelStarId', 'joinedAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        !data.keys().hasAny([
+          'sleep', 'fatigue', 'mood', 'injury', 'injuries', 'severity',
+          'expectedReturn', 'readiness', 'medicalNotes', 'medication', 'diagnosis',
+          'rpe', 'pin', 'pinHash'
+        ]) &&
+        isValidId(memberId) &&
+        isValidTeamId(tid) &&
+        data.id == memberId &&
+        isValidId(data.uid) &&
+        data.uid == memberId &&
+        data.teamId == tid &&
+        data.ownerUid is string && data.ownerUid.size() <= 128 &&
+        (data.ownerUid == '' || isValidId(data.ownerUid)) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        data.role in ['founder', 'organizer', 'member'] &&
+        data.isOrganizer is bool &&
+        data.jersey is number && data.jersey >= 0 && data.jersey <= 99 &&
+        (!('age' in data) || (data.age is number && data.age >= 10 && data.age <= 70)) &&
+        (!('height' in data) || (data.height is number && data.height >= 100 && data.height <= 230)) &&
+        (!('weight' in data) || (data.weight is number && data.weight >= 30 && data.weight <= 160)) &&
+        (!('foot' in data) || isValidFoot(data.foot)) &&
+        isValidPos(data.primaryPos) &&
+        (!('secondaryPos' in data) || isValidSecondaryPos(data.secondaryPos)) &&
+        (!('photo' in data) || (data.photo is string && data.photo.size() <= 250000 && (data.photo == '' || data.photo.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')))) &&
+        (!('hasPhoto' in data) || data.hasPhoto is bool) &&
+        (!('photoZoom' in data) || (data.photoZoom is number && data.photoZoom >= 90 && data.photoZoom <= 160)) &&
+        (!('photoY' in data) || (data.photoY is number && data.photoY >= 0 && data.photoY <= 60)) &&
+        isValidSkillsMap(data.skills) &&
+        (!('stats6' in data) || isValidStats6Map(data.stats6)) &&
+        (!('roleOverride' in data) || isValidRoleOverride(data.roleOverride)) &&
+        (!('top3Strengths' in data) || (data.top3Strengths is string && data.top3Strengths.size() <= 200)) &&
+        (!('weak3Points' in data) || (data.weak3Points is string && data.weak3Points.size() <= 200)) &&
+        (!('seasonGoal' in data) || (data.seasonGoal is string && data.seasonGoal.size() <= 200)) &&
+        data.availableStatus in ['متاح', 'غير متاح'] &&
+        (!('roleModelStarId' in data) || (data.roleModelStarId is string && data.roleModelStarId.size() <= 40 && data.roleModelStarId.matches('^[a-z0-9_]*$'))) &&
+        (!('joinedAtMs' in data) || (data.joinedAtMs is int && data.joinedAtMs >= 0)) &&
+        (!('updatedAtMs' in data) || (data.updatedAtMs is int && data.updatedAtMs >= 0)) &&
+        (!('createdAt' in data) || data.createdAt is timestamp) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidMultiPrivateRecord(data, memberId, tid) {
+      return isValidId(memberId) &&
+        isValidTeamId(tid) &&
+        data.keys().hasAll(['kind', 'uid', 'teamId', 'date', 'updatedAtMs', 'createdAt']) &&
+        data.uid == memberId &&
+        data.teamId == tid &&
+        isValidDateStr(data.date) &&
+        data.updatedAtMs is int && data.updatedAtMs >= 0 &&
+        data.createdAt == request.time && (
+          (
+            data.kind == 'readiness' &&
+            data.keys().hasAll(['kind', 'uid', 'teamId', 'date', 'sleep', 'fatigue', 'mood', 'updatedAtMs', 'createdAt']) &&
+            data.keys().hasOnly(['kind', 'uid', 'teamId', 'date', 'sleep', 'fatigue', 'mood', 'updatedAtMs', 'createdAt']) &&
+            data.sleep is number && data.sleep >= 1 && data.sleep <= 10 &&
+            data.fatigue is number && data.fatigue >= 1 && data.fatigue <= 10 &&
+            data.mood is number && data.mood >= 1 && data.mood <= 10
+          ) || (
+            data.kind == 'injury' &&
+            data.keys().hasAll(['kind', 'uid', 'teamId', 'type', 'location', 'severity', 'date', 'expectedReturn', 'updatedAtMs', 'createdAt']) &&
+            data.keys().hasOnly(['kind', 'uid', 'teamId', 'type', 'location', 'severity', 'date', 'expectedReturn', 'updatedAtMs', 'createdAt']) &&
+            data.type is string && data.type.size() >= 1 && data.type.size() <= 80 &&
+            data.location is string && data.location.size() >= 1 && data.location.size() <= 100 &&
+            data.severity in ['خفيفة', 'متوسطة', 'شديدة'] &&
+            isValidDateStr(data.expectedReturn)
+          )
+        );
+    }
+
+    function isValidMultiJoinRequest(data, uid, tid) {
+      return data.keys().hasAll(['uid', 'teamId', 'name', 'jersey', 'primaryPos', 'inviteCode', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'teamId', 'name', 'jersey', 'primaryPos', 'stats6', 'roleOverride', 'inviteCode', 'referredBy', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(uid) &&
+        isValidTeamId(tid) &&
+        data.uid == uid &&
+        data.teamId == tid &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        data.jersey is number && data.jersey >= 1 && data.jersey <= 99 &&
+        isValidPos(data.primaryPos) &&
+        (!('stats6' in data) || isValidStats6Map(data.stats6)) &&
+        (!('roleOverride' in data) || isValidRoleOverride(data.roleOverride)) &&
+        isValidInviteCodeStr(data.inviteCode) &&
+        (!('referredBy' in data) || isValidReferralCodeStr(data.referredBy)) &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidConsolidatedAttendance(data, matchKey, tid) {
+      return data.keys().hasAll(['matchKey', 'teamId', 'date', 'type', 'responses', 'updatedAtMs', 'updatedAt']) &&
+        data.keys().hasOnly(['matchKey', 'teamId', 'date', 'type', 'responses', 'updatedAtMs', 'updatedAt']) &&
+        isValidId(matchKey) &&
+        matchKey.size() <= 32 &&
+        matchKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}_(match|training)$') &&
+        isValidTeamId(tid) &&
+        data.matchKey == matchKey &&
+        data.teamId == tid &&
+        isValidDateStr(data.date) &&
+        data.type is string && data.type.size() >= 1 && data.type.size() <= 40 &&
+        data.responses is map && data.responses.keys().size() <= 100 &&
+        data.updatedAtMs is int && data.updatedAtMs >= 0 &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidAttendanceResponseEntry(entry, uid) {
+      return entry is map &&
+        entry.keys().hasAll(['uid', 'playerName', 'status', 'updatedAtMs']) &&
+        entry.keys().hasOnly(['uid', 'playerName', 'status', 'updatedAtMs']) &&
+        entry.uid == uid &&
+        entry.playerName is string && entry.playerName.size() >= 1 && entry.playerName.size() <= 80 &&
+        entry.status in ['جاي', 'محتمل', 'معتذر'] &&
+        entry.updatedAtMs is int && entry.updatedAtMs >= 0;
+    }
+
     function isValidPublicBranding(data) {
       return data.keys().hasAll(['appName', 'teamName', 'primaryColor', 'secondaryColor', 'updatedAt']) &&
         data.keys().hasOnly(['appName', 'teamName', 'primaryColor', 'secondaryColor', 'logo', 'updatedAt']) &&
@@ -129,7 +398,11 @@ service cloud.firestore {
 
     function isValidTeamSettings(data) {
       return data.keys().hasAll(['teamId', 'appName', 'teamName', 'primaryColor', 'secondaryColor', 'inviteCode', 'requireApproval', 'lockSkills', 'themeVersion', 'updatedAt']) &&
-        data.keys().hasOnly(['teamId', 'appName', 'teamName', 'primaryColor', 'secondaryColor', 'logo', 'inviteCode', 'requireApproval', 'lockSkills', 'themeVersion', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'teamId', 'appName', 'teamName', 'primaryColor', 'secondaryColor', 'logo',
+          'inviteCode', 'memberShareCode', 'requireApproval', 'lockSkills', 'themeVersion',
+          'creatorUid', 'organizerUids', 'lineupPermission', 'defaultCurrency', 'defaultPitchCost', 'updatedAt'
+        ]) &&
         data.teamId == 'main' &&
         data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 60 &&
         data.teamName is string && data.teamName.size() >= 1 && data.teamName.size() <= 80 &&
@@ -137,37 +410,60 @@ service cloud.firestore {
         isValidHexColor(data.secondaryColor) &&
         (!('logo' in data) || (data.logo is string && data.logo.size() <= 180000)) &&
         isValidInviteCodeStr(data.inviteCode) &&
+        (!('memberShareCode' in data) || isValidInviteCodeStr(data.memberShareCode)) &&
         data.requireApproval is bool &&
         data.lockSkills is bool &&
         data.themeVersion is string && data.themeVersion.size() >= 1 && data.themeVersion.size() <= 24 &&
+        (!('creatorUid' in data) || isValidId(data.creatorUid)) &&
+        (!('organizerUids' in data) || (data.organizerUids is list && data.organizerUids.size() <= 30)) &&
+        (!('lineupPermission' in data) || data.lineupPermission in ['all', 'organizers']) &&
+        (!('defaultCurrency' in data) || (data.defaultCurrency is string && data.defaultCurrency.size() >= 1 && data.defaultCurrency.size() <= 20)) &&
+        (!('defaultPitchCost' in data) || (data.defaultPitchCost is number && data.defaultPitchCost >= 0 && data.defaultPitchCost <= 100000)) &&
         data.updatedAt == request.time;
     }
 
     function isValidInviteCodeDoc(data, code) {
-      return data.keys().hasAll(['code', 'active', 'requireApproval', 'updatedAt']) &&
-        data.keys().hasOnly([
-          'code', 'active', 'requireApproval', 'updatedAt',
+      return data.keys().hasAll([
+          'code', 'active', 'requireApproval', 'isMemberShareCode',
           'teamId', 'teamName', 'appName', 'primaryColor',
           'usageType', 'maxUses', 'usedCount', 'durationDays',
-          'createdAtMs', 'expiresAtMs', 'status', 'createdBy', 'lastUsedBy'
+          'createdAtMs', 'expiresAtMs', 'status', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'code', 'active', 'requireApproval', 'isMemberShareCode', 'joinMode',
+          'teamId', 'teamName', 'appName', 'primaryColor',
+          'usageType', 'maxUses', 'usedCount', 'durationDays',
+          'createdAtMs', 'expiresAtMs', 'status', 'updatedAt'
         ]) &&
         isValidInviteCodeStr(code) &&
         data.code == code &&
         data.active is bool &&
         data.requireApproval is bool &&
-        (!('teamId' in data) || data.teamId == 'main') &&
-        (!('teamName' in data) || (data.teamName is string && data.teamName.size() >= 1 && data.teamName.size() <= 80)) &&
-        (!('appName' in data) || (data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 60)) &&
-        (!('primaryColor' in data) || isValidHexColor(data.primaryColor)) &&
-        (!('usageType' in data) || data.usageType in ['single', 'multi']) &&
-        (!('maxUses' in data) || (data.maxUses is int && data.maxUses >= 1 && data.maxUses <= 100)) &&
-        (!('usedCount' in data) || (data.usedCount is int && data.usedCount >= 0 && data.usedCount <= 100)) &&
-        (!('durationDays' in data) || (data.durationDays is int && data.durationDays >= 1 && data.durationDays <= 365)) &&
+        data.isMemberShareCode is bool &&
+        (!('joinMode' in data) || data.joinMode in ['approval', 'instant']) &&
+        (!data.isMemberShareCode || (data.requireApproval == true && (!('joinMode' in data) || data.joinMode == 'approval'))) &&
+        isValidId(data.teamId) && data.teamId.size() <= 64 &&
+        data.teamName is string && data.teamName.size() >= 1 && data.teamName.size() <= 80 &&
+        data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 60 &&
+        isValidHexColor(data.primaryColor) &&
+        data.usageType in ['single', 'multi'] &&
+        data.maxUses is int && data.maxUses >= 1 && data.maxUses <= 100 &&
+        data.usedCount is int && data.usedCount >= 0 && data.usedCount <= data.maxUses &&
+        data.durationDays is int && data.durationDays >= 1 && data.durationDays <= 365 &&
+        data.createdAtMs is int && data.createdAtMs >= 1000000000000 &&
+        data.expiresAtMs is int && data.expiresAtMs > data.createdAtMs &&
+        data.status in ['active', 'revoked', 'expired', 'completed'] &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidInviteAdminLog(data, code) {
+      return data.keys().hasAll(['code', 'updatedAt']) &&
+        data.keys().hasOnly(['code', 'createdBy', 'revokedBy', 'createdAtMs', 'updatedAt']) &&
+        isValidInviteCodeStr(code) &&
+        data.code == code &&
+        (!('createdBy' in data) || isValidId(data.createdBy)) &&
+        (!('revokedBy' in data) || isValidId(data.revokedBy)) &&
         (!('createdAtMs' in data) || (data.createdAtMs is int && data.createdAtMs >= 1000000000000)) &&
-        (!('expiresAtMs' in data) || (data.expiresAtMs is int && data.expiresAtMs >= 1000000000000)) &&
-        (!('status' in data) || data.status in ['active', 'revoked', 'expired', 'completed']) &&
-        (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128)) &&
-        (!('lastUsedBy' in data) || (data.lastUsedBy is string && data.lastUsedBy.size() <= 128)) &&
         data.updatedAt == request.time;
     }
 
@@ -251,16 +547,17 @@ service cloud.firestore {
     }
 
     function isValidAttendance(data) {
-      return data.keys().hasAll(['teamId', 'playerId', 'ownerUid', 'playerName', 'date', 'type', 'status', 'createdAt']) &&
-        data.keys().hasOnly(['teamId', 'playerId', 'ownerUid', 'playerName', 'date', 'type', 'status', 'createdAt']) &&
+      return data.keys().hasAll(['teamId', 'playerId', 'ownerUid', 'playerName', 'date', 'type', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['teamId', 'playerId', 'ownerUid', 'playerName', 'date', 'type', 'status', 'createdAt', 'updatedAt']) &&
         data.teamId == 'main' &&
         isValidId(data.playerId) &&
         data.ownerUid is string && data.ownerUid.size() <= 128 &&
         data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 80 &&
         isValidDateStr(data.date) &&
         data.type is string && data.type.size() >= 1 && data.type.size() <= 40 &&
-        data.status in ['جاي', 'متردد', 'ما فيني'] &&
-        data.createdAt == request.time;
+        data.status in ['جاي', 'محتمل', 'معتذر'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
     }
 
     function isValidReadiness(data) {
@@ -290,32 +587,41 @@ service cloud.firestore {
         data.createdAt == request.time;
     }
 
-    function isValidMatch(data) {
+    function isValidMatchForTeam(data, tid) {
       return data.keys().hasAll(['teamId', 'date', 'opponent', 'ourScore', 'oppScore', 'result', 'createdBy', 'createdAt']) &&
         data.keys().hasOnly(['teamId', 'date', 'opponent', 'ourScore', 'oppScore', 'result', 'createdBy', 'createdAt']) &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         isValidDateStr(data.date) &&
         data.opponent is string && data.opponent.size() >= 1 && data.opponent.size() <= 80 &&
         data.ourScore is number && data.ourScore >= 0 && data.ourScore <= 99 &&
         data.oppScore is number && data.oppScore >= 0 && data.oppScore <= 99 &&
         data.result in ['فوز', 'تعادل', 'خسارة'] &&
         isValidId(data.createdBy) &&
-        data.createdAt == request.time;
+        data.createdAt is timestamp;
     }
 
-    function isValidReport(data) {
-      return data.keys().hasAll(['teamId', 'playerId', 'ownerUid', 'opponent', 'goals', 'assists', 'minutes', 'rating', 'createdAt']) &&
-        data.keys().hasOnly([
-          'teamId', 'playerId', 'ownerUid', 'opponent', 'goals', 'assists', 'minutes',
-          'interceptions', 'turnovers', 'rating', 'rpe', 'bestMoment', 'worstMoment', 'motmVote',
-          'pitchMode', 'matchResult', 'goalsConceded', 'matchSessionId', 'createdAt'
+    function isValidMatch(data) {
+      return isValidMatchForTeam(data, 'main') && data.createdAt == request.time;
+    }
+
+    function isValidReportForTeam(data, tid) {
+      return data.keys().hasAll([
+          'teamId', 'playerId', 'ownerUid', 'playerName', 'opponent', 'goals', 'assists',
+          'minutes', 'rating', 'confirmedByUids', 'verified', 'createdAtMs', 'createdAt', 'updatedAt'
         ]) &&
-        data.teamId == 'main' &&
+        data.keys().hasOnly([
+          'teamId', 'playerId', 'ownerUid', 'playerName', 'opponent', 'goals', 'assists', 'minutes',
+          'interceptions', 'turnovers', 'rating', 'rpe', 'bestMoment', 'worstMoment', 'motmVote',
+          'pitchMode', 'matchResult', 'goalsConceded', 'matchSessionId',
+          'confirmedByUids', 'verified', 'createdAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        data.teamId == tid &&
         isValidId(data.playerId) &&
         data.ownerUid is string && data.ownerUid.size() <= 128 &&
+        data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 80 &&
         data.opponent is string && data.opponent.size() >= 1 && data.opponent.size() <= 80 &&
-        data.goals is number && data.goals >= 0 && data.goals <= 30 &&
-        data.assists is number && data.assists >= 0 && data.assists <= 30 &&
+        data.goals is number && data.goals >= 0 && data.goals <= 12 &&
+        data.assists is number && data.assists >= 0 && data.assists <= 12 &&
         data.minutes is number && data.minutes >= 1 && data.minutes <= 180 &&
         (!('interceptions' in data) || (data.interceptions is number && data.interceptions >= 0 && data.interceptions <= 60)) &&
         (!('turnovers' in data) || (data.turnovers is number && data.turnovers >= 0 && data.turnovers <= 60)) &&
@@ -328,7 +634,29 @@ service cloud.firestore {
         (!('matchResult' in data) || data.matchResult in ['فوز', 'تعادل', 'خسارة']) &&
         (!('goalsConceded' in data) || (data.goalsConceded is number && data.goalsConceded >= 0 && data.goalsConceded <= 30)) &&
         (!('matchSessionId' in data) || (data.matchSessionId is string && data.matchSessionId.size() <= 128 && (data.matchSessionId == '' || isValidId(data.matchSessionId)))) &&
-        data.createdAt == request.time;
+        data.confirmedByUids is list && data.confirmedByUids.size() <= 30 &&
+        data.verified is bool &&
+        data.createdAtMs is int && data.createdAtMs >= 1000000000000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidReport(data) {
+      return isValidReportForTeam(data, 'main');
+    }
+
+    function isValidReportThrottleForTeam(data, tid, uid) {
+      return data.keys().hasAll(['uid', 'teamId', 'lastReportAtMs', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'teamId', 'lastReportAtMs', 'updatedAt']) &&
+        isValidId(uid) &&
+        data.uid == uid &&
+        data.teamId == tid &&
+        data.lastReportAtMs is int && data.lastReportAtMs >= 1000000000000 &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidReportThrottle(data, uid) {
+      return isValidReportThrottleForTeam(data, 'main', uid);
     }
 
     function isValidPeerBallot(data, ratingId) {
@@ -344,39 +672,54 @@ service cloud.firestore {
         data.updatedAt == request.time;
     }
 
-    function isValidPeerRatingStat(data, targetId) {
+    function isValidPeerRatingStatForTeam(data, tid, targetId) {
       return data.keys().hasAll(['teamId', 'targetId', 'count', 'totalScore', 'updatedAt']) &&
         data.keys().hasOnly(['teamId', 'targetId', 'count', 'totalScore', 'updatedAt']) &&
         isValidId(targetId) &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         data.targetId == targetId &&
         data.count is number && data.count >= 1 && data.count <= 500 &&
         data.totalScore is number && data.totalScore >= 1 && data.totalScore <= 5000 &&
         data.updatedAt == request.time;
     }
 
-    function isValidAdminRating(data, targetId) {
+    function isValidPeerRatingStat(data, targetId) {
+      return isValidPeerRatingStatForTeam(data, 'main', targetId);
+    }
+
+    function isValidAdminRatingForTeam(data, tid, targetId) {
       return data.keys().hasAll(['teamId', 'targetId', 'score', 'updatedAt']) &&
         data.keys().hasOnly(['teamId', 'targetId', 'score', 'updatedAt']) &&
         isValidId(targetId) &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         data.targetId == targetId &&
         data.score is number && data.score >= 1 && data.score <= 10 &&
         data.updatedAt == request.time;
     }
 
-    function isValidSuggestion(data) {
-      return data.keys().hasAll(['teamId', 'text', 'createdAt']) &&
-        data.keys().hasOnly(['teamId', 'text', 'createdAt']) &&
-        data.teamId == 'main' &&
-        data.text is string && data.text.size() >= 1 && data.text.size() <= 500 &&
-        data.createdAt == request.time;
+    function isValidAdminRating(data, targetId) {
+      return isValidAdminRatingForTeam(data, 'main', targetId);
     }
 
-    function isValidTactics(data) {
+    function isValidSuggestionForTeam(data, tid) {
+      return data.keys().hasAll(['teamId', 'text', 'createdAt']) &&
+        data.keys().hasOnly(['teamId', 'text', 'createdAt']) &&
+        data.teamId == tid &&
+        data.text is string && data.text.size() >= 1 && data.text.size() <= 500 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSuggestion(data) {
+      return isValidSuggestionForTeam(data, 'main') && data.createdAt == request.time;
+    }
+
+    function isValidTacticsForTeam(data, tid) {
       return data.keys().hasAll(['teamId', 'formation', 'slots', 'updatedAt']) &&
-        data.keys().hasOnly(['teamId', 'formation', 'slots', 'updatedAt']) &&
-        data.teamId == 'main' &&
+        data.keys().hasOnly([
+          'teamId', 'formation', 'slots', 'publishedByUid', 'publishedByName',
+          'publishedAtMs', 'previousSnapshot', 'updatedAt'
+        ]) &&
+        data.teamId == tid &&
         data.formation in [
           '2-2-1', '1-2-2', '2-1-2', '3-1-1', '1-3-1',
           '1-2-1', '2-2', '1-1-2',
@@ -384,13 +727,35 @@ service cloud.firestore {
           '4-3-3', '4-2-3-1', '3-5-2', '4-4-2'
         ] &&
         data.slots is map && data.slots.keys().size() <= 20 &&
+        (!('publishedByUid' in data) || isValidId(data.publishedByUid)) &&
+        (!('publishedByName' in data) || (data.publishedByName is string && data.publishedByName.size() <= 80)) &&
+        (!('publishedAtMs' in data) || (data.publishedAtMs is int && data.publishedAtMs >= 1000000000000)) &&
+        (!('previousSnapshot' in data) || data.previousSnapshot == null || data.previousSnapshot is map) &&
         data.updatedAt == request.time;
     }
 
-    function isValidPitchSession(data) {
+    function isValidTactics(data) {
+      return isValidTacticsForTeam(data, 'main');
+    }
+
+    function isValidLineupVoteForTeam(data, tid, uid) {
+      return data.keys().hasAll(['teamId', 'uid', 'vote', 'updatedAt']) &&
+        data.keys().hasOnly(['teamId', 'uid', 'vote', 'updatedAt']) &&
+        isValidId(uid) &&
+        data.teamId == tid &&
+        data.uid == uid &&
+        data.vote in ['approve', 'swap'] &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidLineupVote(data, uid) {
+      return isValidLineupVoteForTeam(data, 'main', uid);
+    }
+
+    function isValidPitchSessionForTeam(data, tid) {
       return data.keys().hasAll(['teamId', 'title', 'matchDate', 'matchTime', 'venue', 'totalCost', 'currency', 'confirmedCount', 'paidCount', 'paidTotal', 'updatedAt']) &&
         data.keys().hasOnly(['teamId', 'title', 'matchDate', 'matchTime', 'venue', 'totalCost', 'currency', 'confirmedCount', 'paidCount', 'paidTotal', 'updatedAt']) &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         data.title is string && data.title.size() >= 1 && data.title.size() <= 80 &&
         isValidDateStr(data.matchDate) &&
         isValidTimeStr(data.matchTime) &&
@@ -403,10 +768,14 @@ service cloud.firestore {
         data.updatedAt == request.time;
     }
 
-    function isValidPitchPayment(data, paymentId) {
+    function isValidPitchSession(data) {
+      return isValidPitchSessionForTeam(data, 'main');
+    }
+
+    function isValidPitchPaymentForTeam(data, tid, paymentId) {
       return data.keys().hasAll(['teamId', 'sessionId', 'playerId', 'ownerUid', 'playerName', 'amount', 'paid', 'updatedAt']) &&
         data.keys().hasOnly(['teamId', 'sessionId', 'playerId', 'ownerUid', 'playerName', 'amount', 'paid', 'updatedAt']) &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         data.sessionId == 'current' &&
         isValidId(data.playerId) &&
         paymentId == ('current__' + data.playerId) &&
@@ -417,7 +786,11 @@ service cloud.firestore {
         data.updatedAt == request.time;
     }
 
-    function isValidMatchSession(data, sessionId) {
+    function isValidPitchPayment(data, paymentId) {
+      return isValidPitchPaymentForTeam(data, 'main', paymentId);
+    }
+
+    function isValidMatchSessionForTeam(data, tid, sessionId) {
       return data.keys().hasAll([
           'id', 'teamId', 'date', 'opponent', 'pitchMode', 'ourScore', 'oppScore', 'result',
           'createdBy', 'participantIds', 'confirmers', 'status', 'votingOpen', 'voterUids',
@@ -430,7 +803,7 @@ service cloud.firestore {
         ]) &&
         isValidId(sessionId) &&
         data.id == sessionId &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         isValidDateStr(data.date) &&
         data.opponent is string && data.opponent.size() >= 1 && data.opponent.size() <= 80 &&
         data.pitchMode in ['5v5', '6v6', '7v7', '11v11'] &&
@@ -447,6 +820,10 @@ service cloud.firestore {
         data.updatedAt == request.time;
     }
 
+    function isValidMatchSession(data, sessionId) {
+      return isValidMatchSessionForTeam(data, 'main', sessionId);
+    }
+
     function isValidMatchVoteBallot(data, ballotId) {
       return data.keys().hasAll(['sessionId', 'targetId', 'voterUid', 'score', 'createdAt']) &&
         data.keys().hasOnly(['sessionId', 'targetId', 'voterUid', 'score', 'createdAt']) &&
@@ -460,7 +837,7 @@ service cloud.firestore {
         data.createdAt == request.time;
     }
 
-    function isValidMatchVoteTally(data, tallyId) {
+    function isValidMatchVoteTallyForTeam(data, tid, tallyId) {
       return data.keys().hasAll([
           'teamId', 'sessionId', 'targetId', 'eligibleCount', 'count', 'totalScore',
           'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', 'h10', 'updatedAt'
@@ -470,7 +847,7 @@ service cloud.firestore {
           'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', 'h10', 'updatedAt'
         ]) &&
         isValidId(tallyId) &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         isValidId(data.sessionId) &&
         isValidId(data.targetId) &&
         tallyId == (data.sessionId + '__' + data.targetId) &&
@@ -492,7 +869,11 @@ service cloud.firestore {
         data.updatedAt == request.time;
     }
 
-    function isValidMissionClaim(data, claimId) {
+    function isValidMatchVoteTally(data, tallyId) {
+      return isValidMatchVoteTallyForTeam(data, 'main', tallyId);
+    }
+
+    function isValidMissionClaimForTeam(data, tid, claimId) {
       return data.keys().hasAll([
           'id', 'teamId', 'missionId', 'missionTitle', 'xpReward',
           'claimantUid', 'claimantName', 'note', 'verifierUids',
@@ -505,7 +886,7 @@ service cloud.firestore {
         ]) &&
         isValidId(claimId) &&
         data.id == claimId &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         data.missionId in ['clean_sheet', 'team_assists', 'tactical_discipline', 'punctual_hero'] &&
         data.missionTitle is string && data.missionTitle.size() >= 1 && data.missionTitle.size() <= 80 &&
         data.xpReward is int && data.xpReward >= 10 && data.xpReward <= 100 &&
@@ -521,6 +902,10 @@ service cloud.firestore {
         data.status in ['pending', 'verified', 'rejected'] &&
         data.createdAt is timestamp &&
         data.updatedAt == request.time;
+    }
+
+    function isValidMissionClaim(data, claimId) {
+      return isValidMissionClaimForTeam(data, 'main', claimId);
     }
 
     function isValidLibraryCategory(c) {
@@ -541,7 +926,7 @@ service cloud.firestore {
       ];
     }
 
-    function isValidLibraryArticle(data, articleId) {
+    function isValidLibraryArticleForTeam(data, tid, articleId) {
       return data.keys().hasAll([
           'id', 'teamId', 'titleAr', 'originalLang', 'publisher', 'sourceUrl',
           'publishedAt', 'lastReviewed', 'category', 'level', 'summaryAr',
@@ -556,7 +941,7 @@ service cloud.firestore {
         ]) &&
         isValidId(articleId) &&
         data.id == articleId &&
-        data.teamId == 'main' &&
+        data.teamId == tid &&
         data.titleAr is string && data.titleAr.size() >= 3 && data.titleAr.size() <= 140 &&
         data.originalLang is string && data.originalLang.size() >= 2 && data.originalLang.size() <= 40 &&
         data.publisher is string && data.publisher.size() >= 2 && data.publisher.size() <= 100 &&
@@ -584,7 +969,31 @@ service cloud.firestore {
         data.updatedAt == request.time;
     }
 
-    // ==================== 3. COLLECTION RULES ====================
+    function isValidLibraryArticle(data, articleId) {
+      return isValidLibraryArticleForTeam(data, 'main', articleId);
+    }
+
+    // ==================== 3. SHARED ROOT & LEGACY SINGLE-TEAM COLLECTIONS ====================
+
+    // Global platform Spark quota kill-switch (verified users get config; Platform Owner admins/{uid} updates)
+    match /platform/{docId} {
+      allow get: if isVerifiedUser() && docId == 'config';
+      allow list: if false;
+      allow create, update: if isVerifiedUser() && docId == 'config' && isValidPlatformConfig(incoming()) && isCaptain();
+      allow delete: if false;
+    }
+
+    // Strictly self-only User Multi-Team Registry (zero cross-user snooping or listing)
+    match /users/{uid} {
+      allow get: if isVerifiedUser() && isValidId(uid) && uid == request.auth.uid;
+      allow list: if false;
+      allow create: if isVerifiedUser() && uid == request.auth.uid && isValidUserAccount(incoming(), uid);
+      allow update: if isVerifiedUser() &&
+        uid == request.auth.uid &&
+        isValidUserAccount(incoming(), uid) &&
+        incoming().uid == existing().uid;
+      allow delete: if false;
+    }
 
     // Public non-sensitive branding (login screen)
     match /publicMeta/{docId} {
@@ -594,48 +1003,92 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Team settings (Captain writes; team members read)
+    // Team settings (Captain Tier 1 writes; Organizers Tier 2 limited update; team members read)
     match /settings/{docId} {
       allow get: if isVerifiedUser() && docId == 'team' && isTeamMember();
       allow list: if false;
-      allow create, update: if isVerifiedUser() && docId == 'team' && isValidTeamSettings(incoming()) && isCaptain();
+      allow create: if isVerifiedUser() && docId == 'team' && isValidTeamSettings(incoming()) && isCaptain();
+      allow update: if isVerifiedUser() && docId == 'team' && isValidTeamSettings(incoming()) && (
+        isCaptain() ||
+        (
+          isOrganizer() &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'teamName', 'logo', 'defaultCurrency', 'defaultPitchCost', 'lineupPermission', 'updatedAt'
+          ])
+        )
+      );
       allow delete: if false;
     }
 
-    // Smart Invite Codes:
-    // - Single-doc get by exact unguessable CSPRNG code allowed for verified users to preview team identity before joining.
-    // - List allowed ONLY for verified Captain (Invitations Log); never listable by players or outsiders.
-    // - Create & Delete allowed ONLY for verified Captain.
-    // - Update allowed for Captain (revocation/rotation) OR atomically paired with a new applicant's joinRequest (+1 usedCount).
+    // Smart Invite Codes (Shared across Single-Team main & Multi-Team teams/{teamId}; zero PII):
+    // - Single-doc get by exact unguessable CSPRNG code allowed ONLY for email-verified users.
+    // - List/Create/Delete scoped strictly to owning team Captain/Founder.
+    // - Update allowed for owning Captain/Founder OR atomically paired with applicant joinRequest (+1 usedCount).
     match /inviteCodes/{code} {
       allow get: if isVerifiedUser() && isValidInviteCodeStr(code);
-      allow list: if isVerifiedUser() && isCaptain();
-      allow create: if isVerifiedUser() && isValidInviteCodeDoc(incoming(), code) && isCaptain();
-      allow update: if isVerifiedUser() &&
+      allow list: if isCaptain() || (
+        isVerifiedUser() &&
+        isValidTeamId(resource.data.teamId) &&
+        exists(/databases/$(database)/documents/teams/$(resource.data.teamId)) &&
+        get(/databases/$(database)/documents/teams/$(resource.data.teamId)).data.founderUid == request.auth.uid
+      );
+      allow create: if isVerifiedUser() &&
         isValidInviteCodeDoc(incoming(), code) && (
-          isCaptain() ||
+          (incoming().teamId == 'main' && isCaptain()) ||
+          (incoming().teamId != 'main' && (isMultiFounder(incoming().teamId) || isMultiFounderAfter(incoming().teamId)))
+        );
+      allow update: if isVerifiedUser() &&
+        isValidInviteCodeDoc(incoming(), code) &&
+        incoming().teamId == existing().teamId && (
+          (existing().teamId == 'main' && isCaptain()) ||
+          (existing().teamId != 'main' && isMultiFounder(existing().teamId)) ||
           (
+            existing().teamId == 'main' &&
             !exists(/databases/$(database)/documents/players/$(request.auth.uid)) &&
             !exists(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
             existsAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
             getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode == code &&
+            getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.createdAt == request.time &&
             existing().active == true &&
-            (!('status' in existing()) || existing().status == 'active') &&
-            (!('expiresAtMs' in existing()) || request.time.toMillis() < existing().expiresAtMs) &&
-            ('usedCount' in existing()) &&
-            ('maxUses' in existing()) &&
+            existing().status == 'active' &&
+            request.time.toMillis() < existing().expiresAtMs &&
             existing().usedCount < existing().maxUses &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['usedCount', 'active', 'status', 'lastUsedBy', 'updatedAt']) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['usedCount', 'active', 'status', 'updatedAt']) &&
             incoming().usedCount == existing().usedCount + 1 &&
-            incoming().lastUsedBy == request.auth.uid &&
+            incoming().active == (incoming().usedCount < existing().maxUses) &&
+            incoming().status == (incoming().usedCount >= existing().maxUses ? 'completed' : 'active')
+          ) ||
+          (
+            isValidTeamId(existing().teamId) &&
+            !exists(/databases/$(database)/documents/teams/$(existing().teamId)/members/$(request.auth.uid)) &&
+            !exists(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)) &&
+            existsAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)) &&
+            getAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)).data.inviteCode == code &&
+            getAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)).data.createdAt == request.time &&
+            existing().active == true &&
+            existing().status == 'active' &&
+            request.time.toMillis() < existing().expiresAtMs &&
+            existing().usedCount < existing().maxUses &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['usedCount', 'active', 'status', 'updatedAt']) &&
+            incoming().usedCount == existing().usedCount + 1 &&
             incoming().active == (incoming().usedCount < existing().maxUses) &&
             incoming().status == (incoming().usedCount >= existing().maxUses ? 'completed' : 'active')
           )
         );
-      allow delete: if isVerifiedUser() && isValidInviteCodeStr(code) && isCaptain();
+      allow delete: if isVerifiedUser() && isValidInviteCodeStr(code) && (
+        (existing().teamId == 'main' && isCaptain()) ||
+        (existing().teamId != 'main' && isMultiFounder(existing().teamId))
+      );
     }
 
-    // Trusted Captain RBAC table
+    // Private Captain Audit Logs for Legacy Invite Codes
+    match /inviteAdminLogs/{code} {
+      allow get, list: if isCaptain();
+      allow create, update: if isCaptain() && isValidInviteAdminLog(incoming(), code);
+      allow delete: if isCaptain() && isValidInviteCodeStr(code);
+    }
+
+    // Trusted Platform Owner / Legacy Captain RBAC table
     match /admins/{uid} {
       allow get: if isVerifiedUser() && isValidId(uid) && (uid == request.auth.uid || isCaptain());
       allow list: if isVerifiedUser() && isCaptain();
@@ -649,7 +1102,7 @@ service cloud.firestore {
       allow get: if isVerifiedUser() && isValidId(playerId) && (playerId == request.auth.uid || isTeamMember());
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
 
-      // Captain can create any roster player; non-captain direct join requires active inviteCode via atomic joinRequest
+      // Captain can create any roster player; non-captain direct join requires active inviteCode (never memberShareCode) via atomic joinRequest
       allow create: if isVerifiedUser() &&
         isValidPlayerProfile(incoming(), playerId) &&
         incoming().createdAt == request.time && (
@@ -659,10 +1112,12 @@ service cloud.firestore {
             incoming().ownerUid == request.auth.uid &&
             incoming().role == 'player' &&
             existsAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
+            getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.createdAt == request.time &&
             getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.status == 'approved' &&
             exists(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode)) &&
             get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode)).data.active == true &&
-            get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode)).data.requireApproval == false
+            get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode)).data.requireApproval == false &&
+            get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode)).data.isMemberShareCode != true
           )
         );
 
@@ -671,9 +1126,7 @@ service cloud.firestore {
         incoming().createdAt == existing().createdAt &&
         incoming().id == existing().id &&
         incoming().teamId == existing().teamId && (
-          // Tier 1: Captain can modify roster fields & promote/demote role
           isCaptain() ||
-          // Tier 2: Player can modify ONLY their own profile fields (never role, never ownerUid)
           (
             existing().ownerUid == request.auth.uid &&
             incoming().ownerUid == existing().ownerUid &&
@@ -684,7 +1137,6 @@ service cloud.firestore {
               'skills', 'stats6', 'roleOverride', 'top3Strengths', 'weak3Points', 'seasonGoal',
               'availability', 'availableStatus', 'roleModelStarId', 'updatedAt'
             ]) &&
-            // Enforce Captain skill-lock server-side when lockSkills is enabled
             (
               !incoming().diff(existing()).affectedKeys().hasAny(['skills', 'stats6']) ||
               !exists(/databases/$(database)/documents/settings/team) ||
@@ -693,10 +1145,13 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if isVerifiedUser() && isValidId(playerId) && isCaptain() && playerId != request.auth.uid;
+      allow delete: if isVerifiedUser() && isValidId(playerId) && (
+        (isCaptain() && playerId != request.auth.uid) ||
+        (playerId == request.auth.uid && !isCaptain())
+      );
     }
 
-    // Separate player portrait photos (keeps /players lean & fast on 3G)
+    // Separate player portrait photos
     match /playerPhotos/{playerId} {
       allow get: if isVerifiedUser() && isValidId(playerId) && isTeamMember();
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
@@ -713,7 +1168,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(playerId) && (isCaptain() || existing().ownerUid == request.auth.uid);
     }
 
-    // Join requests (doc ID == applicant UID -> 1 request per user, requires active non-expired invite code & blocks existing team members)
+    // Join requests (Legacy Single-Team)
     match /joinRequests/{uid} {
       allow get: if isVerifiedUser() && isValidId(uid) && (uid == request.auth.uid || isCaptain());
       allow list: if isVerifiedUser() && (isCaptain() || resource.data.uid == request.auth.uid);
@@ -723,28 +1178,19 @@ service cloud.firestore {
         isValidJoinRequest(incoming(), uid) &&
         incoming().createdAt == request.time &&
         exists(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)) &&
+        get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.teamId == 'main' &&
         get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.active == true &&
-        (
-          !('status' in get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data) ||
-          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.status == 'active'
-        ) &&
-        (
-          !('expiresAtMs' in get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data) ||
-          request.time.toMillis() < get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.expiresAtMs
-        ) &&
-        (
-          !('maxUses' in get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data) ||
-          (
-            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount <
-            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.maxUses &&
-            getAfter(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount ==
-            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount + 1
-          )
-        ) && (
+        get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.status == 'active' &&
+        request.time.toMillis() < get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.expiresAtMs &&
+        get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount <
+          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.maxUses &&
+        getAfter(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount ==
+          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount + 1 && (
           incoming().status == 'pending' ||
           (
             incoming().status == 'approved' &&
-            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.requireApproval == false
+            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.requireApproval == false &&
+            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.isMemberShareCode != true
           )
         );
       allow update: if isVerifiedUser() &&
@@ -754,23 +1200,36 @@ service cloud.firestore {
         existing().status == 'pending' &&
         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
         isCaptain();
-      allow delete: if isVerifiedUser() && isValidId(uid) && (isCaptain() || (uid == request.auth.uid && existing().status == 'pending'));
+      allow delete: if isVerifiedUser() && isValidId(uid) && (
+        isCaptain() ||
+        (uid == request.auth.uid && existing().status in ['pending', 'approved'])
+      );
     }
 
-    // Attendance records (IDOR hardened: non-captains can only create for own playerId + ownerUid)
+    // Attendance records (Legacy Single-Team)
     match /attendance/{attendanceId} {
       allow get: if isVerifiedUser() && isValidId(attendanceId) && isTeamMember();
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
       allow create: if isVerifiedUser() &&
         isValidId(attendanceId) &&
         isValidAttendance(incoming()) &&
+        incoming().createdAt == request.time &&
         isTeamMember() &&
         (isCaptain() || (incoming().playerId == request.auth.uid && incoming().ownerUid == request.auth.uid));
-      allow update: if false;
+      allow update: if isVerifiedUser() &&
+        isValidId(attendanceId) &&
+        isValidAttendance(incoming()) &&
+        isTeamMember() &&
+        incoming().teamId == existing().teamId &&
+        incoming().playerId == existing().playerId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        (isCaptain() || existing().ownerUid == request.auth.uid) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['playerName', 'date', 'type', 'status', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(attendanceId) && isCaptain();
     }
 
-    // PRIVATE Readiness logs (Owner + Captain ONLY; IDOR hardened)
+    // PRIVATE Readiness logs (Legacy Single-Team: Owner + Captain ONLY)
     match /readiness/{readinessId} {
       allow get: if isVerifiedUser() && isValidId(readinessId) &&
         (resource.data.ownerUid == request.auth.uid || isCaptain());
@@ -785,7 +1244,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(readinessId) && isCaptain();
     }
 
-    // PRIVATE Injury logs (Owner + Captain ONLY; IDOR hardened)
+    // PRIVATE Injury logs (Legacy Single-Team: Owner + Captain ONLY)
     match /injuries/{injuryId} {
       allow get: if isVerifiedUser() && isValidId(injuryId) &&
         (resource.data.ownerUid == request.auth.uid || isCaptain());
@@ -801,7 +1260,7 @@ service cloud.firestore {
         (isCaptain() || existing().ownerUid == request.auth.uid);
     }
 
-    // Match results (Captain writes; team reads)
+    // Match results (Legacy Single-Team)
     match /matches/{matchId} {
       allow get: if isVerifiedUser() && isValidId(matchId) && isTeamMember();
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
@@ -814,7 +1273,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(matchId) && isCaptain();
     }
 
-    // Match reports (Players write strictly for own playerId + ownerUid; team reads)
+    // Match reports (Legacy Single-Team)
     match /reports/{reportId} {
       allow get: if isVerifiedUser() && isValidId(reportId) && isTeamMember();
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
@@ -822,12 +1281,56 @@ service cloud.firestore {
         isValidId(reportId) &&
         isValidReport(incoming()) &&
         isTeamMember() &&
-        (isCaptain() || (incoming().playerId == request.auth.uid && incoming().ownerUid == request.auth.uid));
-      allow update: if false;
+        incoming().confirmedByUids.size() == 0 &&
+        incoming().verified == false &&
+        incoming().createdAt == request.time && (
+          isCaptain() ||
+          (
+            incoming().playerId == request.auth.uid &&
+            incoming().ownerUid == request.auth.uid &&
+            existsAfter(/databases/$(database)/documents/reportThrottle/$(request.auth.uid)) &&
+            getAfter(/databases/$(database)/documents/reportThrottle/$(request.auth.uid)).data.updatedAt == request.time
+          )
+        );
+      allow update: if isVerifiedUser() &&
+        isValidId(reportId) &&
+        isValidReport(incoming()) &&
+        isTeamMember() &&
+        incoming().teamId == existing().teamId &&
+        incoming().playerId == existing().playerId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().createdAtMs == existing().createdAtMs &&
+        request.auth.uid != existing().ownerUid &&
+        request.auth.uid != existing().playerId &&
+        !(request.auth.uid in existing().confirmedByUids) &&
+        request.auth.uid in incoming().confirmedByUids &&
+        incoming().confirmedByUids.hasAll(existing().confirmedByUids) &&
+        incoming().confirmedByUids.size() == existing().confirmedByUids.size() + 1 &&
+        incoming().verified == true &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['confirmedByUids', 'verified', 'updatedAt']);
       allow delete: if isVerifiedUser() && isValidId(reportId) && isCaptain();
     }
 
-    // ANONYMOUS Raw Peer Rating Ballots (NEVER listable; readable ONLY by own author)
+    // Report Cooldown (Legacy Single-Team)
+    match /reportThrottle/{uid} {
+      allow get: if isVerifiedUser() && isValidId(uid) && (uid == request.auth.uid || isCaptain());
+      allow list: if false;
+      allow create: if isVerifiedUser() &&
+        isValidId(uid) &&
+        uid == request.auth.uid &&
+        isTeamMember() &&
+        isValidReportThrottle(incoming(), uid);
+      allow update: if isVerifiedUser() &&
+        isValidId(uid) &&
+        uid == request.auth.uid &&
+        isTeamMember() &&
+        isValidReportThrottle(incoming(), uid) &&
+        request.time.toMillis() >= existing().updatedAt.toMillis() + 2700000;
+      allow delete: if isVerifiedUser() && isValidId(uid) && isCaptain();
+    }
+
+    // Anonymous Raw Peer Ballots (Legacy Single-Team)
     match /peerRatings/{ratingId} {
       allow get: if isVerifiedUser() && isValidId(ratingId) && resource.data.raterUid == request.auth.uid;
       allow list: if false;
@@ -851,12 +1354,10 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // AGGREGATED Peer Rating Stats (Zero rater IDs; readable ONLY once count >= 3)
+    // Aggregated Peer Rating Stats (Legacy Single-Team)
     match /peerRatingStats/{targetId} {
       allow get: if isVerifiedUser() && isValidId(targetId) && isTeamMember() && resource.data.count >= 3;
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && resource.data.count >= 3 && isTeamMember();
-
-      // Atomic create paired with caller's first ballot for targetId
       allow create: if isVerifiedUser() &&
         isValidPeerRatingStat(incoming(), targetId) &&
         targetId != request.auth.uid &&
@@ -866,8 +1367,6 @@ service cloud.firestore {
         existsAfter(/databases/$(database)/documents/peerRatings/$(targetId + '__' + request.auth.uid)) &&
         incoming().count == 1 &&
         incoming().totalScore == getAfter(/databases/$(database)/documents/peerRatings/$(targetId + '__' + request.auth.uid)).data.score;
-
-      // Atomic update paired with caller's new or updated ballot for targetId
       allow update: if isVerifiedUser() &&
         isValidPeerRatingStat(incoming(), targetId) &&
         targetId != request.auth.uid &&
@@ -877,24 +1376,21 @@ service cloud.firestore {
         isTeamMember() &&
         existsAfter(/databases/$(database)/documents/peerRatings/$(targetId + '__' + request.auth.uid)) &&
         (
-          // Branch A: New rater adding first ballot (+1 count, +score total)
           (
             !exists(/databases/$(database)/documents/peerRatings/$(targetId + '__' + request.auth.uid)) &&
             incoming().count == existing().count + 1 &&
             incoming().totalScore == existing().totalScore + getAfter(/databases/$(database)/documents/peerRatings/$(targetId + '__' + request.auth.uid)).data.score
           ) ||
-          // Branch B: Existing rater revising their own score (0 count change, exact score delta)
           (
             exists(/databases/$(database)/documents/peerRatings/$(targetId + '__' + request.auth.uid)) &&
             incoming().count == existing().count &&
             incoming().totalScore == existing().totalScore - get(/databases/$(database)/documents/peerRatings/$(targetId + '__' + request.auth.uid)).data.score + getAfter(/databases/$(database)/documents/peerRatings/$(targetId + '__' + request.auth.uid)).data.score
           )
         );
-
       allow delete: if isVerifiedUser() && isValidId(targetId) && isCaptain();
     }
 
-    // Captain ratings
+    // Captain ratings (Legacy Single-Team)
     match /adminRatings/{targetId} {
       allow get: if isVerifiedUser() && isValidId(targetId) && isTeamMember();
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
@@ -902,7 +1398,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(targetId) && isCaptain();
     }
 
-    // Anonymous suggestions (no authorUid stored)
+    // Anonymous suggestions (Legacy Single-Team)
     match /suggestions/{suggestionId} {
       allow get: if isVerifiedUser() && isValidId(suggestionId) && isTeamMember();
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
@@ -914,36 +1410,46 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(suggestionId) && isCaptain();
     }
 
-    // Team tactics (Captain writes; team reads)
+    // Team tactics (Legacy Single-Team)
     match /tactics/{docId} {
       allow get: if isVerifiedUser() && docId == 'current' && isTeamMember();
       allow list: if false;
-      allow create, update: if isVerifiedUser() && docId == 'current' && isValidTactics(incoming()) && isCaptain();
+      allow create, update: if isVerifiedUser() && docId == 'current' && isValidTactics(incoming()) && canPublishLineup();
       allow delete: if false;
     }
 
-    // Upcoming match schedule & aggregate pitch fee totals (Captain writes; team reads aggregates only)
+    // Team lineup votes (Legacy Single-Team)
+    match /lineupVotes/{uid} {
+      allow get: if isVerifiedUser() && isValidId(uid) && isTeamMember();
+      allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
+      allow create, update: if isVerifiedUser() &&
+        isValidId(uid) &&
+        uid == request.auth.uid &&
+        isTeamMember() &&
+        isValidLineupVote(incoming(), uid);
+      allow delete: if isVerifiedUser() && isValidId(uid) && (isCaptain() || uid == request.auth.uid);
+    }
+
+    // Upcoming match schedule & aggregate pitch fee totals (Legacy Single-Team)
     match /pitchSessions/{docId} {
       allow get: if isVerifiedUser() && docId == 'current' && isTeamMember();
       allow list: if false;
-      allow create, update: if isVerifiedUser() && docId == 'current' && isValidPitchSession(incoming()) && isCaptain();
+      allow create, update: if isVerifiedUser() && docId == 'current' && isValidPitchSession(incoming()) && (isCaptain() || isOrganizer());
       allow delete: if false;
     }
 
-    // PRIVATE per-player pitch fee payment records (Owner + Captain ONLY read; Captain ONLY writes)
+    // PRIVATE per-player pitch fee payment records (Legacy Single-Team)
     match /pitchPayments/{paymentId} {
       allow get: if isVerifiedUser() && isValidId(paymentId) &&
         (resource.data.ownerUid == request.auth.uid || isCaptain());
       allow list: if isVerifiedUser() &&
         (resource.data.ownerUid == request.auth.uid || isCaptain());
       allow create, update: if isVerifiedUser() && isValidId(paymentId) &&
-        isValidPitchPayment(incoming(), paymentId) && isCaptain();
-      allow delete: if isVerifiedUser() && isValidId(paymentId) && isCaptain();
+        isValidPitchPayment(incoming(), paymentId) && (isCaptain() || isOrganizer());
+      allow delete: if isVerifiedUser() && isValidId(paymentId) && (isCaptain() || isOrganizer());
     }
 
-    // ==================== 4. PHASE B: DECENTRALIZED VERIFICATION, SECRET VOTING & MISSIONS ====================
-
-    // Decentralized match verification (Draft -> Verified by 3 distinct participants)
+    // Decentralized match verification (Legacy Single-Team)
     match /matchSessions/{sessionId} {
       allow get: if isVerifiedUser() && isValidId(sessionId) && isTeamMember();
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
@@ -974,7 +1480,6 @@ service cloud.firestore {
         incoming().oppScore == existing().oppScore &&
         incoming().result == existing().result &&
         incoming().participantIds == existing().participantIds && (
-          // Action A: Participant confirms Draft match (auto-verifies at 3 distinct confirmers)
           (
             existing().status == 'draft' &&
             request.auth.uid in existing().participantIds &&
@@ -987,7 +1492,6 @@ service cloud.firestore {
               (incoming().confirmers.size() < 3 && incoming().status == 'draft' && incoming().votingOpen == false)
             )
           ) ||
-          // Action B: Verified match participant records secret vote participation (one-time per voter)
           (
             existing().status == 'verified' &&
             existing().votingOpen == true &&
@@ -998,7 +1502,6 @@ service cloud.firestore {
             incoming().voterUids.hasAll(existing().voterUids) &&
             request.auth.uid in incoming().voterUids
           ) ||
-          // Action C: Captain closes voting round
           (
             isCaptain() &&
             existing().status == 'verified' &&
@@ -1011,7 +1514,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(sessionId) && isCaptain();
     }
 
-    // PRIVATE Secret Match Ballots (NEVER listable; readable ONLY by own voter; anti-self-vote enforced)
+    // PRIVATE Secret Match Ballots (Legacy Single-Team)
     match /matchVoteBallots/{ballotId} {
       allow get: if isVerifiedUser() && isValidId(ballotId) && resource.data.voterUid == request.auth.uid;
       allow list: if false;
@@ -1031,7 +1534,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(ballotId) && isCaptain();
     }
 
-    // ANONYMOUS 10-Bucket Match Vote Tallies for Trimmed Mean (NEVER listable; get LOCKED under 50% participation)
+    // ANONYMOUS 10-Bucket Match Vote Tallies (Legacy Single-Team)
     match /matchVoteTallies/{tallyId} {
       allow get: if isVerifiedUser() &&
         isValidId(tallyId) &&
@@ -1045,7 +1548,6 @@ service cloud.firestore {
         );
       allow list: if false;
 
-      // Blind atomic create paired with voter's private ballot (anti-self-vote enforced)
       allow create: if isVerifiedUser() &&
         isValidMatchVoteTally(incoming(), tallyId) &&
         incoming().targetId != request.auth.uid &&
@@ -1055,7 +1557,6 @@ service cloud.firestore {
         incoming().count == 1 &&
         incoming().totalScore == getAfter(/databases/$(database)/documents/matchVoteBallots/$(incoming().sessionId + '__' + incoming().targetId + '__' + request.auth.uid)).data.score;
 
-      // Blind atomic update via increment() paired with voter's new ballot (exact +1 bucket & +score invariant)
       allow update: if isVerifiedUser() &&
         isValidMatchVoteTally(incoming(), tallyId) &&
         incoming().targetId != request.auth.uid &&
@@ -1085,7 +1586,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(tallyId) && isCaptain();
     }
 
-    // Random 2-Teammate Peer Mission Verification (XP only — never touches OVR/skills)
+    // Random 2-Teammate Peer Mission Verification (Legacy Single-Team)
     match /missionClaims/{claimId} {
       allow get: if isVerifiedUser() && isValidId(claimId) && isTeamMember();
       allow list: if isVerifiedUser() && resource.data.teamId == 'main' && isTeamMember();
@@ -1141,8 +1642,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(claimId) && isCaptain();
     }
 
-    // ==================== 5. GLOBAL FOOTBALL LIBRARY (TRANSLATED EDUCATIONAL HUB) ====================
-    // Team members read ONLY published articles; Captain can read hidden drafts & manage (create/update/delete)
+    // Global Football Library (Legacy Single-Team)
     match /footballLibrary/{articleId} {
       allow get: if isVerifiedUser() &&
         isValidId(articleId) &&
@@ -1167,6 +1667,734 @@ service cloud.firestore {
         isCaptain();
 
       allow delete: if isVerifiedUser() && isValidId(articleId) && isCaptain();
+    }
+
+    // ==================== 4. PHASE 6: MULTI-TEAM ISOLATED TENANCY (/teams/{teamId}) ====================
+    // Zero cross-team visibility; Platform Owners (admins/{uid}) have ZERO access to other teams unless member/founder.
+
+    match /teams/{teamId} {
+      allow get: if isVerifiedUser() && isValidTeamId(teamId) && (
+        resource.data.founderUid == request.auth.uid ||
+        exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid))
+      );
+      allow list: if false;
+
+      allow create: if isVerifiedUser() &&
+        isValidTeamId(teamId) &&
+        isValidMultiTeam(incoming(), teamId) &&
+        incoming().founderUid == request.auth.uid &&
+        incoming().deletedAt == null &&
+        (!('createdAt' in incoming()) || incoming().createdAt == request.time) && (
+          // Standard Multi-Team Creation (enforces Spark kill-switch + 3 owned / 5 joined cap)
+          (
+            !('migratedFrom' in incoming()) &&
+            incoming().memberCount == 1 &&
+            isPlatformNewTeamsAllowed() &&
+            existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            (teamId in getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownedTeamIds) &&
+            (teamId in getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds) &&
+            getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownedTeamIds.size() <= 3 &&
+            getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds.size() <= 5 &&
+            (
+              !exists(/databases/$(database)/documents/users/$(request.auth.uid)) ||
+              (
+                (!('ownedTeamIds' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
+                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownedTeamIds.size() < 3) &&
+                (!('teamIds' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
+                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds.size() < 5)
+              )
+            )
+          ) ||
+          // Legacy Single-Team Safe Migration Copy (Platform Owner admins/{uid} only)
+          (
+            isCaptain() &&
+            ('migratedFrom' in incoming()) &&
+            incoming().migratedFrom == 'main' &&
+            incoming().memberCount >= 1 &&
+            incoming().memberCount <= incoming().maxMembersPerTeam
+          )
+        );
+
+      allow update: if isVerifiedUser() &&
+        isValidTeamId(teamId) &&
+        isValidMultiTeam(incoming(), teamId) &&
+        incoming().id == existing().id &&
+        (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) && (
+          // Action 1: Founder updates team settings / organizers / maxMembersPerTeam
+          (
+            existing().founderUid == request.auth.uid &&
+            existing().deletedAt == null &&
+            incoming().founderUid == existing().founderUid &&
+            incoming().memberCount == existing().memberCount &&
+            incoming().deletedAt == existing().deletedAt &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'teamName', 'appName', 'primaryColor', 'secondaryColor', 'logo',
+              'inviteCode', 'memberShareCode', 'joinMode', 'lineupPublishMode',
+              'lockSkills', 'maxMembersPerTeam', 'organizerUids',
+              'defaultCurrency', 'defaultPitchCost', 'updatedAtMs', 'updatedAt'
+            ])
+          ) ||
+          // Action 2: Founder transfers leadership to an existing team member
+          (
+            existing().founderUid == request.auth.uid &&
+            existing().deletedAt == null &&
+            incoming().founderUid != existing().founderUid &&
+            exists(/databases/$(database)/documents/teams/$(teamId)/members/$(incoming().founderUid)) &&
+            (request.auth.uid in incoming().organizerUids) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['founderUid', 'organizerUids', 'updatedAtMs', 'updatedAt'])
+          ) ||
+          // Action 3: Founder increments memberCount (+1) on member add / join approval
+          (
+            existing().founderUid == request.auth.uid &&
+            existing().deletedAt == null &&
+            existing().memberCount < existing().maxMembersPerTeam &&
+            incoming().memberCount == existing().memberCount + 1 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt'])
+          ) ||
+          // Action 4: Founder decrements memberCount (-1) on member removal
+          (
+            existing().founderUid == request.auth.uid &&
+            existing().deletedAt == null &&
+            incoming().memberCount == existing().memberCount - 1 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'organizerUids', 'updatedAt'])
+          ) ||
+          // Action 5: Founder soft-deletes team (deletedAt = request.time)
+          (
+            existing().founderUid == request.auth.uid &&
+            existing().deletedAt == null &&
+            incoming().deletedAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['deletedAt', 'updatedAtMs', 'updatedAt'])
+          ) ||
+          // Action 6: Tier 2 Team Organizer limited settings update (never inviteCode, founderUid, joinMode, or lockSkills)
+          (
+            isMultiOrganizer(teamId) &&
+            existing().deletedAt == null &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'teamName', 'logo', 'defaultCurrency', 'defaultPitchCost',
+              'lineupPublishMode', 'updatedAtMs', 'updatedAt'
+            ])
+          ) ||
+          // Action 7: Atomic Instant Join memberCount (+1) paired with new member & approved joinRequest
+          (
+            existing().deletedAt == null &&
+            existing().joinMode == 'instant' &&
+            existing().memberCount < existing().maxMembersPerTeam &&
+            !exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
+            existsAfter(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
+            existsAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)) &&
+            existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            (teamId in getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds) &&
+            getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds.size() <= 5 &&
+            incoming().memberCount == existing().memberCount + 1 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt'])
+          ) ||
+          // Action 8: Atomic Member Self-Leave memberCount (-1) paired with self-deletion
+          (
+            existing().deletedAt == null &&
+            request.auth.uid != existing().founderUid &&
+            exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
+            !existsAfter(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
+            !(request.auth.uid in incoming().organizerUids) &&
+            existing().organizerUids.hasAll(incoming().organizerUids) &&
+            incoming().memberCount == existing().memberCount - 1 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'organizerUids', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+
+      // 4.1 Team Members (Public Profile ONLY — Zero health/readiness/injury/medical/PIN fields)
+      match /members/{memberId} {
+        allow get: if isVerifiedUser() && isValidId(memberId) && (memberId == request.auth.uid || isMultiMember(teamId));
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+
+        allow create: if isVerifiedUser() &&
+          isValidMultiTeamMember(incoming(), memberId, teamId) &&
+          (!('createdAt' in incoming()) || incoming().createdAt == request.time) && (
+            // Team Founder creating initial self doc in batch OR adding/approving a member
+            isMultiFounder(teamId) ||
+            (isMultiFounderAfter(teamId) && memberId == request.auth.uid && incoming().ownerUid == request.auth.uid) ||
+            // Direct instant joiner creating own member doc atomically
+            (
+              memberId == request.auth.uid &&
+              incoming().ownerUid == request.auth.uid &&
+              incoming().role == 'member' &&
+              incoming().isOrganizer == false &&
+              exists(/databases/$(database)/documents/teams/$(teamId)) &&
+              get(/databases/$(database)/documents/teams/$(teamId)).data.deletedAt == null &&
+              get(/databases/$(database)/documents/teams/$(teamId)).data.joinMode == 'instant' &&
+              get(/databases/$(database)/documents/teams/$(teamId)).data.memberCount <
+                get(/databases/$(database)/documents/teams/$(teamId)).data.maxMembersPerTeam &&
+              getAfter(/databases/$(database)/documents/teams/$(teamId)).data.memberCount ==
+                get(/databases/$(database)/documents/teams/$(teamId)).data.memberCount + 1 &&
+              existsAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)) &&
+              getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.createdAt == request.time &&
+              getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.status == 'approved' &&
+              exists(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)) &&
+              get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)).data.teamId == teamId &&
+              get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)).data.active == true &&
+              get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)).data.requireApproval == false &&
+              get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)).data.isMemberShareCode != true
+            )
+          );
+
+        allow update: if isVerifiedUser() &&
+          isValidMultiTeamMember(incoming(), memberId, teamId) &&
+          (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
+          incoming().id == existing().id &&
+          incoming().uid == existing().uid &&
+          incoming().teamId == existing().teamId && (
+            isMultiFounder(teamId) ||
+            (
+              existing().ownerUid == request.auth.uid &&
+              incoming().ownerUid == existing().ownerUid &&
+              incoming().role == existing().role &&
+              incoming().isOrganizer == existing().isOrganizer &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'jersey', 'age', 'height', 'weight', 'foot',
+                'primaryPos', 'secondaryPos', 'photo', 'hasPhoto', 'photoZoom', 'photoY',
+                'skills', 'stats6', 'roleOverride', 'top3Strengths', 'weak3Points',
+                'seasonGoal', 'availableStatus', 'roleModelStarId', 'updatedAtMs', 'updatedAt'
+              ]) &&
+              (
+                !incoming().diff(existing()).affectedKeys().hasAny(['skills', 'stats6']) ||
+                !exists(/databases/$(database)/documents/teams/$(teamId)) ||
+                get(/databases/$(database)/documents/teams/$(teamId)).data.lockSkills == false
+              )
+            )
+          );
+
+        allow delete: if isVerifiedUser() && isValidId(memberId) && (
+          (isMultiFounder(teamId) && memberId != request.auth.uid) ||
+          (memberId == request.auth.uid && !isMultiFounder(teamId))
+        );
+
+        // 4.2 Strictly Isolated Private Personal Records (Owner UID + Team Founder ONLY)
+        match /private/{docId} {
+          allow get: if isVerifiedUser() && isValidId(docId) && (memberId == request.auth.uid || isMultiFounder(teamId));
+          allow list: if isVerifiedUser() && (memberId == request.auth.uid || isMultiFounder(teamId));
+          allow create: if isVerifiedUser() &&
+            isValidId(docId) &&
+            isValidMultiPrivateRecord(incoming(), memberId, teamId) &&
+            (memberId == request.auth.uid || isMultiFounder(teamId));
+          allow update: if false;
+          allow delete: if isVerifiedUser() && isValidId(docId) && (memberId == request.auth.uid || isMultiFounder(teamId));
+        }
+      }
+
+      // 4.3 Team Join Requests
+      match /joinRequests/{uid} {
+        allow get: if isVerifiedUser() && isValidId(uid) && (uid == request.auth.uid || isMultiFounder(teamId));
+        allow list: if isVerifiedUser() && (isMultiFounder(teamId) || resource.data.uid == request.auth.uid);
+
+        allow create: if isVerifiedUser() &&
+          uid == request.auth.uid &&
+          !exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
+          isValidMultiJoinRequest(incoming(), uid, teamId) &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)) &&
+          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.teamId == teamId &&
+          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.active == true &&
+          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.status == 'active' &&
+          request.time.toMillis() < get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.expiresAtMs &&
+          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount <
+            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.maxUses &&
+          getAfter(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount ==
+            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount + 1 && (
+            incoming().status == 'pending' ||
+            (
+              incoming().status == 'approved' &&
+              get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.requireApproval == false &&
+              get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.isMemberShareCode != true
+            )
+          );
+
+        allow update: if isVerifiedUser() &&
+          isValidMultiJoinRequest(incoming(), uid, teamId) &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().uid == existing().uid &&
+          incoming().teamId == existing().teamId &&
+          existing().status == 'pending' &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+          isMultiFounder(teamId);
+
+        allow delete: if isVerifiedUser() && isValidId(uid) && (
+          isMultiFounder(teamId) ||
+          (uid == request.auth.uid && existing().status in ['pending', 'approved'])
+        );
+      }
+
+      // 4.4 Consolidated Per-Match Attendance (Self-entry isolation inside responses map)
+      match /attendance/{matchKey} {
+        allow get: if isVerifiedUser() && isValidId(matchKey) && isMultiMember(teamId);
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+
+        allow create: if isVerifiedUser() &&
+          isValidConsolidatedAttendance(incoming(), matchKey, teamId) &&
+          isMultiMember(teamId) && (
+            isMultiFounder(teamId) ||
+            (
+              incoming().responses.keys().hasOnly([request.auth.uid]) &&
+              request.auth.uid in incoming().responses &&
+              isValidAttendanceResponseEntry(incoming().responses[request.auth.uid], request.auth.uid)
+            )
+          );
+
+        allow update: if isVerifiedUser() &&
+          isValidConsolidatedAttendance(incoming(), matchKey, teamId) &&
+          isMultiMember(teamId) &&
+          incoming().matchKey == existing().matchKey &&
+          incoming().teamId == existing().teamId &&
+          incoming().date == existing().date && (
+            isMultiFounder(teamId) ||
+            (
+              incoming().diff(existing()).affectedKeys().hasOnly(['responses', 'updatedAtMs', 'updatedAt', 'type']) &&
+              incoming().responses.diff(existing().responses).affectedKeys().hasOnly([request.auth.uid]) &&
+              (
+                !(request.auth.uid in incoming().responses) ||
+                isValidAttendanceResponseEntry(incoming().responses[request.auth.uid], request.auth.uid)
+              )
+            )
+          );
+
+        allow delete: if isVerifiedUser() && isValidId(matchKey) && isMultiFounder(teamId);
+      }
+
+      // 4.5 Team Matches
+      match /matches/{matchId} {
+        allow get: if isVerifiedUser() && isValidId(matchId) && isMultiMember(teamId);
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+        allow create: if isVerifiedUser() &&
+          isValidId(matchId) &&
+          isValidMatchForTeam(incoming(), teamId) && (
+            isMultiFounder(teamId) ||
+            (isMultiOrganizer(teamId) && incoming().createdBy == request.auth.uid && incoming().createdAt == request.time)
+          );
+        allow update: if false;
+        allow delete: if isVerifiedUser() && isValidId(matchId) && isMultiFounder(teamId);
+      }
+
+      // 4.6 Team Reports (45-min Cooldown + Peer Verification)
+      match /reports/{reportId} {
+        allow get: if isVerifiedUser() && isValidId(reportId) && isMultiMember(teamId);
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+
+        allow create: if isVerifiedUser() &&
+          isValidId(reportId) &&
+          isValidReportForTeam(incoming(), teamId) &&
+          isMultiMember(teamId) && (
+            isMultiFounder(teamId) ||
+            (
+              incoming().confirmedByUids.size() == 0 &&
+              incoming().verified == false &&
+              incoming().createdAt == request.time &&
+              incoming().playerId == request.auth.uid &&
+              incoming().ownerUid == request.auth.uid &&
+              existsAfter(/databases/$(database)/documents/teams/$(teamId)/reportThrottle/$(request.auth.uid)) &&
+              getAfter(/databases/$(database)/documents/teams/$(teamId)/reportThrottle/$(request.auth.uid)).data.updatedAt == request.time
+            )
+          );
+
+        allow update: if isVerifiedUser() &&
+          isValidId(reportId) &&
+          isValidReportForTeam(incoming(), teamId) &&
+          isMultiMember(teamId) &&
+          incoming().teamId == existing().teamId &&
+          incoming().playerId == existing().playerId &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().createdAtMs == existing().createdAtMs &&
+          request.auth.uid != existing().ownerUid &&
+          request.auth.uid != existing().playerId &&
+          !(request.auth.uid in existing().confirmedByUids) &&
+          request.auth.uid in incoming().confirmedByUids &&
+          incoming().confirmedByUids.hasAll(existing().confirmedByUids) &&
+          incoming().confirmedByUids.size() == existing().confirmedByUids.size() + 1 &&
+          incoming().verified == true &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['confirmedByUids', 'verified', 'updatedAt']);
+
+        allow delete: if isVerifiedUser() && isValidId(reportId) && isMultiFounder(teamId);
+      }
+
+      // 4.7 Server-Enforced 45-Minute Report Cooldown
+      match /reportThrottle/{uid} {
+        allow get: if isVerifiedUser() && isValidId(uid) && (uid == request.auth.uid || isMultiFounder(teamId));
+        allow list: if false;
+        allow create: if isVerifiedUser() &&
+          isValidId(uid) &&
+          uid == request.auth.uid &&
+          isMultiMember(teamId) &&
+          isValidReportThrottleForTeam(incoming(), teamId, uid);
+        allow update: if isVerifiedUser() &&
+          isValidId(uid) &&
+          uid == request.auth.uid &&
+          isMultiMember(teamId) &&
+          isValidReportThrottleForTeam(incoming(), teamId, uid) &&
+          request.time.toMillis() >= existing().updatedAt.toMillis() + 2700000;
+        allow delete: if isVerifiedUser() && isValidId(uid) && isMultiFounder(teamId);
+      }
+
+      // 4.8 Anonymous Raw Peer Rating Ballots
+      match /peerRatings/{ratingId} {
+        allow get: if isVerifiedUser() && isValidId(ratingId) && resource.data.raterUid == request.auth.uid;
+        allow list: if false;
+        allow create: if isVerifiedUser() &&
+          isValidId(ratingId) &&
+          isValidPeerBallot(incoming(), ratingId) &&
+          incoming().createdAt == request.time &&
+          isMultiMember(teamId) &&
+          exists(/databases/$(database)/documents/teams/$(teamId)/members/$(incoming().targetId)) &&
+          existsAfter(/databases/$(database)/documents/teams/$(teamId)/peerRatingStats/$(incoming().targetId));
+        allow update: if isVerifiedUser() &&
+          isValidId(ratingId) &&
+          isValidPeerBallot(incoming(), ratingId) &&
+          existing().raterUid == request.auth.uid &&
+          incoming().raterUid == existing().raterUid &&
+          incoming().targetId == existing().targetId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['score', 'updatedAt']) &&
+          isMultiMember(teamId) &&
+          existsAfter(/databases/$(database)/documents/teams/$(teamId)/peerRatingStats/$(incoming().targetId));
+        allow delete: if false;
+      }
+
+      // 4.9 Aggregated Peer Rating Stats (Readable strictly when count >= 3)
+      match /peerRatingStats/{targetId} {
+        allow get: if isVerifiedUser() && isValidId(targetId) && isMultiMember(teamId) && resource.data.count >= 3;
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && resource.data.count >= 3 && isMultiMember(teamId);
+        allow create: if isVerifiedUser() &&
+          isValidPeerRatingStatForTeam(incoming(), teamId, targetId) &&
+          targetId != request.auth.uid &&
+          isMultiMember(teamId) &&
+          exists(/databases/$(database)/documents/teams/$(teamId)/members/$(targetId)) &&
+          !exists(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)) &&
+          existsAfter(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)) &&
+          incoming().count == 1 &&
+          incoming().totalScore == getAfter(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)).data.score;
+        allow update: if isVerifiedUser() &&
+          isValidPeerRatingStatForTeam(incoming(), teamId, targetId) &&
+          targetId != request.auth.uid &&
+          incoming().teamId == existing().teamId &&
+          incoming().targetId == existing().targetId &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['count', 'totalScore', 'updatedAt']) &&
+          isMultiMember(teamId) &&
+          existsAfter(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)) &&
+          (
+            (
+              !exists(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)) &&
+              incoming().count == existing().count + 1 &&
+              incoming().totalScore == existing().totalScore + getAfter(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)).data.score
+            ) ||
+            (
+              exists(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)) &&
+              incoming().count == existing().count &&
+              incoming().totalScore == existing().totalScore - get(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)).data.score + getAfter(/databases/$(database)/documents/teams/$(teamId)/peerRatings/$(targetId + '__' + request.auth.uid)).data.score
+            )
+          );
+        allow delete: if isVerifiedUser() && isValidId(targetId) && isMultiFounder(teamId);
+      }
+
+      // 4.10 Founder Official Player Ratings
+      match /adminRatings/{targetId} {
+        allow get: if isVerifiedUser() && isValidId(targetId) && isMultiMember(teamId);
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+        allow create, update: if isVerifiedUser() && isValidAdminRatingForTeam(incoming(), teamId, targetId) && isMultiFounder(teamId);
+        allow delete: if isVerifiedUser() && isValidId(targetId) && isMultiFounder(teamId);
+      }
+
+      // 4.11 Anonymous Suggestions
+      match /suggestions/{suggestionId} {
+        allow get: if isVerifiedUser() && isValidId(suggestionId) && isMultiMember(teamId);
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+        allow create: if isVerifiedUser() &&
+          isValidId(suggestionId) &&
+          isValidSuggestionForTeam(incoming(), teamId) &&
+          isMultiMember(teamId) &&
+          (isMultiFounder(teamId) || incoming().createdAt == request.time);
+        allow update: if false;
+        allow delete: if isVerifiedUser() && isValidId(suggestionId) && isMultiFounder(teamId);
+      }
+
+      // 4.12 Team Tactics Board
+      match /tactics/{docId} {
+        allow get: if isVerifiedUser() && docId == 'current' && isMultiMember(teamId);
+        allow list: if false;
+        allow create: if isVerifiedUser() &&
+          docId == 'current' &&
+          isValidTacticsForTeam(incoming(), teamId) &&
+          (isMultiFounderAfter(teamId) || canMultiPublishLineup(teamId));
+        allow update: if isVerifiedUser() &&
+          docId == 'current' &&
+          isValidTacticsForTeam(incoming(), teamId) &&
+          canMultiPublishLineup(teamId);
+        allow delete: if false;
+      }
+
+      // 4.13 Team Lineup Votes
+      match /lineupVotes/{uid} {
+        allow get: if isVerifiedUser() && isValidId(uid) && isMultiMember(teamId);
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+        allow create, update: if isVerifiedUser() &&
+          isValidId(uid) &&
+          uid == request.auth.uid &&
+          isMultiMember(teamId) &&
+          isValidLineupVoteForTeam(incoming(), teamId, uid);
+        allow delete: if isVerifiedUser() && isValidId(uid) && (isMultiFounder(teamId) || uid == request.auth.uid);
+      }
+
+      // 4.14 Team Pitch Session (Schedule & Aggregate Fee Totals)
+      match /pitchSessions/{docId} {
+        allow get: if isVerifiedUser() && docId == 'current' && isMultiMember(teamId);
+        allow list: if false;
+        allow create, update: if isVerifiedUser() &&
+          docId == 'current' &&
+          isValidPitchSessionForTeam(incoming(), teamId) &&
+          (isMultiFounder(teamId) || isMultiOrganizer(teamId));
+        allow delete: if false;
+      }
+
+      // 4.15 Private Per-Player Pitch Payments (Owner + Team Founder + Team Organizers ONLY)
+      match /pitchPayments/{paymentId} {
+        allow get: if isVerifiedUser() && isValidId(paymentId) &&
+          (resource.data.ownerUid == request.auth.uid || isMultiFounder(teamId) || isMultiOrganizer(teamId));
+        allow list: if isVerifiedUser() &&
+          resource.data.teamId == teamId &&
+          (resource.data.ownerUid == request.auth.uid || isMultiFounder(teamId) || isMultiOrganizer(teamId));
+        allow create, update: if isVerifiedUser() &&
+          isValidId(paymentId) &&
+          isValidPitchPaymentForTeam(incoming(), teamId, paymentId) &&
+          (isMultiFounder(teamId) || isMultiOrganizer(teamId));
+        allow delete: if isVerifiedUser() && isValidId(paymentId) && (isMultiFounder(teamId) || isMultiOrganizer(teamId));
+      }
+
+      // 4.16 Decentralized Match Verification Sessions
+      match /matchSessions/{sessionId} {
+        allow get: if isVerifiedUser() && isValidId(sessionId) && isMultiMember(teamId);
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+
+        allow create: if isVerifiedUser() &&
+          isValidMatchSessionForTeam(incoming(), teamId, sessionId) &&
+          isMultiMember(teamId) &&
+          incoming().createdBy == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().status == 'draft' &&
+          incoming().votingOpen == false &&
+          incoming().confirmers.size() == 1 &&
+          request.auth.uid in incoming().confirmers &&
+          request.auth.uid in incoming().participantIds &&
+          incoming().voterUids.size() == 0;
+
+        allow update: if isVerifiedUser() &&
+          isValidMatchSessionForTeam(incoming(), teamId, sessionId) &&
+          isMultiMember(teamId) &&
+          incoming().id == existing().id &&
+          incoming().teamId == existing().teamId &&
+          incoming().createdBy == existing().createdBy &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().date == existing().date &&
+          incoming().opponent == existing().opponent &&
+          incoming().pitchMode == existing().pitchMode &&
+          incoming().ourScore == existing().ourScore &&
+          incoming().oppScore == existing().oppScore &&
+          incoming().result == existing().result &&
+          incoming().participantIds == existing().participantIds && (
+            (
+              existing().status == 'draft' &&
+              request.auth.uid in existing().participantIds &&
+              !(request.auth.uid in existing().confirmers) &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['confirmers', 'status', 'votingOpen', 'updatedAt']) &&
+              incoming().confirmers.size() == existing().confirmers.size() + 1 &&
+              incoming().confirmers.hasAll(existing().confirmers) &&
+              request.auth.uid in incoming().confirmers && (
+                (incoming().confirmers.size() >= 3 && incoming().status == 'verified' && incoming().votingOpen == true) ||
+                (incoming().confirmers.size() < 3 && incoming().status == 'draft' && incoming().votingOpen == false)
+              )
+            ) ||
+            (
+              existing().status == 'verified' &&
+              existing().votingOpen == true &&
+              request.auth.uid in existing().participantIds &&
+              !(request.auth.uid in existing().voterUids) &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['voterUids', 'updatedAt']) &&
+              incoming().voterUids.size() == existing().voterUids.size() + 1 &&
+              incoming().voterUids.hasAll(existing().voterUids) &&
+              request.auth.uid in incoming().voterUids
+            ) ||
+            (
+              isMultiFounder(teamId) &&
+              existing().status == 'verified' &&
+              existing().votingOpen == true &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['votingOpen', 'updatedAt']) &&
+              incoming().votingOpen == false
+            )
+          );
+
+        allow delete: if isVerifiedUser() && isValidId(sessionId) && isMultiFounder(teamId);
+      }
+
+      // 4.17 Private Secret Match Ballots
+      match /matchVoteBallots/{ballotId} {
+        allow get: if isVerifiedUser() && isValidId(ballotId) && resource.data.voterUid == request.auth.uid;
+        allow list: if false;
+
+        allow create: if isVerifiedUser() &&
+          isValidId(ballotId) &&
+          isValidMatchVoteBallot(incoming(), ballotId) &&
+          isMultiMember(teamId) &&
+          exists(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(incoming().sessionId)) &&
+          get(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(incoming().sessionId)).data.status == 'verified' &&
+          get(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(incoming().sessionId)).data.votingOpen == true &&
+          request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(incoming().sessionId)).data.participantIds &&
+          incoming().targetId in get(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(incoming().sessionId)).data.participantIds &&
+          existsAfter(/databases/$(database)/documents/teams/$(teamId)/matchVoteTallies/$(incoming().sessionId + '__' + incoming().targetId));
+
+        allow update: if false;
+        allow delete: if isVerifiedUser() && isValidId(ballotId) && isMultiFounder(teamId);
+      }
+
+      // 4.18 Anonymous 10-Bucket Match Vote Tallies (50% Quorum Lock)
+      match /matchVoteTallies/{tallyId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(tallyId) &&
+          isMultiMember(teamId) &&
+          resource.data.count >= 2 &&
+          exists(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(resource.data.sessionId)) &&
+          get(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(resource.data.sessionId)).data.status == 'verified' &&
+          (
+            get(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(resource.data.sessionId)).data.voterUids.size() * 2 >=
+            get(/databases/$(database)/documents/teams/$(teamId)/matchSessions/$(resource.data.sessionId)).data.participantIds.size()
+          );
+        allow list: if false;
+
+        allow create: if isVerifiedUser() &&
+          isValidMatchVoteTallyForTeam(incoming(), teamId, tallyId) &&
+          incoming().targetId != request.auth.uid &&
+          isMultiMember(teamId) &&
+          !exists(/databases/$(database)/documents/teams/$(teamId)/matchVoteBallots/$(incoming().sessionId + '__' + incoming().targetId + '__' + request.auth.uid)) &&
+          existsAfter(/databases/$(database)/documents/teams/$(teamId)/matchVoteBallots/$(incoming().sessionId + '__' + incoming().targetId + '__' + request.auth.uid)) &&
+          incoming().count == 1 &&
+          incoming().totalScore == getAfter(/databases/$(database)/documents/teams/$(teamId)/matchVoteBallots/$(incoming().sessionId + '__' + incoming().targetId + '__' + request.auth.uid)).data.score;
+
+        allow update: if isVerifiedUser() &&
+          isValidMatchVoteTallyForTeam(incoming(), teamId, tallyId) &&
+          incoming().targetId != request.auth.uid &&
+          incoming().teamId == existing().teamId &&
+          incoming().sessionId == existing().sessionId &&
+          incoming().targetId == existing().targetId &&
+          incoming().eligibleCount == existing().eligibleCount &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'count', 'totalScore', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', 'h10', 'updatedAt'
+          ]) &&
+          isMultiMember(teamId) &&
+          !exists(/databases/$(database)/documents/teams/$(teamId)/matchVoteBallots/$(incoming().sessionId + '__' + incoming().targetId + '__' + request.auth.uid)) &&
+          existsAfter(/databases/$(database)/documents/teams/$(teamId)/matchVoteBallots/$(incoming().sessionId + '__' + incoming().targetId + '__' + request.auth.uid)) &&
+          incoming().count == existing().count + 1 &&
+          incoming().totalScore == existing().totalScore + getAfter(/databases/$(database)/documents/teams/$(teamId)/matchVoteBallots/$(incoming().sessionId + '__' + incoming().targetId + '__' + request.auth.uid)).data.score &&
+          incoming().h1 >= existing().h1 &&
+          incoming().h2 >= existing().h2 &&
+          incoming().h3 >= existing().h3 &&
+          incoming().h4 >= existing().h4 &&
+          incoming().h5 >= existing().h5 &&
+          incoming().h6 >= existing().h6 &&
+          incoming().h7 >= existing().h7 &&
+          incoming().h8 >= existing().h8 &&
+          incoming().h9 >= existing().h9 &&
+          incoming().h10 >= existing().h10;
+
+        allow delete: if isVerifiedUser() && isValidId(tallyId) && isMultiFounder(teamId);
+      }
+
+      // 4.19 Random 2-Teammate Peer Mission Verification
+      match /missionClaims/{claimId} {
+        allow get: if isVerifiedUser() && isValidId(claimId) && isMultiMember(teamId);
+        allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
+
+        allow create: if isVerifiedUser() &&
+          isValidMissionClaimForTeam(incoming(), teamId, claimId) &&
+          isMultiMember(teamId) &&
+          incoming().claimantUid == request.auth.uid &&
+          incoming().status == 'pending' &&
+          incoming().approverUids.size() == 0 &&
+          incoming().rejectorUids.size() == 0 &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/teams/$(teamId)/members/$(incoming().verifierUids[0])) &&
+          exists(/databases/$(database)/documents/teams/$(teamId)/members/$(incoming().verifierUids[1]));
+
+        allow update: if isVerifiedUser() &&
+          isValidMissionClaimForTeam(incoming(), teamId, claimId) &&
+          isMultiMember(teamId) &&
+          existing().status == 'pending' &&
+          incoming().id == existing().id &&
+          incoming().teamId == existing().teamId &&
+          incoming().missionId == existing().missionId &&
+          incoming().missionTitle == existing().missionTitle &&
+          incoming().xpReward == existing().xpReward &&
+          incoming().claimantUid == existing().claimantUid &&
+          incoming().claimantName == existing().claimantName &&
+          incoming().note == existing().note &&
+          incoming().verifierUids == existing().verifierUids &&
+          incoming().createdAt == existing().createdAt &&
+          request.auth.uid != existing().claimantUid &&
+          request.auth.uid in existing().verifierUids &&
+          !(request.auth.uid in existing().approverUids) &&
+          !(request.auth.uid in existing().rejectorUids) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['approverUids', 'rejectorUids', 'status', 'updatedAt']) && (
+            (
+              incoming().rejectorUids == existing().rejectorUids &&
+              incoming().approverUids.size() == existing().approverUids.size() + 1 &&
+              incoming().approverUids.hasAll(existing().approverUids) &&
+              request.auth.uid in incoming().approverUids && (
+                (incoming().approverUids.size() == 2 && incoming().status == 'verified') ||
+                (incoming().approverUids.size() < 2 && incoming().status == 'pending')
+              )
+            ) ||
+            (
+              incoming().approverUids == existing().approverUids &&
+              incoming().rejectorUids.size() == existing().rejectorUids.size() + 1 &&
+              incoming().rejectorUids.hasAll(existing().rejectorUids) &&
+              request.auth.uid in incoming().rejectorUids &&
+              incoming().status == 'rejected'
+            )
+          );
+
+        allow delete: if isVerifiedUser() && isValidId(claimId) && isMultiFounder(teamId);
+      }
+
+      // 4.20 Team Football Library
+      match /footballLibrary/{articleId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(articleId) &&
+          isMultiMember(teamId) &&
+          (resource.data.published == true || isMultiFounder(teamId));
+
+        allow list: if isVerifiedUser() &&
+          resource.data.teamId == teamId &&
+          isMultiMember(teamId) &&
+          (resource.data.published == true || isMultiFounder(teamId));
+
+        allow create: if isVerifiedUser() &&
+          isValidLibraryArticleForTeam(incoming(), teamId, articleId) &&
+          incoming().createdAt == request.time &&
+          isMultiFounder(teamId);
+
+        allow update: if isVerifiedUser() &&
+          isValidLibraryArticleForTeam(incoming(), teamId, articleId) &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().id == existing().id &&
+          incoming().teamId == existing().teamId &&
+          isMultiFounder(teamId);
+
+        allow delete: if isVerifiedUser() && isValidId(articleId) && isMultiFounder(teamId);
+      }
+
+      // 4.21 Team-Scoped Private Founder Audit Logs for Invite Codes
+      match /inviteAdminLogs/{code} {
+        allow get, list: if isMultiFounder(teamId);
+        allow create: if isVerifiedUser() && isValidInviteAdminLog(incoming(), code) && (isMultiFounder(teamId) || isMultiFounderAfter(teamId));
+        allow update: if isMultiFounder(teamId) && isValidInviteAdminLog(incoming(), code);
+        allow delete: if isMultiFounder(teamId) && isValidInviteCodeStr(code);
+      }
     }
   }
 }

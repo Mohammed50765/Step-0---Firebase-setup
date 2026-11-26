@@ -172,7 +172,7 @@ export function buildWhatsAppReminder(input: {
     const status = latestByPlayer.get(p.id) || latestByPlayer.get(p.name) || '';
     if (status === 'جاي') {
       confirmedNames.push(p.name);
-    } else if (status === 'ما فيني') {
+    } else if (status === 'ما فيني' || status === 'معتذر') {
       declinedNames.push(p.name);
     } else if (p.availableStatus !== 'unavailable') {
       unrespondedNames.push(p.name);
@@ -187,7 +187,7 @@ export function buildWhatsAppReminder(input: {
   lines.push(`✅ المؤكّدون حتى الآن (${confirmedNames.length}): ${confirmedNames.length ? confirmedNames.join('، ') : 'لا يوجد بعد'}`);
   if (unrespondedNames.length > 0) {
     lines.push(`⏳ بانتظار تأكيدكم يا شباب (${unrespondedNames.length}): ${unrespondedNames.join('، ')}`);
-    lines.push('يرجى الضغط على «جاي» أو «ما فيني» في التطبيق لتأكيد العدد وقَطّة الملعب.');
+    lines.push('يرجى الضغط على «جاي» أو «محتمل» أو «معتذر» في التطبيق لتأكيد العدد وقَطّة الملعب.');
   } else {
     lines.push('🎉 رائع! جميع اللاعبين المتاحين ردّوا على الحضور.');
   }
@@ -359,6 +359,7 @@ export interface PreMatchMountHooks {
   getState: () => Record<string, unknown>;
   getCurrentUser: () => Record<string, unknown> | null;
   isCaptain: () => boolean;
+  canManagePitch?: () => boolean;
   isFirebaseMode: () => boolean;
   persistAction: (action: string, payload: Record<string, unknown>) => Promise<unknown>;
   saveLocal: () => void;
@@ -409,21 +410,23 @@ class MaydanPreMatchHubUI {
       });
     });
 
-    // Save upcoming match + pitch fee settings (Captain)
+    // Save upcoming match + pitch fee settings (Organizer / Friends Mode)
     document.getElementById('pitchSessionForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!this.hooks) return;
-      if (!this.hooks.isCaptain()) {
-        this.hooks.toast('تعديل موعد المباراة والقَطّة متاح للكابتن فقط', true);
+      const canEditPitch = this.hooks.canManagePitch ? this.hooks.canManagePitch() : this.hooks.isCaptain();
+      if (!canEditPitch) {
+        this.hooks.toast('تعديل موعد المباراة والقَطّة متاح لمنشئ الفريق والمنظّمين فقط', true);
         return;
       }
       const st = this.hooks.getState();
+      const settings = (st.settings || {}) as Record<string, unknown>;
       const title = (document.getElementById('pmTitle') as HTMLInputElement)?.value.trim() || 'مباراة السداسي';
       const matchDate = (document.getElementById('pmDate') as HTMLInputElement)?.value || new Date().toISOString().slice(0, 10);
-      const matchTime = (document.getElementById('pmTime') as HTMLInputElement)?.value || '20:00';
+      const matchTime = (document.getElementById('pmTime') as HTMLInputElement)?.value || '20:30';
       const venue = (document.getElementById('pmVenue') as HTMLInputElement)?.value.trim() || 'ملعب السداسي';
       const totalCost = Math.max(0, Number((document.getElementById('pmCost') as HTMLInputElement)?.value || 0));
-      const currency = (document.getElementById('pmCurrency') as HTMLInputElement)?.value.trim() || 'ريال';
+      const currency = (document.getElementById('pmCurrency') as HTMLInputElement)?.value.trim() || String(settings.defaultCurrency || 'ريال');
 
       const prevPayments = (st.pitchPayments || []) as PitchPaymentRecord[];
       const confirmedIds = this.getConfirmedPlayerIds(matchDate);
@@ -522,16 +525,22 @@ class MaydanPreMatchHubUI {
 
   private getSessionOrDefault(): PitchSessionData {
     const st = (this.hooks?.getState() || {}) as Record<string, unknown>;
+    const settings = (st.settings || {}) as Record<string, unknown>;
     const raw = (st.pitchSession || {}) as Partial<PitchSessionData>;
     const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const defaultCost = Math.max(0, Number(settings.defaultPitchCost ?? 0));
+    const resolvedCost =
+      raw.totalCost !== undefined && raw.totalCost !== null && Number.isFinite(Number(raw.totalCost))
+        ? Math.max(0, Number(raw.totalCost))
+        : defaultCost;
     return {
-      teamId: String(raw.teamId || 'main'),
-      title: String(raw.title || 'مباراة السداسي الأسبوعية'),
+      teamId: String(raw.teamId || settings.teamId || 'main'),
+      title: String(raw.title || 'مباراة السداسي القادمة'),
       matchDate: String(raw.matchDate || tomorrow),
       matchTime: String(raw.matchTime || '20:30'),
-      venue: String(raw.venue || 'ملعب السداسي'),
-      totalCost: Number(raw.totalCost ?? 180),
-      currency: String(raw.currency || 'ريال'),
+      venue: String(raw.venue || 'يُحدّد لاحقاً'),
+      totalCost: resolvedCost,
+      currency: String(raw.currency || settings.defaultCurrency || 'ريال'),
       confirmedCount: Number(raw.confirmedCount || 0),
       paidCount: Number(raw.paidCount || 0),
       paidTotal: Number(raw.paidTotal || 0),
@@ -725,22 +734,24 @@ class MaydanPreMatchHubUI {
 
     this.renderFatigueWidget();
 
-    // Populate Captain schedule/fee form inputs (clear if not Captain)
+    const canManagePitch = this.hooks.canManagePitch ? this.hooks.canManagePitch() : isCaptain;
+
+    // Populate schedule/fee form inputs (editable for organizers or all members in Friends Mode)
     const capForm = document.getElementById('pitchSessionForm');
     if (capForm) {
-      capForm.classList.toggle('hidden', !isCaptain);
+      capForm.classList.toggle('hidden', !canManagePitch);
       const setVal = (id: string, val: string) => {
         const el = document.getElementById(id) as HTMLInputElement | null;
         if (el) el.value = val;
       };
-      if (isCaptain) {
+      if (canManagePitch) {
         const activeTag = document.activeElement?.tagName;
         if (activeTag !== 'INPUT') {
           setVal('pmTitle', session.title);
           setVal('pmDate', session.matchDate);
           setVal('pmTime', session.matchTime);
-          setVal('pmVenue', session.venue);
-          setVal('pmCost', String(session.totalCost));
+          setVal('pmVenue', session.venue === 'يُحدّد لاحقاً' ? '' : session.venue);
+          setVal('pmCost', session.totalCost > 0 ? String(session.totalCost) : '');
           setVal('pmCurrency', session.currency);
         }
       } else {
@@ -761,9 +772,8 @@ class MaydanPreMatchHubUI {
       payments,
     });
 
-    // If team member (not captain) in Firebase mode, show server aggregate totals from pitchSession if local payments list only has own doc
-    const displayPaidCount = isCaptain ? split.paidCount : Math.max(split.paidCount, Number(session.paidCount || 0));
-    const displayPaidTotal = isCaptain ? split.paidTotal : Math.max(split.paidTotal, Number(session.paidTotal || 0));
+    const displayPaidCount = canManagePitch ? split.paidCount : Math.max(split.paidCount, Number(session.paidCount || 0));
+    const displayPaidTotal = canManagePitch ? split.paidTotal : Math.max(split.paidTotal, Number(session.paidTotal || 0));
     const displayRemaining = Math.max(0, Math.round((session.totalCost - displayPaidTotal) * 10) / 10);
 
     const summaryEl = document.getElementById('pitchSplitSummary');
@@ -815,11 +825,11 @@ class MaydanPreMatchHubUI {
       `;
     }
 
-    // Captain payment checklist (ONLY Captain sees & edits; strictly cleared otherwise)
+    // Payment checklist (editable by organizers or friends in Friends Mode)
     const capPayList = document.getElementById('captainPitchPayList');
     if (capPayList) {
-      capPayList.classList.toggle('hidden', !isCaptain);
-      if (!isCaptain) {
+      capPayList.classList.toggle('hidden', !canManagePitch);
+      if (!canManagePitch) {
         capPayList.innerHTML = '';
       } else {
         if (!confirmedIds.length) {
@@ -828,7 +838,7 @@ class MaydanPreMatchHubUI {
         } else {
           capPayList.innerHTML = `
             <div class="muted" style="font-size:0.74rem;margin-bottom:6px;">
-              قائمة الدفع (خاص بالكابتن — المدفوع: ${displayPaidCount}/${confirmedIds.length}):
+              قائمة دفع القَطّة (المدفوع: ${displayPaidCount}/${confirmedIds.length}):
             </div>
             ${confirmedIds
               .map((pid) => {
@@ -853,8 +863,9 @@ class MaydanPreMatchHubUI {
 
           capPayList.querySelectorAll<HTMLButtonElement>('[data-toggle-pay]').forEach((btn) => {
             btn.addEventListener('click', async () => {
-              if (!this.hooks || !this.hooks.isCaptain()) {
-                this.hooks?.toast('تحديث حالة دفع القَطّة متاح للكابتن فقط', true);
+              const allowedNow = this.hooks?.canManagePitch ? this.hooks.canManagePitch() : Boolean(this.hooks?.isCaptain());
+              if (!this.hooks || !allowedNow) {
+                this.hooks?.toast('تحديث حالة دفع القَطّة متاح للمنظّمين فقط', true);
                 return;
               }
               const targetPid = btn.dataset.togglePay || '';

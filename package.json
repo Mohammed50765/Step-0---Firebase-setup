@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --port=3000 --host=0.0.0.0",
     "lint": "node scripts/check-html.mjs",
-    "test": "npx --yes tsx --test src/security.test.ts src/authFlow.test.ts src/starsEngine.test.ts src/tacticsData.test.ts src/tacticsLayout.test.ts src/tacticsEngine.test.ts src/tacticsComparisons.test.ts src/tacticsVoice.test.ts src/qrCode.test.ts src/injuryLibrary.test.ts src/preMatchHub.test.ts src/quotaMonitor.test.ts src/ratingEngine.test.ts src/votingEngine.test.ts src/footballLibrary.test.ts src/invitations.test.ts",
+    "test": "npx --yes tsx --test src/security.test.ts src/authFlow.test.ts src/starsEngine.test.ts src/tacticsData.test.ts src/tacticsLayout.test.ts src/tacticsEngine.test.ts src/tacticsComparisons.test.ts src/tacticsVoice.test.ts src/qrCode.test.ts src/injuryLibrary.test.ts src/preMatchHub.test.ts src/quotaMonitor.test.ts src/ratingEngine.test.ts src/votingEngine.test.ts src/footballLibrary.test.ts src/invitations.test.ts src/teamMultiplayer.test.ts src/multiTeamEngine.test.ts",
     "test:rules": "npx --yes tsx --test firestore.rules.test.ts"
   },
   "devDependencies": {

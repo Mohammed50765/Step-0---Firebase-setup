@@ -83,8 +83,19 @@ export function generateSecureInviteCode(rawLength = 12): string {
   return raw;
 }
 
+export function normalizeUnicodeCodeText(raw: unknown): string {
+  return String(raw ?? '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/[\u2010-\u2015\u2212\u0640\uFE58\uFE63\uFF0D]/g, '-');
+}
+
 export function sanitizeInviteCode(code: unknown): string {
-  const clean = String(code ?? '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  const clean = normalizeUnicodeCodeText(code)
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, '');
   if (clean.length >= MIN_INVITE_CODE_LEN && clean.length <= MAX_INVITE_CODE_LEN) return clean;
   return '';
 }
@@ -315,8 +326,8 @@ export function sanitizeBackupImport(raw: unknown): CleanBackupPayload {
       playerId: String(r.playerId || 'p_1').replace(/[^a-zA-Z0-9_-]/g, '') || 'p_1',
       ownerUid: typeof r.ownerUid === 'string' ? r.ownerUid.slice(0, 128) : '',
       opponent: clampStr(r.opponent || 'مباراة', 80) || 'مباراة',
-      goals: Math.round(clampNum(r.goals, 0, 30, 0)),
-      assists: Math.round(clampNum(r.assists, 0, 30, 0)),
+      goals: Math.round(clampNum(r.goals, 0, 12, 0)),
+      assists: Math.round(clampNum(r.assists, 0, 12, 0)),
       minutes: Math.round(clampNum(r.minutes, 1, 180, 50)),
       interceptions: Math.round(clampNum(r.interceptions, 0, 60, 0)),
       turnovers: Math.round(clampNum(r.turnovers, 0, 60, 0)),
@@ -340,7 +351,12 @@ export function sanitizeBackupImport(raw: unknown): CleanBackupPayload {
       playerName: clampStr(a.playerName || 'لاعب', 80) || 'لاعب',
       date: sanitizeDateStr(a.date),
       type: clampStr(a.type || 'مباراة', 40) || 'مباراة',
-      status: a.status === 'ما فيني' ? 'ما فيني' : a.status === 'متردد' ? 'متردد' : 'جاي',
+      status:
+        a.status === 'معتذر' || a.status === 'ما فيني'
+          ? 'معتذر'
+          : a.status === 'محتمل' || a.status === 'مو أكيد' || a.status === 'متردد'
+            ? 'محتمل'
+            : 'جاي',
     }));
 
   const readiness = (Array.isArray(obj.readiness) ? obj.readiness : [])

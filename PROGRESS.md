@@ -104,4 +104,80 @@
   - فحص Chromium الحي (`360×780`, `390×844`, `1440×900`): `0` أخطاء كونسول/صفحة، `0px` طفح أفقي، `0` ظهور لكلمة FIFA/فيفا، وتصدير `900×1280 PNG` ناجح.
   - لم يتم لمس أي ملف خارج النطاق المسموح (`src/backend.ts`، `firestore.rules`، ملفات المصادقة، `.bottom-nav`، والهيدر العام).
 
+---
+
+## المرحلة D: المحاكاة التكتيكية السينمائية (`Cinematic 3D Tactical Simulation`) — ✅ مكتملة
+- [x] وضع العرض السينمائي (`cinematic`) مع 3 زوايا كاميرا (`cinematic`، `top`، `wide`) ومزامنة حركة اللاعبين والكرة ومسار التمريرات مع التشكيلة الفعلية، مع احترام `body.data-saver` و`prefers-reduced-motion: reduce`.
+
+---
+
+## المرحلة E: التحديث الجماعي عبر Firebase وتبسيط الواجهة والتنظيف — ✅ مكتملة
+- [x] **تثبيت الجلسة وفصل الوضع التجريبي:** تفعيل `browserLocalPersistence` + شاشة تحميل تمهيدية `#authBootLoader` + `overscroll-behavior-y: none` + فصل شاشة الدخول بين Google والوضع التجريبي المحلي مع تنبيه `#demoNoticeBanner`.
+- [x] **الفرق الجماعية والدعوات وماسح QR:** إتاحة إنشاء الفرق والانضمام بالكود أو رابط `?join=` لجميع مستخدمي Google، توحيد أكواد الدعوة (`inviteCodes/{code}`)، ماسح QR بالكاميرا الخلفية (`src/qrScanner.ts`)، ومشاركة واتساب.
+- [x] **تبويب «الفريق» (`#tab-team`) والتشكيلة المشتركة والقطّة المرنة:** شريط تبديل الفرق، قائمة الأعضاء المباشرة، إعدادات الفريق الكاملة (`#teamSettingsModal`)، دليل الترحيب السريع (3 خطوات)، نشر التشكيلة والتصويت والتقسيمة التلقائية للحاضرين، وإزالة الرقم الثابت `180` مع خيارات الحضور المحدّثة (`جاي` / `مو أكيد` / `معتذر`).
+- [x] **تغذية تقارير الفريق ومكافحة تضخيم XP:** فاصل زمني 45 دقيقة، حد أقصى 12 هدفاً و12 تمريرة، وتوثيق الزملاء (`تأكيد 👍` ← `✓ موثّق`) مع منع التوثيق الذاتي.
+- [x] **توحيد التنقل وتنظيف المشروع:** 5 تبويبات سفلية موحّدة (`الفريق`، `التشكيلة`، `المباراة`، `اللوحة`، `بطاقتي`)، حذف الشريط العلوي المكرّر، وحذف مجلد `backups/` والصور المرجعية غير المستخدمة.
+- [x] **نشر القواعد والتحقق النهائي:** نشر `firestore.rules` على مشروع Firebase بنجاح، واجتياز `npm run build` و`npm run lint` و`npx eslint firestore.rules` و**100/100** اختبار وحدة، والتحقق المباشر في Chromium (`0` أخطاء كونسول).
+
+---
+
+## المرحلة F: التحصين الأمني وتوحيد الفريق الواحد (Phases 2–5) — ✅ مكتملة (بانتظار «بوابة القواعد»)
+
+- [x] **المرحلة 2 — تنظيف الحزم وتوحيد المنطق (`backups/phase2-before/`):**
+  - إزالة حزمة `jsqr` من `package.json` وإعادة بناء `src/qrScanner.ts` بالاعتماد على `BarcodeDetector` الأصلي فقط (تحميل كسول في `index.html` بحجم حزمة `3.23 kB` / gzip `1.28 kB` وصفر وجود لـ `jsqr` في `dist/`).
+  - تحديث `src/security.ts` و`src/teamMultiplayer.ts` و`src/invitations.ts` و`src/preMatchHub.ts` لدعم `memberShareCode`، وحالات الحضور الموحدة (`جاي` / `محتمل` / `معتذر`)، وعزل PII عن معاينة الدعوات.
+- [x] **المرحلة 3 — تحصين الباك-إند وقواعد الأمان (`backups/phase3-before/`):**
+  - تحديث `src/backend.ts`: استبدال `catch {}` الصامتة، دعم `memberShareCode` و`organizerUids` و`lineupPermission` و`defaultCurrency` و`defaultPitchCost`، عزل `inviteAdminLogs` عن `inviteCodes`، تبريد 45 دقيقة في `reportThrottle` مع توثيق الزملاء (`confirmReport`)، تراجع خطوة واحدة (`undoTactics`) و`lineupVotes`، ومغادرة الفريق (`leaveTeam`) وحذف `jsqr`.
+  - تحصين `firestore.rules` على معمارية الفريق الواحد فقط (`teamId == 'main'`, `admins/{uid}`): إزالة مسارات الفرق المتعددة (`users/*`, `teams/*`)، إلزام `8–20` محرفاً لأكواد الدعوة، عزل PII في `inviteAdminLogs/{code}`، فرض `requireApproval == true` و`status == 'pending'` دائماً على `isMemberShareCode`، فرض تبريد `2700000ms` في `reportThrottle/{uid}`، ودعم صلاحيات Tier 2 للمنظّمين (`organizerUids`).
+- [x] **المرحلة 4 — ربط الواجهة وإصلاحات UX (`backups/phase4-before/index.html`):**
+  - توحيد تسمية الحضور إلى (`جاي` / `محتمل` / `معتذر`) وإزالة أي شارة `مصاب 🩹` (استبدالها بـ `غير متاح`).
+  - إضافة شريط وحالة انتظار الموافقة مع إشعار واتساب وتحديث الحالة، وصندوق الطلبات المعلقة داخل تبويب الفريق للكابتن (`قبول ✓` / `رفض ✕`).
+  - إضافة زر `↩️ تراجع عن النشر` (`#btnTacUndoPublish`)، إبراز زر التصويت المختار (`.tac-vote-active`)، وتأكيد مغادرة الفريق المدمج من خطوتين (`#tsLeaveConfirmBox`) بدون `window.confirm`.
+- [x] **المرحلة 5 — مزامنة المخطط والمواصفات والاختبارات والتحقق الشامل:**
+  - تحديث `firebase-blueprint.json` و`security_spec.md` و`firestore.rules.test.ts` (إضافة الحالات الأمنية `#23–#28` ومزامنة `#1–#22`).
+  - نتائج الفحص النهائي:
+    - `npm test`: **100/100** اختبار وحدة ناجح.
+    - `npx eslint firestore.rules`: **0** أخطاء.
+    - `npm run lint` (`lint_applet`): ناجح.
+    - `npm run build` (`compile_applet`): ناجح (`ZERO_JSQR_IN_DIST`).
+    - فحص الأصول: صورة `/assets/aistudio/4dd680f1455c4343a2f9e28fa69f624060d00d2580e286b39bd8830fb272ce75_4f298648.png` مستخدمة فعلياً في `index.html` (لا توجد أصول غير مستخدمة، وتم الحفاظ على `backups/` و`bun.lock`).
+    - محاكي القواعد المحلي (`firebase emulators:exec`): تعذّر تشغيله داخل بيئة الحاوية بسبب غياب `java` (`java: not found`)، لكن تم التحقق من صلاحية كتابة `firestore.rules` عبر `eslint` وصحة البناء النحوي لملف `firestore.rules.test.ts` عبر `esbuild + node --check`.
+    - التحقق الحي في Chromium عبر `playwright-cli` على المقاسات `360×780` و`390×844` و`1440×900`: `0` أخطاء كونسول، `0px` طفح أفقي، `0` ظهور لكلمة FIFA/فيفا، واجتياز تدفقات التبويبات ونشر التشكيلة والتصويت والتراجع.
+
+### حالة النشر: ⏸️ متوقف عند «بوابة القواعد»
+- لم يتم استدعاء `deploy_firebase` أو `DeployRules` بانتظار موافقتك الصريحة بعبارة **«انشر القواعد»**.
+
+---
+
+# سجل التقدم — المرحلة السادسة: الفرق المتعددة (Multi-Team • Zero Budget Spark)
+
+النسخة الاحتياطية قبل البدء: `backups/phase6-before/`
+
+- [x] **الخطوة 6.1 — الوحدات النقية واختبارات الفرق المتعددة والحصة والهجرة:**
+  - تحديث `src/quotaMonitor.ts` و`src/quotaMonitor.test.ts` لدعم تنبيه الـ `70%` من الحد اليومي (`50,000`) وحاسبة تقدير القراءات اليومية للفرق المتعددة (`estimateDailySparkReads`).
+  - تحديث `src/invitations.ts` لدعم `teamId` الديناميكي و`joinMode` (`'approval'` الافتراضي مقابل `'instant'`) دون كسر التوافق مع الفريق الواحد.
+  - إنشاء `src/multiTeamEngine.ts` و`src/multiTeamEngine.test.ts`: حدود الفرق (`<= 3` إنشاء، `<= 5` انضمام، حد سعة الفريق، وإيقاف الإنشاء عبر `allowNewTeams`), التحقق من حجم الشعار (`<= 50 KB / 68,500 chars`), فصل الحقول العامة عن الخاصة (`/private/*`) مع منع تسرب أي حقل صحي/جاهزية في قائمة الأعضاء العامة، تجميع الحضور في وثيقة واحدة لكل مباراة (`attendance/{matchKey}`), تجزئة دفعات الهجرة (`<= 400`), التحقق من الأعداد، ونقاط الاستئناف المحلية (`maydan_m6_migration_ckpt_v1`).
+  - اجتياز `npm test`: **106/106** اختبار وحدة بنجاح.
+- [x] **الخطوة 6.2 — `persistentLocalCache` وتطوير الباك-إند الهجين (`src/firebase.ts` و`src/backend.ts`):**
+  - تفعيل `initializeFirestore` مع `persistentLocalCache` و`persistentMultipleTabManager` وتدرج احتياطي آمن لعدم تعطل الجلسات متعددة التبويبات.
+  - تطوير الباك-إند الهجين (`Single-Team main` + `Multi-Team teams/{teamId}`) مع الترقية التلقائية الآمنة (`pendingJoinTeamId`)، وعزل القراءات الخاصة (`/private/*`)، واستهلاك قراءة مستمع حي واحد دائم (`teams/{teamId}`) ومستمعات تبويب كسولة (`setActiveTab`)، وصفحات `limit(20)` مع `loadMoreReports`/`loadMoreMatches`، ودعم معالج الهجرة الآمن (`exportLegacyTeamBackupJson` -> `runLegacyToMultiMigration` -> `verifyLegacyToMultiMigration` -> `confirmSwitchToMigratedTeam`).
+- [x] **الخطوة 6.3 — واجهة وتجربة المستخدم للفرق المتعددة ومعالج الترقية (`index.html`)**:
+  - إضافة شريط تبديل الفرق السريع في التبويب (`#teamSwitcherBar`) وزر الهيدر (`#hdrTeamSwitcherBtn`) ونافذة تبديل الفرق (`#teamSwitcherModal`).
+  - إضافة شاشة الاختيار الترحيبي بعد الدخول (`#teamOnboardingModal`) وإنشاء الفريق الكامل (`#createTeamModal` مع وضع الانضمام `'approval'`/`'instant'` وتحذير الانضمام المباشر وضغط الشعار `<= 50 KB` ومنع الإنشاء عند `allowNewTeams == false`).
+  - إضافة إشعار الخصوصية المدمج (`#privacyNoticeModal`)، وتحديث إعدادات الفريق (`#teamSettingsModal`) مع نقل القيادة، وحذف البيانات الخاصة، وحذف الفريق المرن بخطوتين، وتنبيه الحصة 70%.
+  - إضافة معالج الهجرة الآمن من 4 خطوات (`#migrationWizardModal`) وبطاقة مالك المنصة (`#admPlatformOwnerCard`) وأزرار «عرض المزيد» (`limit(20)`) للمباريات والتقارير.
+  - التحقق بالبناء (`compile_applet` و`lint_applet`): ناجح بالكامل بدون أخطاء.
+- [x] **الخطوة 6.4 — قواعد الأمان `firestore.rules` والمخطط والمواصفات والاختبارات (`36` حالة) وتقديرات الحصة**
+  - تحديث `security_spec.md` (إضافة الثوابت `#13–#20` وحالات الاختبار العدائية `#29–#36`) و`firebase-blueprint.json` (توثيق `/platform`، `/users`، `/teams/{teamId}` وجميع المجموعات الفرعية الـ 21).
+  - تحديث `firestore.rules` بعزل كامل بين الفرق ومنع وصول مالك المنصة لأي فريق غير منضم إليه، ومنع تسرب الحقول الصحية أو الـ PINs، وتقييد `/private/*` للمالك والمؤسس فقط، وحماية قَطّة الملعب وحدود Spark (`allowNewTeams`، `<=3` إنشاء، `<=5` انضمام، شعار `<=50 KB`).
+  - توسيع `firestore.rules.test.ts` لتشمل 36 حالة اختبار أمنية (`#1–#36`) مع نجاح `npx eslint firestore.rules` (`0` أخطاء) ونجاح التحقق النحوي والتجميعي `esbuild + node --check`.
+- [x] **الخطوة 6.5 — التحقق النهائي والتوقف عند «بوابة القواعد» (`⏸️ متوقف عند بوابة القواعد`)**
+  - اجتياز `npm test`: **106/106** اختبار وحدة بنجاح.
+  - اجتياز `npx eslint firestore.rules`: **0** أخطاء أو تحذيرات.
+  - اجتياز `npx esbuild firestore.rules.test.ts --bundle --platform=node --format=esm --outfile=/tmp/rules-test.mjs && node --check /tmp/rules-test.mjs`: نجاح التحقق النحوي والتجميعي للـ **36** حالة اختبار أمنية (`#1–#36`). (تعذّر تشغيل محاكي القواعد المحلي `firebase emulators:exec` لعدم توفر `java` داخل الحاوية).
+  - اجتياز `compile_applet` و`lint_applet` و`npm run build` وإعادة تشغيل الخادم بنجاح.
+  - التحقق الحي في Chromium عبر `playwright-cli` (`360×780` و`1440×900`): `0` أخطاء كونسول، `0px` طفح أفقي، `0` ظهور لكلمة FIFA/فيفا، والتحقق من تفعيل وضع الانضمام `'approval'` افتراضياً وتوفر كافة نوافذ وشريط تبديل الفرق.
+  - تقدير استهلاك Spark اليومي (`10` فرق × `15` لاعباً × `3` فتحات = `450` جلسة/يوم): نحو **`~1,450–2,700` قراءة يومياً** بفضل `persistentLocalCache` ومستمع دائم واحد (`teams/{teamId}`) ومستمعات تبويب كسولة وحدّ `limit(20)` — أي أقل من **`6%`** من حد Spark المجاني (`50,000` قراءة/يوم).
+  - **حالة النشر:** ⏸️ متوقف تماماً عند **«بوابة القواعد»** — لم يتم استدعاء `deploy_firebase` أو `DeployRules` أو تشغيل أي هجرة بيانات فعلية بانتظار عبارة **«انشر القواعد»**.
+
 

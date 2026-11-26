@@ -39,12 +39,13 @@ test('generateSecureInviteCode produces >= 10 CSPRNG alphanumeric chars with no 
   assert.equal(sanitizeInviteCode(code1), code1);
 });
 
-test('sanitizeInviteCode enforces minimum 8 chars and has no hardcoded fallback', () => {
+test('sanitizeInviteCode enforces minimum 8 chars, normalizes Arabic/Persian numerals and dashes, and has no hardcoded fallback', () => {
   assert.equal(sanitizeInviteCode(''), '');
   assert.equal(sanitizeInviteCode('MDN-606'), '');
   assert.equal(sanitizeInviteCode('abc-123'), '');
   assert.equal(sanitizeInviteCode('ab12-cd34-ef56'), 'AB12-CD34-EF56');
   assert.equal(sanitizeInviteCode('12345678'), '12345678');
+  assert.equal(sanitizeInviteCode('mdn–١٢٣٤—۵۶۷۸\u200f'), 'MDN-1234-5678');
   assert.equal(sanitizeInviteCode('A'.repeat(21)), '');
 });
 
@@ -62,7 +63,7 @@ test('computePeerAggregate enforces minimum 3 raters privacy threshold and round
   });
 });
 
-test('sanitizeBackupImport strips PINs, enforces requireApproval default, and replaces short invite codes with CSPRNG', () => {
+test('sanitizeBackupImport strips PINs, enforces requireApproval default, maps attendance, and replaces short invite codes with CSPRNG', () => {
   const rawBackup = {
     settings: {
       appName: 'ميدان 6v6',
@@ -85,6 +86,11 @@ test('sanitizeBackupImport strips PINs, enforces requireApproval default, and re
       },
     ],
     matches: [{ opponent: 'النسور', ourScore: 4, oppScore: 2, date: '2026-11-20' }],
+    attendance: [
+      { id: 'a1', playerId: 'p_1', status: 'متردد' },
+      { id: 'a2', playerId: 'p_1', status: 'مو أكيد' },
+      { id: 'a3', playerId: 'p_1', status: 'ما فيني' },
+    ],
     suggestions: [{ text: '  مقترح جيد  ' }],
   };
 
@@ -102,6 +108,9 @@ test('sanitizeBackupImport strips PINs, enforces requireApproval default, and re
   assert.equal((clean.players[0].skills as Record<string, number>).speed, 10);
   assert.equal((clean.players[0].skills as Record<string, number>).shooting, 1);
   assert.equal(clean.matches[0].result, 'فوز');
+  assert.equal(clean.attendance[0].status, 'محتمل');
+  assert.equal(clean.attendance[1].status, 'محتمل');
+  assert.equal(clean.attendance[2].status, 'معتذر');
 });
 
 test('stripSensitivePlayerFields removes pin and pinHash without mutating input', () => {

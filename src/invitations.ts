@@ -19,11 +19,16 @@ export const MAX_ALLOWED_INVITE_USES = 100;
 export const MAX_ALLOWED_DURATION_DAYS = 90;
 const DAY_MS = 86_400_000;
 
+export type InviteJoinMode = 'approval' | 'instant';
+
 export interface SmartInviteOptionsInput {
+  teamId?: string;
   usageType?: InviteUsageType | string;
   maxUses?: number | string;
   durationDays?: number | string;
+  joinMode?: InviteJoinMode | string;
   requireApproval?: boolean;
+  isMemberShareCode?: boolean;
   teamName?: string;
   appName?: string;
   primaryColor?: string;
@@ -33,14 +38,17 @@ export interface SmartInviteOptionsInput {
 }
 
 export interface SanitizedInviteOptions {
+  teamId: string;
   usageType: InviteUsageType;
   maxUses: number;
   durationDays: number;
+  joinMode: InviteJoinMode;
   requireApproval: boolean;
+  isMemberShareCode: boolean;
   teamName: string;
   appName: string;
   primaryColor: string;
-  createdBy: string;
+  createdBy?: string;
   createdAtMs: number;
   expiresAtMs: number;
 }
@@ -59,14 +67,17 @@ export interface SmartInviteRecord {
   expiresAtMs: number;
   status: InviteStatus;
   active: boolean;
+  joinMode?: InviteJoinMode;
   requireApproval: boolean;
-  createdBy: string;
+  isMemberShareCode?: boolean;
+  createdBy?: string;
   lastUsedBy?: string;
 }
 
 export interface InviteStatusMeta {
   status: InviteStatus;
   labelAr: 'فعالة' | 'منتهية' | 'ملغاة' | 'مكتملة';
+  reasonAr: string;
   colorHex: string;
   bgRgba: string;
   borderRgba: string;
@@ -104,27 +115,50 @@ export function sanitizeInvitationOptions(input: SmartInviteOptionsInput = {}): 
       : Date.now();
   const expiresAtMs = nowMs + durationDays * DAY_MS;
 
+  const isMemberShareCode = input.isMemberShareCode === true;
+  const rawJoinMode = String(input.joinMode || '').trim().toLowerCase();
+  const requireApproval = isMemberShareCode
+    ? true
+    : rawJoinMode === 'instant'
+      ? false
+      : rawJoinMode === 'approval'
+        ? true
+        : input.requireApproval !== false;
+  const joinMode: InviteJoinMode = requireApproval ? 'approval' : 'instant';
+  const rawTeamId = String(input.teamId || TEAM_ID)
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 64);
+  const teamId = rawTeamId.length >= 2 ? rawTeamId : TEAM_ID;
+
+  const cleanCreatedBy =
+    typeof input.createdBy === 'string' && input.createdBy.trim()
+      ? input.createdBy
+          .trim()
+          .replace(/[^a-zA-Z0-9_-]/g, '')
+          .slice(0, 128)
+      : '';
+
   return {
+    teamId,
     usageType,
     maxUses,
     durationDays,
-    requireApproval: input.requireApproval !== false,
+    joinMode,
+    requireApproval,
+    isMemberShareCode,
     teamName: clampStr(input.teamName || 'فريق السداسي', 80) || 'فريق السداسي',
     appName: clampStr(input.appName || 'ميدان 6v6', 60) || 'ميدان 6v6',
     primaryColor: sanitizeHexColor(input.primaryColor, ROYAL_PRIMARY),
-    createdBy:
-      String(input.createdBy || 'captain')
-        .trim()
-        .replace(/[^a-zA-Z0-9_-]/g, '')
-        .slice(0, 128) || 'captain',
+    ...(cleanCreatedBy ? { createdBy: cleanCreatedBy } : {}),
     createdAtMs: nowMs,
     expiresAtMs,
   };
 }
 
 /**
- * Creates a new SmartInviteRecord for the Captain.
- * Enforces Captain authorization when authContext is supplied.
+ * Creates a new SmartInviteRecord for the Captain or Team Founder.
+ * Enforces Captain/Founder authorization when authContext is supplied.
  */
 export function createSmartInvitationRecord(
   input: SmartInviteOptionsInput = {},
@@ -147,7 +181,7 @@ export function createSmartInvitationRecord(
 
   return {
     code,
-    teamId: TEAM_ID,
+    teamId: opts.teamId,
     teamName: opts.teamName,
     appName: opts.appName,
     primaryColor: opts.primaryColor,
@@ -159,8 +193,10 @@ export function createSmartInvitationRecord(
     expiresAtMs: opts.expiresAtMs,
     status: 'active',
     active: true,
+    joinMode: opts.joinMode,
     requireApproval: opts.requireApproval,
-    createdBy: opts.createdBy,
+    ...(opts.isMemberShareCode ? { isMemberShareCode: true } : {}),
+    ...(opts.createdBy ? { createdBy: opts.createdBy } : {}),
   };
 }
 
@@ -206,9 +242,32 @@ export function normalizeInviteRecord(
     status = 'revoked';
   }
 
+  const isMemberShareCode = raw.isMemberShareCode === true;
+  const rawJoinMode = String(raw.joinMode || '').trim().toLowerCase();
+  const requireApproval = isMemberShareCode
+    ? true
+    : rawJoinMode === 'instant'
+      ? false
+      : rawJoinMode === 'approval'
+        ? true
+        : raw.requireApproval !== false;
+  const joinMode: InviteJoinMode = requireApproval ? 'approval' : 'instant';
+  const rawTeamId = String(raw.teamId || TEAM_ID)
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 64);
+  const teamId = rawTeamId.length >= 2 ? rawTeamId : TEAM_ID;
+  const cleanCreatedBy =
+    typeof raw.createdBy === 'string' && raw.createdBy.trim()
+      ? raw.createdBy
+          .trim()
+          .replace(/[^a-zA-Z0-9_-]/g, '')
+          .slice(0, 128)
+      : '';
+
   return {
     code,
-    teamId: TEAM_ID,
+    teamId,
     teamName:
       clampStr(raw.teamName || fallbackTeam?.teamName || 'فريق السداسي', 80) || 'فريق السداسي',
     appName: clampStr(raw.appName || fallbackTeam?.appName || 'ميدان 6v6', 60) || 'ميدان 6v6',
@@ -224,12 +283,10 @@ export function normalizeInviteRecord(
     expiresAtMs,
     status,
     active: isActiveBool && status === 'active',
-    requireApproval: raw.requireApproval !== false,
-    createdBy:
-      String(raw.createdBy || 'captain')
-        .trim()
-        .replace(/[^a-zA-Z0-9_-]/g, '')
-        .slice(0, 128) || 'captain',
+    joinMode,
+    requireApproval,
+    ...(isMemberShareCode ? { isMemberShareCode: true } : {}),
+    ...(cleanCreatedBy ? { createdBy: cleanCreatedBy } : {}),
     ...(typeof raw.lastUsedBy === 'string' && raw.lastUsedBy.trim()
       ? { lastUsedBy: raw.lastUsedBy.trim().slice(0, 128) }
       : {}),
@@ -248,6 +305,7 @@ export function computeInviteStatus(
     return {
       status: 'revoked',
       labelAr: 'ملغاة',
+      reasonAr: 'كود الدعوة غير صحيح أو غير موجود — تحقق من الكود وحاول مجدداً.',
       colorHex: '#fda4af',
       bgRgba: 'rgba(244,63,94,0.14)',
       borderRgba: 'rgba(244,63,94,0.35)',
@@ -287,6 +345,9 @@ export function computeInviteStatus(
       return {
         status: 'active',
         labelAr: 'فعالة',
+        reasonAr: inv.isMemberShareCode
+          ? 'دعوة مشاركة الفريق فعالة — يتطلب الانضمام موافقة المؤسس.'
+          : 'الدعوة فعالة وجاهزة للاستخدام.',
         colorHex: '#86efac',
         bgRgba: 'rgba(34,197,94,0.14)',
         borderRgba: 'rgba(34,197,94,0.36)',
@@ -301,6 +362,7 @@ export function computeInviteStatus(
       return {
         status: 'completed',
         labelAr: 'مكتملة',
+        reasonAr: 'اكتمل الحد الأقصى لعدد مرات استخدام كود الدعوة هذا.',
         colorHex: '#93c5fd',
         bgRgba: 'rgba(59,130,246,0.14)',
         borderRgba: 'rgba(59,130,246,0.36)',
@@ -315,6 +377,7 @@ export function computeInviteStatus(
       return {
         status: 'expired',
         labelAr: 'منتهية',
+        reasonAr: 'انتهت صلاحية كود الدعوة هذا — اطلب دعوة جديدة من الكابتن.',
         colorHex: '#fde047',
         bgRgba: 'rgba(250,204,21,0.12)',
         borderRgba: 'rgba(250,204,21,0.32)',
@@ -330,6 +393,7 @@ export function computeInviteStatus(
       return {
         status: 'revoked',
         labelAr: 'ملغاة',
+        reasonAr: 'تم إلغاء كود الدعوة هذا من قِبل الكابتن ولم يعد صالحاً للاستخدام.',
         colorHex: '#fda4af',
         bgRgba: 'rgba(244,63,94,0.14)',
         borderRgba: 'rgba(244,63,94,0.35)',

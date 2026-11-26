@@ -5,6 +5,7 @@ import {
   type User,
 } from 'firebase/auth';
 import {
+  arrayRemove,
   arrayUnion,
   collection,
   deleteDoc,
@@ -12,24 +13,42 @@ import {
   getDoc,
   getDocs,
   increment,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
   setDoc,
+  startAfter,
   updateDoc,
   where,
   writeBatch,
+  type DocumentData,
+  type QueryDocumentSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore';
 import {
   auth,
+  authPersistenceReady,
   db,
+  getRedirectResult,
   googleProvider,
   handleFirestoreError,
   OperationType,
+  signInWithRedirect,
   testConnection,
 } from './firebase';
+import './teamMultiplayer';
+import {
+  applyReportConfirmation,
+  evaluateReportSubmissionGuard,
+  MAX_ASSISTS_PER_MATCH,
+  MAX_CONCEDED_PER_MATCH,
+  MAX_GOALS_PER_MATCH,
+  normalizeAttendanceStatus,
+  REPORT_COOLDOWN_MS,
+} from './teamMultiplayer';
 import {
   clampNum,
   clampStr,
@@ -71,8 +90,48 @@ import {
   quotaMonitor,
 } from './quotaMonitor';
 import { resolveEffectivePlayerName, sanitizePlayerDisplayName } from './authFlow';
+import {
+  buildAttendanceMatchKey,
+  buildDefaultTeamCreatePayload,
+  buildPrivacyNoticeAcceptedPayload,
+  checkTeamQuotaEligibility,
+  chunkItemsForBatch,
+  DEFAULT_MAX_MEMBERS_PER_TEAM,
+  findForbiddenPublicHealthFields,
+  flattenConsolidatedAttendanceDocs,
+  generateMultiTeamId,
+  groupLegacyAttendanceByMatchKey,
+  hasAcceptedCurrentPrivacyNotice,
+  loadMigrationCheckpoint,
+  markPrivacyNoticeAcceptedLocally,
+  MAX_JOINED_TEAMS,
+  MAX_OWNED_TEAMS,
+  MIGRATION_BATCH_WRITE_LIMIT,
+  normalizePublicAvailableStatus,
+  PRIVACY_NOTICE_VERSION,
+  sanitizeJoinMode,
+  sanitizeLineupPublishMode,
+  sanitizeTeamId,
+  sanitizeTeamLogo50Kb,
+  saveMigrationCheckpoint,
+  sortActiveTeamsList,
+  splitPlayerPublicAndPrivate,
+  verifyMigrationCountReport,
+  type MigrationCheckpoint,
+  type MigrationCountRow,
+  type MultiTeamMeta,
+} from './multiTeamEngine';
 
 const TEAM_CACHE_KEY = 'maydan_team_cache_v1';
+const PAGE_SIZE_LIST = 20;
+
+export interface TacticsSnapshotRecord {
+  formation: string;
+  slots: Record<string, string>;
+  publishedByUid?: string;
+  publishedByName?: string;
+  publishedAtMs?: number;
+}
 
 export interface BackendState {
   settings: Record<string, unknown>;
@@ -87,7 +146,10 @@ export interface BackendState {
   peerRatingStats: Record<string, { count: number; totalScore: number }>;
   peerRatings: Array<Record<string, unknown>>;
   adminRatings: Array<Record<string, unknown>>;
-  tactics: { formation: string; slots: Record<string, string> };
+  tactics: TacticsSnapshotRecord & {
+    previousSnapshot?: TacticsSnapshotRecord | null;
+  };
+  lineupVotes?: Record<string, string>;
   suggestions: Array<Record<string, unknown>>;
   pitchSession?: Record<string, unknown>;
   pitchPayments?: Array<Record<string, unknown>>;
@@ -106,6 +168,43 @@ function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function stripForbiddenHealthFields<T extends Record<string, unknown>>(obj: T): T {
+  const leaked = findForbiddenPublicHealthFields(obj);
+  if (!leaked.length) return obj;
+  const copy = { ...obj };
+  for (const k of leaked) delete copy[k];
+  return copy;
+}
+
+function normalizeTeamDocToSettings(teamId: string, d: Record<string, unknown>): Record<string, unknown> {
+  const joinMode = sanitizeJoinMode(d.joinMode ?? (d.requireApproval === false ? 'instant' : 'approval'));
+  const lineupPublishMode = sanitizeLineupPublishMode(d.lineupPublishMode ?? d.lineupPermission);
+  const founderUid = String(d.founderUid || d.creatorUid || '');
+  return {
+    ...d,
+    id: teamId,
+    teamId,
+    appName: clampStr(d.appName || 'ميدان 6v6', 60) || 'ميدان 6v6',
+    teamName: clampStr(d.teamName || 'فريق السداسي', 80) || 'فريق السداسي',
+    primaryColor: sanitizeHexColor(d.primaryColor, ROYAL_PRIMARY),
+    secondaryColor: sanitizeHexColor(d.secondaryColor, ROYAL_SECONDARY),
+    logo: typeof d.logo === 'string' ? d.logo : '',
+    founderUid,
+    creatorUid: founderUid,
+    organizerUids: Array.isArray(d.organizerUids) ? d.organizerUids : [],
+    joinMode,
+    requireApproval: joinMode === 'approval',
+    lineupPublishMode,
+    lineupPermission: lineupPublishMode,
+    defaultCurrency: clampStr(d.defaultCurrency || 'ريال', 20) || 'ريال',
+    defaultPitchCost: Math.max(0, Number(d.defaultPitchCost || 0)),
+    maxMembersPerTeam: Math.max(6, Math.min(100, Number(d.maxMembersPerTeam || DEFAULT_MAX_MEMBERS_PER_TEAM))),
+    memberCount: Math.max(0, Number(d.memberCount || 0)),
+    lockSkills: Boolean(d.lockSkills),
+    storageMode: 'multi',
+  };
+}
+
 class MaydanBackendService {
   private coreUnsubs: Unsubscribe[] = [];
   private tabUnsubs: Unsubscribe[] = [];
@@ -117,17 +216,101 @@ class MaydanBackendService {
   private activeOnError: ((msg: string) => void) | null = null;
   private photosMap: Record<string, { dataUrl: string; photoZoom: number; photoY: number }> = {};
 
+  // Phase 6 Dual-Mode & Multi-Team runtime state
+  activeStorageMode: 'single' | 'multi' | 'none' = 'none';
+  activeTeamId: string = TEAM_ID;
+  activeTeams: MultiTeamMeta[] = [];
+  isPlatformOwner = false;
+  platformConfig: { allowNewTeams: boolean } = { allowNewTeams: true };
+  userDoc: Record<string, unknown> | null = null;
+  reportsLastDoc: QueryDocumentSnapshot<DocumentData> | null = null;
+  reportsHasMore = false;
+  matchesLastDoc: QueryDocumentSnapshot<DocumentData> | null = null;
+  matchesHasMore = false;
+
   init(): void {
     void testConnection();
   }
 
-  onAuthChange(cb: (fbUser: User | null) => void): Unsubscribe {
-    return onAuthStateChanged(auth, cb);
+  isMultiMode(): boolean {
+    return this.activeStorageMode === 'multi' && Boolean(this.activeTeamId && this.activeTeamId !== TEAM_ID);
   }
 
-  async signInWithGoogle(): Promise<User> {
-    const cred = await signInWithPopup(auth, googleProvider);
-    return cred.user;
+  private getSnapshotCacheKey(uid: string, teamId: string): string {
+    if (teamId && teamId !== TEAM_ID) {
+      return `${TEAM_CACHE_KEY}__${uid}__${teamId}`;
+    }
+    return TEAM_CACHE_KEY;
+  }
+
+  private isTeamOrganizer(uid: string): boolean {
+    const s = (this.activeState?.settings || {}) as Record<string, unknown>;
+    const orgs = Array.isArray(s.organizerUids) ? (s.organizerUids as string[]) : [];
+    return this.activeIsCaptain || orgs.includes(uid);
+  }
+
+  onAuthChange(cb: (fbUser: User | null) => void): Unsubscribe {
+    let innerUnsub: Unsubscribe | null = null;
+    let cancelled = false;
+    void authPersistenceReady.finally(() => {
+      if (cancelled) return;
+      innerUnsub = onAuthStateChanged(auth, cb);
+    });
+    return () => {
+      cancelled = true;
+      if (innerUnsub) innerUnsub();
+    };
+  }
+
+  async consumeRedirectResult(): Promise<{ user: User | null; errorAr?: string }> {
+    await authPersistenceReady;
+    try {
+      const res = await getRedirectResult(auth);
+      return { user: res?.user ?? null };
+    } catch (err: unknown) {
+      const code = (err && typeof err === 'object' && 'code' in err)
+        ? String((err as { code?: unknown }).code || '')
+        : '';
+      if (code === 'auth/unauthorized-domain') {
+        return {
+          user: null,
+          errorAr: 'النطاق الحالي غير مضاف في إعدادات Firebase Auth (Authorized domains). افتح عبر chromatic-instrument-dpz3c.firebaseapp.com أو أضف النطاق في وحدة التحكم.',
+        };
+      }
+      return { user: null };
+    }
+  }
+
+  async signInWithGoogle(): Promise<User | null> {
+    await authPersistenceReady;
+    try {
+      const cred = await signInWithPopup(auth, googleProvider);
+      return cred.user;
+    } catch (err: unknown) {
+      const code = (err && typeof err === 'object' && 'code' in err)
+        ? String((err as { code?: unknown }).code || '')
+        : '';
+      if (
+        code === 'auth/popup-blocked' ||
+        code === 'auth/cancelled-popup-request' ||
+        code === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        await signInWithRedirect(auth, googleProvider);
+        return null;
+      }
+      if (code === 'auth/unauthorized-domain') {
+        throw new Error(
+          'تعذّر تسجيل الدخول: هذا النطاق غير مصرّح به في Firebase Auth. أضف النطاق الحالي إلى Authorized domains أو افتح عبر chromatic-instrument-dpz3c.firebaseapp.com.'
+        );
+      }
+      if (code === 'auth/popup-closed-by-user') {
+        throw new Error('تم إغلاق نافذة تسجيل الدخول قبل الإتمام.');
+      }
+      if (code === 'auth/network-request-failed') {
+        throw new Error('تعذّر الاتصال بخدمة Google — تحقّق من الشبكة وأعد المحاولة.');
+      }
+      throw new Error('تعذّر إتمام تسجيل الدخول بحساب Google، حاول مجدداً.');
+    }
   }
 
   async signOut(): Promise<void> {
@@ -144,6 +327,15 @@ class MaydanBackendService {
     this.activeOnUpdate = null;
     this.activeOnError = null;
     this.photosMap = {};
+    this.activeStorageMode = 'none';
+    this.activeTeamId = TEAM_ID;
+    this.activeTeams = [];
+    this.isPlatformOwner = false;
+    this.userDoc = null;
+    this.reportsLastDoc = null;
+    this.reportsHasMore = false;
+    this.matchesLastDoc = null;
+    this.matchesHasMore = false;
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem(TEAM_CACHE_KEY);
@@ -193,10 +385,12 @@ class MaydanBackendService {
       });
       const safeSettings = { ...(state.settings || {}) };
       delete safeSettings.inviteCode;
+      const key = this.getSnapshotCacheKey(this.activeUid, this.activeTeamId);
       localStorage.setItem(
-        TEAM_CACHE_KEY,
+        key,
         JSON.stringify({
           ownerUid: this.activeUid,
+          teamId: this.activeTeamId,
           settings: safeSettings,
           players: leanPlayers,
           pitchSession: state.pitchSession || null,
@@ -208,8 +402,9 @@ class MaydanBackendService {
     }
   }
 
-  loadTeamSnapshotCache(expectedUid?: string): {
+  loadTeamSnapshotCache(expectedUid?: string, teamId?: string): {
     ownerUid?: string;
+    teamId?: string;
     settings?: Record<string, unknown>;
     players?: Array<Record<string, unknown>>;
     pitchSession?: Record<string, unknown> | null;
@@ -217,11 +412,14 @@ class MaydanBackendService {
   } | null {
     try {
       if (typeof localStorage === 'undefined') return null;
-      const raw = localStorage.getItem(TEAM_CACHE_KEY);
+      const uid = expectedUid || this.activeUid || '';
+      const tid = teamId || this.activeTeamId || TEAM_ID;
+      const key = this.getSnapshotCacheKey(uid, tid);
+      const raw = localStorage.getItem(key);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (expectedUid && parsed?.ownerUid !== expectedUid) {
-        localStorage.removeItem(TEAM_CACHE_KEY);
+        localStorage.removeItem(key);
         return null;
       }
       return parsed;
@@ -257,9 +455,68 @@ class MaydanBackendService {
     handleFirestoreError(err, op, path);
   }
 
+  private async fetchPlatformConfig(): Promise<{ allowNewTeams: boolean }> {
+    try {
+      const snap = await getDoc(doc(db, 'platform', 'config'));
+      quotaMonitor.recordReads('session', 1);
+      if (snap.exists()) {
+        const allow = snap.data().allowNewTeams !== false;
+        this.platformConfig = { allowNewTeams: allow };
+        return this.platformConfig;
+      }
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+      } else {
+        console.warn('platform/config read notice:', err instanceof Error ? err.message : String(err));
+      }
+    }
+    this.platformConfig = { allowNewTeams: true };
+    return this.platformConfig;
+  }
+
+  private async loadUserMultiTeams(uid: string, userDocData: Record<string, unknown> | null): Promise<MultiTeamMeta[]> {
+    const rawIds = Array.isArray(userDocData?.teamIds)
+      ? (userDocData!.teamIds as unknown[]).map((x) => sanitizeTeamId(x)).filter(Boolean)
+      : [];
+    const candidateIds = Array.from(new Set(rawIds)).slice(0, MAX_JOINED_TEAMS);
+    if (!candidateIds.length) return [];
+
+    const results = await Promise.all(
+      candidateIds.map(async (tid) => {
+        try {
+          const [tSnap, mSnap] = await Promise.all([
+            getDoc(doc(db, 'teams', tid)),
+            getDoc(doc(db, 'teams', tid, 'members', uid)),
+          ]);
+          quotaMonitor.recordReads('session', 2);
+          if (!tSnap.exists() || !mSnap.exists()) return null;
+          const td = tSnap.data();
+          if (td.deletedAt) return null;
+          const norm = normalizeTeamDocToSettings(tid, td);
+          return norm as unknown as MultiTeamMeta;
+        } catch (err) {
+          if (isQuotaExceededError(err)) {
+            quotaMonitor.markQuotaExceeded(true);
+          }
+          return null;
+        }
+      })
+    );
+    return results.filter((t): t is MultiTeamMeta => Boolean(t));
+  }
+
   async resolveSession(fbUser: User): Promise<{
     status: 'ready' | 'pending' | 'rejected' | 'needs_join';
+    mode: 'single' | 'multi' | 'none';
     isCaptain: boolean;
+    isPlatformOwner: boolean;
+    teams: MultiTeamMeta[];
+    activeTeamId: string;
+    platformConfig: { allowNewTeams: boolean };
+    userDoc: Record<string, unknown> | null;
+    canMigrateLegacyTeam: boolean;
+    needsPrivacyNotice: boolean;
     captainDiagnostic: {
       code: 'verified' | 'not_found' | 'email_unverified' | 'error';
       detail?: string;
@@ -269,13 +526,12 @@ class MaydanBackendService {
   }> {
     this.clearSessionData();
     this.activeUid = fbUser.uid;
-    let isCaptain = false;
+    let isPlatformOwner = false;
     let captainDiagnostic: {
       code: 'verified' | 'not_found' | 'email_unverified' | 'error';
       detail?: string;
     } = { code: 'not_found' };
 
-    // Captain identity is strictly verified via trusted admins/{uid} document ONLY
     if (!fbUser.emailVerified) {
       captainDiagnostic = {
         code: 'email_unverified',
@@ -285,14 +541,14 @@ class MaydanBackendService {
       try {
         const admSnap = await getDoc(doc(db, 'admins', fbUser.uid));
         quotaMonitor.recordReads('session', 1);
-        isCaptain = admSnap.exists();
-        captainDiagnostic = { code: isCaptain ? 'verified' : 'not_found' };
+        isPlatformOwner = admSnap.exists();
+        captainDiagnostic = { code: isPlatformOwner ? 'verified' : 'not_found' };
       } catch (err) {
         if (isQuotaExceededError(err)) {
           quotaMonitor.markQuotaExceeded(true);
           throw new Error(QUOTA_EXCEEDED_ARABIC_MSG);
         }
-        isCaptain = false;
+        isPlatformOwner = false;
         const errMsg = err instanceof Error ? err.message : String(err);
         console.warn('Captain admins/{uid} verification error:', errMsg);
         captainDiagnostic = {
@@ -301,52 +557,305 @@ class MaydanBackendService {
         };
       }
     }
-    this.activeIsCaptain = isCaptain;
+    this.isPlatformOwner = isPlatformOwner;
 
-    if (isCaptain) {
-      await this.bootstrapCaptainWorkspace(fbUser);
-      return { status: 'ready', isCaptain: true, captainDiagnostic };
-    }
+    const platformConfig = await this.fetchPlatformConfig();
 
-    // Check if player profile already exists for this Google UID
-    let playerSnap;
+    // Load or initialize user registry doc users/{uid}
+    let userDoc: Record<string, unknown> | null = null;
     try {
-      playerSnap = await getDoc(doc(db, 'players', fbUser.uid));
+      const uSnap = await getDoc(doc(db, 'users', fbUser.uid));
       quotaMonitor.recordReads('session', 1);
+      if (uSnap.exists()) {
+        userDoc = { uid: fbUser.uid, ...uSnap.data() };
+      }
     } catch (err) {
-      this.handleWriteError(err, OperationType.GET, `players/${fbUser.uid}`);
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        throw new Error(QUOTA_EXCEEDED_ARABIC_MSG);
+      }
+      console.warn('users/{uid} read notice:', err instanceof Error ? err.message : String(err));
+    }
+    this.userDoc = userDoc;
+
+    // 0) Auto-promote approved pendingJoinTeamId into userDoc.teamIds cleanly without cross-user write
+    const pendingJoinTid = sanitizeTeamId(userDoc?.pendingJoinTeamId);
+    if (pendingJoinTid && pendingJoinTid !== TEAM_ID) {
+      const existingIds = Array.isArray(userDoc?.teamIds)
+        ? (userDoc!.teamIds as unknown[]).map((x) => sanitizeTeamId(x)).filter(Boolean)
+        : [];
+      if (!existingIds.includes(pendingJoinTid)) {
+        try {
+          const [jrCheck, memCheck] = await Promise.all([
+            getDoc(doc(db, 'teams', pendingJoinTid, 'joinRequests', fbUser.uid)),
+            getDoc(doc(db, 'teams', pendingJoinTid, 'members', fbUser.uid)),
+          ]);
+          quotaMonitor.recordReads('session', 2);
+          if (jrCheck.exists() && jrCheck.data().status === 'approved' && memCheck.exists()) {
+            const nextTeamIds = Array.from(new Set([...existingIds, pendingJoinTid])).slice(0, MAX_JOINED_TEAMS);
+            await setDoc(
+              doc(db, 'users', fbUser.uid),
+              {
+                uid: fbUser.uid,
+                teamIds: nextTeamIds,
+                activeTeamId: pendingJoinTid,
+                pendingJoinTeamId: '',
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+            userDoc = { ...(userDoc || { uid: fbUser.uid }), teamIds: nextTeamIds, activeTeamId: pendingJoinTid, pendingJoinTeamId: '' };
+            this.userDoc = userDoc;
+          }
+        } catch {
+          // ignore non-fatal promotion check
+        }
+      }
     }
 
-    if (playerSnap.exists()) {
-      return { status: 'ready', isCaptain: false, captainDiagnostic };
+    // 1) Multi-Team Mode resolution first if user belongs to >= 1 active isolated team
+    const activeMultiTeams = await this.loadUserMultiTeams(fbUser.uid, userDoc);
+    if (activeMultiTeams.length > 0) {
+      const preferredTid = sanitizeTeamId(userDoc?.activeTeamId);
+      const chosen =
+        activeMultiTeams.find((t) => t.id === preferredTid) || activeMultiTeams[0];
+      const sortedTeams = sortActiveTeamsList(activeMultiTeams, chosen.id);
+      this.activeStorageMode = 'multi';
+      this.activeTeamId = chosen.id;
+      this.activeTeams = sortedTeams;
+      const isFounder = chosen.founderUid === fbUser.uid;
+      this.activeIsCaptain = isFounder;
+
+      // Sync ownedTeamIds cleanly in case founder leadership was transferred to this UID
+      try {
+        const actualOwned = sortedTeams.filter((t) => t.founderUid === fbUser.uid).map((t) => t.id);
+        const storedOwned = Array.isArray(userDoc?.ownedTeamIds)
+          ? (userDoc!.ownedTeamIds as string[])
+          : [];
+        const mismatch =
+          actualOwned.length !== storedOwned.length ||
+          actualOwned.some((id) => !storedOwned.includes(id));
+        if (mismatch && userDoc) {
+          await setDoc(
+            doc(db, 'users', fbUser.uid),
+            {
+              uid: fbUser.uid,
+              ownedTeamIds: actualOwned,
+              teamIds: sortedTeams.map((t) => t.id),
+              activeTeamId: chosen.id,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+          userDoc.ownedTeamIds = actualOwned;
+        }
+      } catch {
+        // non-blocking sync
+      }
+
+      const needsPrivacyNotice = !hasAcceptedCurrentPrivacyNotice(userDoc, fbUser.uid);
+      return {
+        status: 'ready',
+        mode: 'multi',
+        isCaptain: isFounder,
+        isPlatformOwner,
+        teams: sortedTeams,
+        activeTeamId: chosen.id,
+        platformConfig,
+        userDoc,
+        canMigrateLegacyTeam: Boolean(isPlatformOwner && !userDoc?.migratedToTeamId),
+        needsPrivacyNotice,
+        captainDiagnostic,
+      };
     }
 
-    // Fetch public branding for join/pending screens
+    // 2) Single-Team Legacy Fallback (keeps original team 100% operational pre-migration)
+    const migratedTid = sanitizeTeamId(userDoc?.migratedToTeamId);
+    if (!migratedTid) {
+      if (isPlatformOwner) {
+        await this.bootstrapCaptainWorkspace(fbUser);
+        this.activeStorageMode = 'single';
+        this.activeTeamId = TEAM_ID;
+        this.activeIsCaptain = true;
+        return {
+          status: 'ready',
+          mode: 'single',
+          isCaptain: true,
+          isPlatformOwner: true,
+          teams: [],
+          activeTeamId: TEAM_ID,
+          platformConfig,
+          userDoc,
+          canMigrateLegacyTeam: true,
+          needsPrivacyNotice: !hasAcceptedCurrentPrivacyNotice(userDoc, fbUser.uid),
+          captainDiagnostic,
+        };
+      }
+
+      let playerSnap;
+      try {
+        playerSnap = await getDoc(doc(db, 'players', fbUser.uid));
+        quotaMonitor.recordReads('session', 1);
+      } catch (err) {
+        this.handleWriteError(err, OperationType.GET, `players/${fbUser.uid}`);
+      }
+
+      if (playerSnap.exists()) {
+        this.activeStorageMode = 'single';
+        this.activeTeamId = TEAM_ID;
+        this.activeIsCaptain = false;
+        return {
+          status: 'ready',
+          mode: 'single',
+          isCaptain: false,
+          isPlatformOwner: false,
+          teams: [],
+          activeTeamId: TEAM_ID,
+          platformConfig,
+          userDoc,
+          canMigrateLegacyTeam: false,
+          needsPrivacyNotice: !hasAcceptedCurrentPrivacyNotice(userDoc, fbUser.uid),
+          captainDiagnostic,
+        };
+      }
+    }
+
+    // 3) Check pending Multi-Team join request (if stored in users/{uid}.pendingJoinTeamId)
+    const pendingTeamId = sanitizeTeamId(userDoc?.pendingJoinTeamId);
+    if (pendingTeamId && pendingTeamId !== TEAM_ID) {
+      try {
+        const jrSnap = await getDoc(doc(db, 'teams', pendingTeamId, 'joinRequests', fbUser.uid));
+        quotaMonitor.recordReads('session', 1);
+        if (jrSnap.exists()) {
+          const jr = jrSnap.data();
+          let tData: Record<string, unknown> = {};
+          try {
+            const tSnap = await getDoc(doc(db, 'teams', pendingTeamId));
+            quotaMonitor.recordReads('session', 1);
+            if (tSnap.exists()) tData = tSnap.data();
+          } catch {
+            // fallback to invite/default metadata if team doc is unavailable
+          }
+          const teamBrand = {
+            teamName: tData.teamName || 'فريق السداسي',
+            appName: tData.appName || 'ميدان 6v6',
+            primaryColor: tData.primaryColor || ROYAL_PRIMARY,
+            secondaryColor: tData.secondaryColor || ROYAL_SECONDARY,
+            logo: tData.logo || '',
+          };
+          if (jr.status === 'pending') {
+            return {
+              status: 'pending',
+              mode: 'none',
+              isCaptain: false,
+              isPlatformOwner,
+              teams: [],
+              activeTeamId: pendingTeamId,
+              platformConfig,
+              userDoc,
+              canMigrateLegacyTeam: false,
+              needsPrivacyNotice: !hasAcceptedCurrentPrivacyNotice(userDoc, fbUser.uid),
+              captainDiagnostic,
+              branding: teamBrand,
+              joinRequest: { ...jr, teamName: teamBrand.teamName },
+            };
+          }
+          if (jr.status === 'rejected') {
+            return {
+              status: 'rejected',
+              mode: 'none',
+              isCaptain: false,
+              isPlatformOwner,
+              teams: [],
+              activeTeamId: pendingTeamId,
+              platformConfig,
+              userDoc,
+              canMigrateLegacyTeam: false,
+              needsPrivacyNotice: !hasAcceptedCurrentPrivacyNotice(userDoc, fbUser.uid),
+              captainDiagnostic,
+              branding: teamBrand,
+              joinRequest: { ...jr, teamName: teamBrand.teamName },
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('Multi-team pending request check notice:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // 4) Legacy Single-Team pending/rejected check + public branding
     let branding: Record<string, unknown> | undefined;
     try {
       const bSnap = await getDoc(doc(db, 'publicMeta', 'branding'));
+      quotaMonitor.recordReads('session', 1);
       if (bSnap.exists()) branding = bSnap.data();
-    } catch {
-      // Optional before team initialization
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+      } else {
+        console.warn('publicMeta/branding read notice:', err instanceof Error ? err.message : String(err));
+      }
     }
 
-    // Check existing join request
     try {
       const jrSnap = await getDoc(doc(db, 'joinRequests', fbUser.uid));
+      quotaMonitor.recordReads('session', 1);
       if (jrSnap.exists()) {
         const jr = jrSnap.data();
         if (jr.status === 'pending') {
-          return { status: 'pending', isCaptain: false, captainDiagnostic, branding, joinRequest: jr };
+          return {
+            status: 'pending',
+            mode: 'none',
+            isCaptain: false,
+            isPlatformOwner,
+            teams: [],
+            activeTeamId: TEAM_ID,
+            platformConfig,
+            userDoc,
+            canMigrateLegacyTeam: false,
+            needsPrivacyNotice: !hasAcceptedCurrentPrivacyNotice(userDoc, fbUser.uid),
+            captainDiagnostic,
+            branding,
+            joinRequest: jr,
+          };
         }
         if (jr.status === 'rejected') {
-          return { status: 'rejected', isCaptain: false, captainDiagnostic, branding, joinRequest: jr };
+          return {
+            status: 'rejected',
+            mode: 'none',
+            isCaptain: false,
+            isPlatformOwner,
+            teams: [],
+            activeTeamId: TEAM_ID,
+            platformConfig,
+            userDoc,
+            canMigrateLegacyTeam: false,
+            needsPrivacyNotice: !hasAcceptedCurrentPrivacyNotice(userDoc, fbUser.uid),
+            captainDiagnostic,
+            branding,
+            joinRequest: jr,
+          };
         }
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.GET, `joinRequests/${fbUser.uid}`);
     }
 
-    return { status: 'needs_join', isCaptain: false, captainDiagnostic, branding };
+    this.activeStorageMode = 'none';
+    return {
+      status: 'needs_join',
+      mode: 'none',
+      isCaptain: false,
+      isPlatformOwner,
+      teams: [],
+      activeTeamId: '',
+      platformConfig,
+      userDoc,
+      canMigrateLegacyTeam: Boolean(isPlatformOwner && !migratedTid),
+      needsPrivacyNotice: !hasAcceptedCurrentPrivacyNotice(userDoc, fbUser.uid),
+      captainDiagnostic,
+      branding,
+    };
   }
 
   private async bootstrapCaptainWorkspace(fbUser: User): Promise<void> {
@@ -359,19 +868,35 @@ class MaydanBackendService {
     }
 
     if (!settingsSnap.exists()) {
-      const initialRec = createSmartInvitationRecord({
-        isCaptain: true,
-        createdBy: fbUser.uid,
-        teamId: TEAM_ID,
-        teamName: 'فريق السداسي',
-        appName: 'ميدان 6v6',
-        primaryColor: ROYAL_PRIMARY,
-        requireApproval: true,
-        usageType: 'single',
-        maxUses: 1,
-        durationDays: 7,
-      });
+      const authCtx = { isFirebaseMode: true, isCaptainSession: true };
+      const initialRec = createSmartInvitationRecord(
+        {
+          teamName: 'فريق السداسي',
+          appName: 'ميدان 6v6',
+          primaryColor: ROYAL_PRIMARY,
+          requireApproval: true,
+          isMemberShareCode: false,
+          usageType: 'single',
+          maxUses: 1,
+          durationDays: 7,
+        },
+        authCtx
+      );
+      const memberShareRec = createSmartInvitationRecord(
+        {
+          teamName: 'فريق السداسي',
+          appName: 'ميدان 6v6',
+          primaryColor: ROYAL_PRIMARY,
+          requireApproval: true,
+          isMemberShareCode: true,
+          usageType: 'multi',
+          maxUses: 100,
+          durationDays: 90,
+        },
+        authCtx
+      );
       const initialCode = initialRec.code;
+      const memberShareCode = memberShareRec.code;
       const batch = writeBatch(db);
       batch.set(settingsRef, {
         teamId: TEAM_ID,
@@ -381,9 +906,15 @@ class MaydanBackendService {
         secondaryColor: ROYAL_SECONDARY,
         logo: '',
         inviteCode: initialCode,
+        memberShareCode,
         requireApproval: true,
         lockSkills: false,
         themeVersion: 'royal_v2',
+        creatorUid: fbUser.uid,
+        organizerUids: [fbUser.uid],
+        lineupPermission: 'all',
+        defaultCurrency: 'ريال',
+        defaultPitchCost: 0,
         updatedAt: serverTimestamp(),
       });
       batch.set(doc(db, 'publicMeta', 'branding'), {
@@ -398,6 +929,7 @@ class MaydanBackendService {
         code: initialCode,
         active: true,
         requireApproval: true,
+        isMemberShareCode: false,
         teamId: TEAM_ID,
         teamName: 'فريق السداسي',
         appName: 'ميدان 6v6',
@@ -409,7 +941,36 @@ class MaydanBackendService {
         createdAtMs: initialRec.createdAtMs,
         expiresAtMs: initialRec.expiresAtMs,
         status: 'active',
+        updatedAt: serverTimestamp(),
+      });
+      batch.set(doc(db, 'inviteAdminLogs', initialCode), {
+        code: initialCode,
         createdBy: fbUser.uid,
+        createdAtMs: initialRec.createdAtMs,
+        updatedAt: serverTimestamp(),
+      });
+      batch.set(doc(db, 'inviteCodes', memberShareCode), {
+        code: memberShareCode,
+        active: true,
+        requireApproval: true,
+        isMemberShareCode: true,
+        teamId: TEAM_ID,
+        teamName: 'فريق السداسي',
+        appName: 'ميدان 6v6',
+        primaryColor: ROYAL_PRIMARY,
+        usageType: memberShareRec.usageType,
+        maxUses: memberShareRec.maxUses,
+        usedCount: 0,
+        durationDays: memberShareRec.durationDays,
+        createdAtMs: memberShareRec.createdAtMs,
+        expiresAtMs: memberShareRec.expiresAtMs,
+        status: 'active',
+        updatedAt: serverTimestamp(),
+      });
+      batch.set(doc(db, 'inviteAdminLogs', memberShareCode), {
+        code: memberShareCode,
+        createdBy: fbUser.uid,
+        createdAtMs: memberShareRec.createdAtMs,
         updatedAt: serverTimestamp(),
       });
       batch.set(doc(db, 'tactics', 'current'), {
@@ -538,11 +1099,20 @@ class MaydanBackendService {
         record,
         statusInfo,
       };
-    } catch {
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        return {
+          exists: false,
+          valid: false,
+          errorAr: QUOTA_EXCEEDED_ARABIC_MSG,
+        };
+      }
+      console.warn('inspectInviteCode error:', err instanceof Error ? err.message : String(err));
       return {
         exists: false,
         valid: false,
-        errorAr: 'تعذّر التحقق من كود الدعوة حالياً',
+        errorAr: 'تعذّر التحقق من كود الدعوة حالياً — تحقق من الشبكة وأعد المحاولة.',
       };
     }
   }
@@ -557,7 +1127,7 @@ class MaydanBackendService {
     referredBy?: string;
     hasExistingPersonalTeam?: boolean;
     confirmedTeamSwitch?: boolean;
-  }): Promise<{ joinedDirectly: boolean; teamName?: string }> {
+  }): Promise<{ joinedDirectly: boolean; teamName?: string; teamId?: string }> {
     const fbUser = auth.currentUser;
     if (!fbUser || !fbUser.emailVerified) {
       throw new Error('يرجى تسجيل الدخول بحساب Google أولاً');
@@ -573,6 +1143,205 @@ class MaydanBackendService {
     const cleanRoleOverride = sanitizeRoleOverride(input.roleOverride);
     const cleanReferredBy = sanitizeReferralCode(input.referredBy);
 
+    // Pre-inspect invite target teamId so we can dispatch to Multi-Team or legacy Single-Team
+    let preInviteSnap;
+    try {
+      preInviteSnap = await getDoc(doc(db, 'inviteCodes', code));
+      quotaMonitor.recordReads('oneShot', 1);
+    } catch (err) {
+      this.handleWriteError(err, OperationType.GET, `inviteCodes/${code}`);
+    }
+    if (!preInviteSnap.exists()) {
+      throw new Error('كود الدعوة غير صحيح أو غير موجود');
+    }
+    const targetTeamId = sanitizeTeamId(preInviteSnap.data().teamId) || TEAM_ID;
+
+    // ===== Multi-Team Join Path (`teams/{teamId}`) =====
+    if (targetTeamId !== TEAM_ID) {
+      const joinedTeamIds = Array.isArray(this.userDoc?.teamIds)
+        ? (this.userDoc!.teamIds as string[])
+        : this.activeTeams.map((t) => t.id);
+      try {
+        return await runTransaction(db, async (tx) => {
+          const inviteRef = doc(db, 'inviteCodes', code);
+          const teamRef = doc(db, 'teams', targetTeamId);
+          const memberRef = doc(db, 'teams', targetTeamId, 'members', fbUser.uid);
+          const jrRef = doc(db, 'teams', targetTeamId, 'joinRequests', fbUser.uid);
+          const userRef = doc(db, 'users', fbUser.uid);
+
+          const [inviteSnap, memberSnap, jrSnap, userSnap] = await Promise.all([
+            tx.get(inviteRef),
+            tx.get(memberRef),
+            tx.get(jrRef),
+            tx.get(userRef),
+          ]);
+
+          const uData = userSnap.exists() ? userSnap.data() : {};
+          const currentJoined = Array.isArray(uData.teamIds) ? (uData.teamIds as string[]) : joinedTeamIds;
+
+          const quotaCheck = checkTeamQuotaEligibility({
+            action: 'join',
+            joinedTeamIds: currentJoined,
+            targetTeamId,
+            maxMembersPerTeam: DEFAULT_MAX_MEMBERS_PER_TEAM,
+            currentMemberCount: 0,
+          });
+          if (!quotaCheck.allowed) {
+            throw new Error(quotaCheck.errorAr || 'لا يمكن الانضمام لهذا الفريق حالياً.');
+          }
+
+          const rawInvite = inviteSnap.exists() ? { code, ...inviteSnap.data() } : null;
+          const hasPendingRequest = jrSnap.exists() && jrSnap.data().status === 'pending';
+
+          const validation = validateInviteForJoin({
+            invite: rawInvite,
+            applicantUid: fbUser.uid,
+            existingPlayers: memberSnap.exists() ? [{ id: fbUser.uid, ownerUid: fbUser.uid }] : [],
+            existingJoinRequestStatus: hasPendingRequest ? 'pending' : null,
+            hasExistingPersonalTeam: Boolean(input.hasExistingPersonalTeam),
+            confirmedTeamSwitch: Boolean(input.confirmedTeamSwitch),
+          });
+          if (!validation.valid || !validation.normalizedInvite) {
+            throw new Error(validation.errorMessageAr || 'كود الدعوة غير صالح أو منتهي الصلاحية');
+          }
+
+          const inviteData = inviteSnap.data() || {};
+          const isMemberShareCode = inviteData.isMemberShareCode === true;
+          const requireApproval = isMemberShareCode
+            ? true
+            : inviteData.joinMode === 'instant' || inviteData.requireApproval === false
+              ? false
+              : inviteData.requireApproval !== false;
+          const teamName = clampStr(inviteData.teamName || 'فريق السداسي', 80) || 'فريق السداسي';
+
+          if ('maxUses' in inviteData && 'usedCount' in inviteData) {
+            const maxUses = Math.max(1, Number(inviteData.maxUses || 1));
+            const nextUsedCount = Math.max(0, Number(inviteData.usedCount || 0)) + 1;
+            tx.update(inviteRef, {
+              usedCount: nextUsedCount,
+              active: nextUsedCount < maxUses,
+              status: nextUsedCount >= maxUses ? 'completed' : 'active',
+              updatedAt: serverTimestamp(),
+            });
+          }
+
+          if (requireApproval) {
+            const jrDoc: Record<string, unknown> = {
+              uid: fbUser.uid,
+              teamId: targetTeamId,
+              name: cleanName,
+              jersey: cleanJersey,
+              primaryPos: cleanPos,
+              inviteCode: code,
+              status: 'pending',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+            if (cleanStats6) jrDoc.stats6 = cleanStats6;
+            if (cleanRoleOverride) jrDoc.roleOverride = cleanRoleOverride;
+            if (cleanReferredBy) jrDoc.referredBy = cleanReferredBy;
+            tx.set(jrRef, jrDoc);
+            tx.set(
+              userRef,
+              {
+                uid: fbUser.uid,
+                pendingJoinTeamId: targetTeamId,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+            return { joinedDirectly: false, teamName, teamId: targetTeamId };
+          }
+
+          const jrApprovedDoc: Record<string, unknown> = {
+            uid: fbUser.uid,
+            teamId: targetTeamId,
+            name: cleanName,
+            jersey: cleanJersey,
+            primaryPos: cleanPos,
+            inviteCode: code,
+            status: 'approved',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          };
+          if (cleanStats6) jrApprovedDoc.stats6 = cleanStats6;
+          if (cleanRoleOverride) jrApprovedDoc.roleOverride = cleanRoleOverride;
+          if (cleanReferredBy) jrApprovedDoc.referredBy = cleanReferredBy;
+          tx.set(jrRef, jrApprovedDoc);
+
+          const memberDoc: Record<string, unknown> = {
+            id: fbUser.uid,
+            uid: fbUser.uid,
+            ownerUid: fbUser.uid,
+            teamId: targetTeamId,
+            name: cleanName,
+            role: 'member',
+            isOrganizer: false,
+            jersey: cleanJersey,
+            age: 18,
+            height: 175,
+            weight: 70,
+            foot: 'يمين',
+            primaryPos: cleanPos,
+            secondaryPos: 'لا يوجد',
+            photo: '',
+            hasPhoto: false,
+            photoZoom: 105,
+            photoY: 18,
+            skills: cleanStats6
+              ? stats6ToLegacySkills(cleanStats6)
+              : sanitizeSkills({
+                  speed: 7,
+                  shooting: 6,
+                  passing: 7,
+                  dribbling: 6,
+                  defending: 6,
+                  stamina: 7,
+                  vision: 6,
+                  teamwork: 7,
+                  control: 7,
+                  positioning: 6,
+                }),
+            top3Strengths: '',
+            weak3Points: '',
+            seasonGoal: '',
+            availableStatus: 'متاح',
+            roleModelStarId: '',
+            joinedAtMs: Date.now(),
+            updatedAtMs: Date.now(),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          };
+          if (cleanStats6) memberDoc.stats6 = cleanStats6;
+          if (cleanRoleOverride) memberDoc.roleOverride = cleanRoleOverride;
+          tx.set(memberRef, memberDoc);
+          tx.update(teamRef, {
+            memberCount: increment(1),
+            updatedAt: serverTimestamp(),
+          });
+          tx.set(
+            userRef,
+            {
+              uid: fbUser.uid,
+              displayName: cleanName,
+              teamIds: arrayUnion(targetTeamId),
+              activeTeamId: targetTeamId,
+              pendingJoinTeamId: '',
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+          return { joinedDirectly: true, teamName, teamId: targetTeamId };
+        });
+      } catch (err) {
+        if (err instanceof Error && !err.message.includes('Missing or insufficient permissions')) {
+          throw err;
+        }
+        this.handleWriteError(err, OperationType.WRITE, `teams/${targetTeamId}/joinRequests/${fbUser.uid}`);
+      }
+    }
+
+    // ===== Legacy Single-Team Join Path (`teamId == 'main'`) =====
     try {
       return await runTransaction(db, async (tx) => {
         const inviteRef = doc(db, 'inviteCodes', code);
@@ -591,21 +1360,21 @@ class MaydanBackendService {
         const validation = validateInviteForJoin({
           invite: rawInvite,
           applicantUid: fbUser.uid,
-          alreadyMember: playerSnap.exists(),
-          hasPendingRequest,
+          existingPlayers: playerSnap.exists() ? [{ id: fbUser.uid, ownerUid: fbUser.uid }] : [],
+          existingJoinRequestStatus: hasPendingRequest ? 'pending' : null,
           hasExistingPersonalTeam: Boolean(input.hasExistingPersonalTeam),
           confirmedTeamSwitch: Boolean(input.confirmedTeamSwitch),
         });
 
-        if (!validation.ok || !validation.invite) {
-          throw new Error(validation.errorAr || 'كود الدعوة غير صالح أو منتهي الصلاحية');
+        if (!validation.valid || !validation.normalizedInvite) {
+          throw new Error(validation.errorMessageAr || 'كود الدعوة غير صالح أو منتهي الصلاحية');
         }
 
         const inviteData = inviteSnap.data() || {};
-        const requireApproval = Boolean(inviteData.requireApproval);
+        const isMemberShareCode = inviteData.isMemberShareCode === true;
+        const requireApproval = isMemberShareCode ? true : Boolean(inviteData.requireApproval);
         const teamName = clampStr(inviteData.teamName || 'فريق السداسي', 80) || 'فريق السداسي';
 
-        // Atomically consume +1 from the invitation quota when smart quota fields exist on the doc
         if ('maxUses' in inviteData && 'usedCount' in inviteData) {
           const maxUses = Math.max(1, Number(inviteData.maxUses || 1));
           const nextUsedCount = Math.max(0, Number(inviteData.usedCount || 0)) + 1;
@@ -615,7 +1384,6 @@ class MaydanBackendService {
             usedCount: nextUsedCount,
             active: nextActive,
             status: nextStatus,
-            lastUsedBy: fbUser.uid,
             updatedAt: serverTimestamp(),
           });
         }
@@ -635,7 +1403,7 @@ class MaydanBackendService {
           if (cleanRoleOverride) jrDoc.roleOverride = cleanRoleOverride;
           if (cleanReferredBy) jrDoc.referredBy = cleanReferredBy;
           tx.set(jrRef, jrDoc);
-          return { joinedDirectly: false, teamName };
+          return { joinedDirectly: false, teamName, teamId: TEAM_ID };
         }
 
         const jrApprovedDoc: Record<string, unknown> = {
@@ -696,7 +1464,7 @@ class MaydanBackendService {
         if (cleanReferredBy) playerDoc.referredBy = cleanReferredBy;
         tx.set(playerRef, playerDoc);
 
-        return { joinedDirectly: true, teamName };
+        return { joinedDirectly: true, teamName, teamId: TEAM_ID };
       });
     } catch (err) {
       if (err instanceof Error && !err.message.includes('Missing or insufficient permissions')) {
@@ -720,24 +1488,191 @@ class MaydanBackendService {
     });
   }
 
+  async refreshMultiMembers(state?: BackendState): Promise<void> {
+    const targetState = state || this.activeState;
+    if (!targetState || !this.isMultiMode()) return;
+    const tid = this.activeTeamId;
+    try {
+      const snap = await getDocs(collection(db, 'teams', tid, 'members'));
+      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+      targetState.players = snap.docs.map((d) =>
+        stripForbiddenHealthFields({ id: d.id, ...d.data() })
+      );
+      this.saveTeamSnapshotCache(targetState);
+      if (this.activeOnUpdate) this.activeOnUpdate();
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        if (this.activeOnError) this.activeOnError(QUOTA_EXCEEDED_ARABIC_MSG);
+        return;
+      }
+      console.warn('refreshMultiMembers error:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async refreshMyPrivateRecords(state?: BackendState): Promise<void> {
+    const targetState = state || this.activeState;
+    const uid = this.activeUid;
+    if (!targetState || !uid || !this.isMultiMode()) return;
+    const tid = this.activeTeamId;
+    try {
+      const snap = await getDocs(collection(db, 'teams', tid, 'members', uid, 'private'));
+      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+      const rd: Array<Record<string, unknown>> = [];
+      const inj: Array<Record<string, unknown>> = [];
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        if (data.kind === 'readiness') rd.push({ id: d.id, playerId: uid, ownerUid: uid, ...data });
+        else if (data.kind === 'injury') inj.push({ id: d.id, playerId: uid, ownerUid: uid, ...data });
+      });
+      targetState.readiness = rd;
+      targetState.injuries = inj;
+      if (this.activeOnUpdate) this.activeOnUpdate();
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        if (this.activeOnError) this.activeOnError(QUOTA_EXCEEDED_ARABIC_MSG);
+        return;
+      }
+      console.warn('refreshMyPrivateRecords error:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async refreshReportsPage(state?: BackendState, append = false): Promise<{ hasMore: boolean }> {
+    const targetState = state || this.activeState;
+    if (!targetState) return { hasMore: false };
+    const isMulti = this.isMultiMode();
+    const tid = this.activeTeamId;
+    try {
+      const colRef = isMulti
+        ? collection(db, 'teams', tid, 'reports')
+        : collection(db, 'reports');
+      const baseFilters = isMulti ? [] : [where('teamId', '==', TEAM_ID)];
+      const q = append && this.reportsLastDoc
+        ? query(colRef, ...baseFilters, orderBy('createdAt', 'desc'), startAfter(this.reportsLastDoc), limit(PAGE_SIZE_LIST))
+        : query(colRef, ...baseFilters, orderBy('createdAt', 'desc'), limit(PAGE_SIZE_LIST));
+      const snap = await getDocs(q);
+      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (append) {
+        const seen = new Set(targetState.reports.map((r) => String(r.id || '')));
+        for (const row of rows) {
+          if (!seen.has(String(row.id || ''))) targetState.reports.push(row);
+        }
+      } else {
+        targetState.reports = rows;
+      }
+      this.reportsLastDoc = snap.docs.length ? snap.docs[snap.docs.length - 1] : this.reportsLastDoc;
+      this.reportsHasMore = snap.docs.length === PAGE_SIZE_LIST;
+      if (this.activeOnUpdate) this.activeOnUpdate();
+      return { hasMore: this.reportsHasMore };
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        if (this.activeOnError) this.activeOnError(QUOTA_EXCEEDED_ARABIC_MSG);
+        return { hasMore: false };
+      }
+      const code = String((err as { code?: string })?.code || '');
+      if (!isMulti && code === 'failed-precondition') {
+        try {
+          const snap = await getDocs(query(collection(db, 'reports'), where('teamId', '==', TEAM_ID), limit(50)));
+          quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+          targetState.reports = snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => Number((b as Record<string, unknown>).createdAtMs || 0) - Number((a as Record<string, unknown>).createdAtMs || 0));
+          this.reportsHasMore = false;
+          if (this.activeOnUpdate) this.activeOnUpdate();
+        } catch {
+          // ignore secondary failure
+        }
+        return { hasMore: false };
+      }
+      console.warn('refreshReportsPage error:', err instanceof Error ? err.message : String(err));
+      return { hasMore: false };
+    }
+  }
+
+  async loadMoreReports(): Promise<{ hasMore: boolean }> {
+    return this.refreshReportsPage(this.activeState || undefined, true);
+  }
+
+  async refreshMatchesPage(state?: BackendState, append = false): Promise<{ hasMore: boolean }> {
+    const targetState = state || this.activeState;
+    if (!targetState) return { hasMore: false };
+    const isMulti = this.isMultiMode();
+    const tid = this.activeTeamId;
+    try {
+      const colRef = isMulti
+        ? collection(db, 'teams', tid, 'matches')
+        : collection(db, 'matches');
+      const baseFilters = isMulti ? [] : [where('teamId', '==', TEAM_ID)];
+      const q = append && this.matchesLastDoc
+        ? query(colRef, ...baseFilters, orderBy('createdAt', 'desc'), startAfter(this.matchesLastDoc), limit(PAGE_SIZE_LIST))
+        : query(colRef, ...baseFilters, orderBy('createdAt', 'desc'), limit(PAGE_SIZE_LIST));
+      const snap = await getDocs(q);
+      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (append) {
+        const seen = new Set(targetState.matches.map((m) => String(m.id || '')));
+        for (const row of rows) {
+          if (!seen.has(String(row.id || ''))) targetState.matches.push(row);
+        }
+      } else {
+        targetState.matches = rows;
+      }
+      this.matchesLastDoc = snap.docs.length ? snap.docs[snap.docs.length - 1] : this.matchesLastDoc;
+      this.matchesHasMore = snap.docs.length === PAGE_SIZE_LIST;
+      if (this.activeOnUpdate) this.activeOnUpdate();
+      return { hasMore: this.matchesHasMore };
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        if (this.activeOnError) this.activeOnError(QUOTA_EXCEEDED_ARABIC_MSG);
+        return { hasMore: false };
+      }
+      const code = String((err as { code?: string })?.code || '');
+      if (!isMulti && code === 'failed-precondition') {
+        try {
+          const snap = await getDocs(query(collection(db, 'matches'), where('teamId', '==', TEAM_ID), limit(50)));
+          quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+          targetState.matches = snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => String((b as Record<string, unknown>).date || '').localeCompare(String((a as Record<string, unknown>).date || '')));
+          this.matchesHasMore = false;
+          if (this.activeOnUpdate) this.activeOnUpdate();
+        } catch {
+          // ignore secondary failure
+        }
+        return { hasMore: false };
+      }
+      console.warn('refreshMatchesPage error:', err instanceof Error ? err.message : String(err));
+      return { hasMore: false };
+    }
+  }
+
+  async loadMoreMatches(): Promise<{ hasMore: boolean }> {
+    return this.refreshMatchesPage(this.activeState || undefined, true);
+  }
+
   /**
    * Non-realtime one-shot fetch of aggregated peer rating stats (count >= 3).
-   * Intentionally NOT subscribed via onSnapshot so live score deltas cannot
-   * de-anonymize individual raters when they submit a ballot.
    */
   async refreshPeerRatingStats(
     state?: BackendState
   ): Promise<Record<string, { count: number; totalScore: number }>> {
     const targetState = state || this.activeState;
     if (!targetState) return {};
+    const isMulti = this.isMultiMode();
+    const tid = this.activeTeamId;
     try {
-      const snap = await getDocs(
-        query(
-          collection(db, 'peerRatingStats'),
-          where('teamId', '==', TEAM_ID),
-          where('count', '>=', 3)
-        )
-      );
+      const q = isMulti
+        ? query(collection(db, 'teams', tid, 'peerRatingStats'), where('count', '>=', 3))
+        : query(
+            collection(db, 'peerRatingStats'),
+            where('teamId', '==', TEAM_ID),
+            where('count', '>=', 3)
+          );
+      const snap = await getDocs(q);
       quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
       const statsMap: Record<string, { count: number; totalScore: number }> = {};
       snap.docs.forEach((d) => {
@@ -762,36 +1697,60 @@ class MaydanBackendService {
   }
 
   /**
-   * One-shot non-realtime fetch of attendance records so FIFA Shield commitment %
-   * is accurate without adding a permanent core listener.
+   * One-shot non-realtime fetch of attendance records.
    */
   async refreshAttendance(state?: BackendState): Promise<void> {
     const targetState = state || this.activeState;
     if (!targetState) return;
+    const isMulti = this.isMultiMode();
+    const tid = this.activeTeamId;
     try {
-      const snap = await getDocs(query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID)));
-      quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
-      targetState.attendance = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (isMulti) {
+        const snap = await getDocs(
+          query(collection(db, 'teams', tid, 'attendance'), limit(15))
+        );
+        quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+        targetState.attendance = flattenConsolidatedAttendanceDocs(
+          snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+        );
+      } else {
+        const snap = await getDocs(query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID)));
+        quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+        targetState.attendance = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      }
       if (this.activeOnUpdate) this.activeOnUpdate();
-    } catch {
-      // Non-fatal; ready tab also subscribes live when opened
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        if (this.activeOnError) this.activeOnError(QUOTA_EXCEEDED_ARABIC_MSG);
+        return;
+      }
+      console.warn('refreshAttendance error:', err instanceof Error ? err.message : String(err));
     }
   }
 
   /**
-   * One-shot non-realtime fetch of Captain official ratings (adminRatings)
-   * so the 3-layer rating transparency panel reflects Captain scores without an extra core listener.
+   * One-shot non-realtime fetch of Captain/Founder official ratings (adminRatings).
    */
   async refreshAdminRatings(state?: BackendState): Promise<void> {
     const targetState = state || this.activeState;
     if (!targetState) return;
+    const isMulti = this.isMultiMode();
+    const tid = this.activeTeamId;
     try {
-      const snap = await getDocs(query(collection(db, 'adminRatings'), where('teamId', '==', TEAM_ID)));
+      const snap = isMulti
+        ? await getDocs(collection(db, 'teams', tid, 'adminRatings'))
+        : await getDocs(query(collection(db, 'adminRatings'), where('teamId', '==', TEAM_ID)));
       quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
       targetState.adminRatings = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       if (this.activeOnUpdate) this.activeOnUpdate();
-    } catch {
-      // Non-fatal; stats and admin tabs subscribe live when opened
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        if (this.activeOnError) this.activeOnError(QUOTA_EXCEEDED_ARABIC_MSG);
+        return;
+      }
+      console.warn('refreshAdminRatings error:', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -801,6 +1760,8 @@ class MaydanBackendService {
   async refreshMatchVoteTallies(state?: BackendState): Promise<void> {
     const targetState = state || this.activeState;
     if (!targetState) return;
+    const isMulti = this.isMultiMode();
+    const tid = this.activeTeamId;
     const sessions = Array.isArray(targetState.matchSessions) ? targetState.matchSessions : [];
     const unlockedSessions = sessions.filter((s) => {
       const parts = Array.isArray(s.participantIds) ? s.participantIds : [];
@@ -818,13 +1779,23 @@ class MaydanBackendService {
       const parts = (Array.isArray(sess.participantIds) ? sess.participantIds : []) as string[];
       const fetches = parts.map(async (pid) => {
         try {
-          const snap = await getDoc(doc(db, 'matchVoteTallies', `${sid}__${pid}`));
+          const docRef = isMulti
+            ? doc(db, 'teams', tid, 'matchVoteTallies', `${sid}__${pid}`)
+            : doc(db, 'matchVoteTallies', `${sid}__${pid}`);
+          const snap = await getDoc(docRef);
           quotaMonitor.recordReads('oneShot', 1);
           if (snap.exists()) {
             tallies.push({ id: snap.id, ...snap.data() });
           }
-        } catch {
-          // Locked (count < 2) or not yet voted for this target — safely ignore
+        } catch (err) {
+          if (isQuotaExceededError(err)) {
+            quotaMonitor.markQuotaExceeded(true);
+            return;
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.includes('Missing or insufficient permissions')) {
+            console.warn('refreshMatchVoteTallies error:', msg);
+          }
         }
       });
       await Promise.all(fetches);
@@ -835,25 +1806,35 @@ class MaydanBackendService {
 
   /**
    * One-shot non-realtime fetch of Global Football Library articles (0 permanent listeners).
-   * Non-captains query only published articles; gracefully no-ops if rules await deployment.
    */
   async refreshFootballLibrary(state?: BackendState): Promise<void> {
     const targetState = state || this.activeState;
     if (!targetState) return;
+    const isMulti = this.isMultiMode();
+    const tid = this.activeTeamId;
     try {
-      const q = this.activeIsCaptain
-        ? query(collection(db, 'footballLibrary'), where('teamId', '==', TEAM_ID))
-        : query(
-            collection(db, 'footballLibrary'),
-            where('teamId', '==', TEAM_ID),
-            where('published', '==', true)
-          );
+      const q = isMulti
+        ? this.activeIsCaptain
+          ? collection(db, 'teams', tid, 'footballLibrary')
+          : query(collection(db, 'teams', tid, 'footballLibrary'), where('published', '==', true))
+        : this.activeIsCaptain
+          ? query(collection(db, 'footballLibrary'), where('teamId', '==', TEAM_ID))
+          : query(
+              collection(db, 'footballLibrary'),
+              where('teamId', '==', TEAM_ID),
+              where('published', '==', true)
+            );
       const snap = await getDocs(q);
       quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
       targetState.footballLibrary = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       if (this.activeOnUpdate) this.activeOnUpdate();
-    } catch {
-      // Non-fatal: starter 13-article educational catalog remains available even before rules deploy
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaMonitor.markQuotaExceeded(true);
+        if (this.activeOnError) this.activeOnError(QUOTA_EXCEEDED_ARABIC_MSG);
+        return;
+      }
+      console.warn('refreshFootballLibrary error:', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -872,13 +1853,17 @@ class MaydanBackendService {
     this.activeOnUpdate = onUpdate;
     this.activeOnError = onError;
     this.photosMap = {};
+    this.reportsLastDoc = null;
+    this.reportsHasMore = false;
+    this.matchesLastDoc = null;
+    this.matchesHasMore = false;
 
     const handleErr = (op: OperationType, path: string) => (err: unknown) => {
       this.handleListenerError(err, op, path, onError);
     };
 
-    // Hydrate non-sensitive local cache ONLY if it belongs to the exact same UID
-    const cached = this.loadTeamSnapshotCache(uid);
+    // Hydrate non-sensitive local cache ONLY if it belongs to the exact same UID & teamId
+    const cached = this.loadTeamSnapshotCache(uid, this.activeTeamId);
     if (cached && cached.ownerUid === uid) {
       if (cached.settings && Object.keys(cached.settings).length && !Object.keys(state.settings || {}).length) {
         state.settings = { ...cached.settings };
@@ -891,8 +1876,42 @@ class MaydanBackendService {
       }
     }
 
-    // ==================== CORE LISTENERS ONLY (3 minimal subscriptions) ====================
-    // 1. Team Settings (1 doc)
+    if (this.isMultiMode()) {
+      const tid = this.activeTeamId;
+      // Multi-Team Core: ONLY 1 live listener (teams/{teamId}) + one-shot initial members & own private records
+      this.coreUnsubs.push(
+        onSnapshot(
+          doc(db, 'teams', tid),
+          (snap) => {
+            quotaMonitor.recordReads('core', 1);
+            quotaMonitor.markQuotaExceeded(false);
+            if (snap.exists()) {
+              const raw = snap.data();
+              this.activeIsCaptain = String(raw.founderUid || '') === uid;
+              const nextSettings = normalizeTeamDocToSettings(tid, raw);
+              if (!this.activeIsCaptain) {
+                delete nextSettings.inviteCode;
+              }
+              state.settings = nextSettings;
+              // Sync activeTeams list entry
+              this.activeTeams = this.activeTeams.map((t) =>
+                t.id === tid ? ({ ...t, ...nextSettings } as unknown as MultiTeamMeta) : t
+              );
+              this.saveTeamSnapshotCache(state);
+              onUpdate();
+            }
+          },
+          handleErr(OperationType.GET, `teams/${tid}`)
+        )
+      );
+
+      void this.refreshMultiMembers(state);
+      void this.refreshMyPrivateRecords(state);
+      this.setActiveTab(initialTab);
+      return;
+    }
+
+    // ==================== SINGLE-TEAM LEGACY CORE LISTENERS ====================
     this.coreUnsubs.push(
       onSnapshot(
         doc(db, 'settings', 'team'),
@@ -900,7 +1919,7 @@ class MaydanBackendService {
           quotaMonitor.recordReads('core', 1);
           quotaMonitor.markQuotaExceeded(false);
           if (snap.exists()) {
-            const nextSettings = { ...snap.data() };
+            const nextSettings = { ...snap.data(), storageMode: 'single' };
             if (!this.activeIsCaptain) {
               delete nextSettings.inviteCode;
             }
@@ -913,7 +1932,6 @@ class MaydanBackendService {
       )
     );
 
-    // 2. Team Roster (N player docs — lean, no portrait images)
     this.coreUnsubs.push(
       onSnapshot(
         query(collection(db, 'players'), where('teamId', '==', TEAM_ID)),
@@ -929,7 +1947,6 @@ class MaydanBackendService {
       )
     );
 
-    // 3. Current User's Own Portrait ONLY (1 doc instead of whole team)
     this.coreUnsubs.push(
       onSnapshot(
         doc(db, 'playerPhotos', uid),
@@ -952,14 +1969,13 @@ class MaydanBackendService {
       )
     );
 
-    // Subscribe lazily to ONLY the initially visible tab
     this.setActiveTab(initialTab);
   }
 
   /**
    * Lazy Per-Tab Listener Manager:
-   * Detaches listeners for the previous tab and subscribes ONLY to the
-   * collections required by the currently visible tab.
+   * In Multi-Team mode keeps permanent/live tab listeners strictly <= 3 total across the app
+   * (live ONLY on team/tactics/ready attendance & tactics; everything else uses limit(20) one-shot pagination).
    */
   setActiveTab(tabId: string): void {
     const uid = this.activeUid;
@@ -967,7 +1983,7 @@ class MaydanBackendService {
     const onUpdate = this.activeOnUpdate;
     const onError = this.activeOnError;
     if (!uid || !state || !onUpdate || !onError) return;
-    if (this.activeTab === tabId && this.tabUnsubs.length > 0) return;
+    if (this.activeTab === tabId && (this.tabUnsubs.length > 0 || this.isMultiMode())) return;
 
     this.stopTabListeners();
     this.activeTab = tabId;
@@ -977,6 +1993,219 @@ class MaydanBackendService {
       this.handleListenerError(err, op, path, onError);
     };
 
+    if (this.isMultiMode()) {
+      const tid = this.activeTeamId;
+
+      const subMultiAttendanceAndPitch = (includeJoinRequests: boolean) => {
+        this.tabUnsubs.push(
+          onSnapshot(
+            query(collection(db, 'teams', tid, 'attendance'), limit(15)),
+            (snap) => {
+              quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+              state.attendance = flattenConsolidatedAttendanceDocs(
+                snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+              );
+              onUpdate();
+            },
+            handleErr(OperationType.LIST, `teams/${tid}/attendance`)
+          )
+        );
+        this.tabUnsubs.push(
+          onSnapshot(
+            doc(db, 'teams', tid, 'pitchSessions', 'current'),
+            (snap) => {
+              quotaMonitor.recordReads('tab', 1);
+              if (snap.exists()) {
+                state.pitchSession = { ...snap.data() };
+                this.saveTeamSnapshotCache(state);
+                onUpdate();
+              }
+            },
+            handleErr(OperationType.GET, `teams/${tid}/pitchSessions/current`)
+          )
+        );
+        if (includeJoinRequests && isCaptain && this.tabUnsubs.length < 3) {
+          this.tabUnsubs.push(
+            onSnapshot(
+              query(collection(db, 'teams', tid, 'joinRequests'), where('status', '==', 'pending'), limit(20)),
+              (snap) => {
+                quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+                state.pendingPlayers = snap.docs.slice(0, MAX_PENDING_JOIN_REQUESTS).map((d) => ({ id: d.id, ...d.data() }));
+                onUpdate();
+              },
+              handleErr(OperationType.LIST, `teams/${tid}/joinRequests`)
+            )
+          );
+        }
+      };
+
+      const loadOneShotPitchPayments = async () => {
+        try {
+          const payQ = this.isTeamOrganizer(uid)
+            ? query(collection(db, 'teams', tid, 'pitchPayments'), limit(40))
+            : query(collection(db, 'teams', tid, 'pitchPayments'), where('ownerUid', '==', uid), limit(10));
+          const snap = await getDocs(payQ);
+          quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+          state.pitchPayments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          onUpdate();
+        } catch (err) {
+          if (isQuotaExceededError(err)) quotaMonitor.markQuotaExceeded(true);
+        }
+      };
+
+      const loadOneShotSuggestionsAndMissions = async () => {
+        try {
+          const [sSnap, mSnap] = await Promise.all([
+            getDocs(query(collection(db, 'teams', tid, 'suggestions'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE_LIST))),
+            getDocs(query(collection(db, 'teams', tid, 'missionClaims'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE_LIST))),
+          ]);
+          quotaMonitor.recordReads('oneShot', Math.max(1, sSnap.size) + Math.max(1, mSnap.size));
+          state.suggestions = sSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          state.missionClaims = mSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          onUpdate();
+        } catch (err) {
+          if (isQuotaExceededError(err)) quotaMonitor.markQuotaExceeded(true);
+        }
+      };
+
+      const loadOneShotMatchSessions = async () => {
+        try {
+          const snap = await getDocs(
+            query(collection(db, 'teams', tid, 'matchSessions'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE_LIST))
+          );
+          quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+          state.matchSessions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          onUpdate();
+          await this.refreshMatchVoteTallies(state);
+        } catch (err) {
+          if (isQuotaExceededError(err)) quotaMonitor.markQuotaExceeded(true);
+        }
+      };
+
+      const loadOneShotAdminData = async () => {
+        try {
+          if (isCaptain) {
+            const [jrSnap, invSnap] = await Promise.all([
+              getDocs(query(collection(db, 'teams', tid, 'joinRequests'), where('status', '==', 'pending'), limit(20))),
+              getDocs(query(collection(db, 'inviteCodes'), where('teamId', '==', tid), limit(10))),
+            ]);
+            quotaMonitor.recordReads('oneShot', Math.max(1, jrSnap.size) + Math.max(1, invSnap.size));
+            state.pendingPlayers = jrSnap.docs.slice(0, MAX_PENDING_JOIN_REQUESTS).map((d) => ({ id: d.id, ...d.data() }));
+            state.inviteCodes = invSnap.docs
+              .map((d) => ({ code: d.id, ...d.data() }))
+              .sort((a, b) => Number((b as Record<string, unknown>).createdAtMs || 0) - Number((a as Record<string, unknown>).createdAtMs || 0));
+            onUpdate();
+          }
+          await this.refreshMatchesPage(state, false);
+          await this.refreshAdminRatings(state);
+        } catch (err) {
+          if (isQuotaExceededError(err)) quotaMonitor.markQuotaExceeded(true);
+        }
+      };
+
+      switch (tabId) {
+        case 'team': {
+          subMultiAttendanceAndPitch(true);
+          void loadOneShotPitchPayments();
+          void this.refreshMultiMembers(state);
+          break;
+        }
+        case 'fifa': {
+          void this.refreshReportsPage(state, false);
+          void this.refreshPeerRatingStats(state);
+          void this.refreshAttendance(state);
+          void this.refreshAdminRatings(state);
+          void this.refreshMyPrivateRecords(state);
+          break;
+        }
+        case 'live': {
+          void this.refreshReportsPage(state, false);
+          void loadOneShotMatchSessions();
+          break;
+        }
+        case 'tactics': {
+          this.tabUnsubs.push(
+            onSnapshot(
+              doc(db, 'teams', tid, 'tactics', 'current'),
+              (snap) => {
+                quotaMonitor.recordReads('tab', 1);
+                if (snap.exists()) {
+                  const d = snap.data();
+                  state.tactics = {
+                    formation: sanitizeFormation(d.formation),
+                    slots: (d.slots && typeof d.slots === 'object' ? d.slots : {}) as Record<string, string>,
+                    ...(d.publishedByUid ? { publishedByUid: String(d.publishedByUid) } : {}),
+                    ...(d.publishedByName ? { publishedByName: String(d.publishedByName) } : {}),
+                    ...(typeof d.publishedAtMs === 'number' ? { publishedAtMs: d.publishedAtMs } : {}),
+                    ...(d.previousSnapshot && typeof d.previousSnapshot === 'object'
+                      ? { previousSnapshot: d.previousSnapshot as TacticsSnapshotRecord }
+                      : { previousSnapshot: null }),
+                  };
+                  onUpdate();
+                }
+              },
+              handleErr(OperationType.GET, `teams/${tid}/tactics/current`)
+            )
+          );
+          this.tabUnsubs.push(
+            onSnapshot(
+              collection(db, 'teams', tid, 'lineupVotes'),
+              (snap) => {
+                quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+                const votes: Record<string, string> = {};
+                snap.docs.forEach((d) => {
+                  const data = d.data();
+                  if (data.vote === 'approve' || data.vote === 'swap') votes[d.id] = data.vote;
+                });
+                state.lineupVotes = votes;
+                onUpdate();
+              },
+              handleErr(OperationType.LIST, `teams/${tid}/lineupVotes`)
+            )
+          );
+          if (!state.players.length) void this.refreshMultiMembers(state);
+          break;
+        }
+        case 'ready': {
+          subMultiAttendanceAndPitch(false);
+          void loadOneShotPitchPayments();
+          void this.refreshMyPrivateRecords(state);
+          void this.refreshReportsPage(state, false);
+          break;
+        }
+        case 'stats': {
+          void this.refreshMatchesPage(state, false);
+          void this.refreshReportsPage(state, false);
+          void this.refreshAdminRatings(state);
+          void this.refreshPeerRatingStats(state);
+          break;
+        }
+        case 'injuries': {
+          void this.refreshMyPrivateRecords(state);
+          break;
+        }
+        case 'social': {
+          void loadOneShotSuggestionsAndMissions();
+          break;
+        }
+        case 'library': {
+          void this.refreshFootballLibrary(state);
+          break;
+        }
+        case 'admin': {
+          void loadOneShotAdminData();
+          void loadOneShotSuggestionsAndMissions();
+          break;
+        }
+        default:
+          break;
+      }
+
+      quotaMonitor.setActiveListeners(this.getActiveListenerCount());
+      return;
+    }
+
+    // ==================== SINGLE-TEAM LEGACY PER-TAB LISTENERS ====================
     const subReports = () => {
       this.tabUnsubs.push(
         onSnapshot(
@@ -1127,10 +2356,73 @@ class MaydanBackendService {
       );
     };
 
+    const subAttendance = () => {
+      this.tabUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID)),
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.attendance = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'attendance')
+        )
+      );
+    };
+
+    const subPlayerPhotosTeam = () => {
+      this.tabUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'playerPhotos'), where('teamId', '==', TEAM_ID)),
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            const nextMap: Record<string, { dataUrl: string; photoZoom: number; photoY: number }> = {
+              ...this.photosMap,
+            };
+            snap.docs.forEach((d) => {
+              const data = d.data();
+              nextMap[d.id] = {
+                dataUrl: sanitizeImageDataUrl(data.dataUrl, 250000),
+                photoZoom: Number(data.photoZoom || 105),
+                photoY: typeof data.photoY === 'number' ? data.photoY : 18,
+              };
+            });
+            this.photosMap = nextMap;
+            this.mergePhotosIntoPlayers(state);
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'playerPhotos')
+        )
+      );
+    };
+
+    const subPendingJoinRequests = () => {
+      if (!isCaptain) return;
+      this.tabUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'joinRequests'), where('status', '==', 'pending')),
+          (snap) => {
+            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
+            state.pendingPlayers = snap.docs
+              .slice(0, MAX_PENDING_JOIN_REQUESTS)
+              .map((d) => ({ id: d.id, ...d.data() }));
+            onUpdate();
+          },
+          handleErr(OperationType.LIST, 'joinRequests')
+        )
+      );
+    };
+
     switch (tabId) {
+      case 'team': {
+        subAttendance();
+        subPitchHub();
+        subPlayerPhotosTeam();
+        subPendingJoinRequests();
+        break;
+      }
       case 'fifa': {
         subReports();
-        // One-shot non-realtime fetch of aggregated peer stats, attendance commitment & captain ratings on screen open
         void this.refreshPeerRatingStats(state);
         void this.refreshAttendance(state);
         void this.refreshAdminRatings(state);
@@ -1152,6 +2444,12 @@ class MaydanBackendService {
                 state.tactics = {
                   formation: sanitizeFormation(d.formation),
                   slots: (d.slots && typeof d.slots === 'object' ? d.slots : {}) as Record<string, string>,
+                  ...(d.publishedByUid ? { publishedByUid: String(d.publishedByUid) } : {}),
+                  ...(d.publishedByName ? { publishedByName: String(d.publishedByName) } : {}),
+                  ...(typeof d.publishedAtMs === 'number' ? { publishedAtMs: d.publishedAtMs } : {}),
+                  ...(d.previousSnapshot && typeof d.previousSnapshot === 'object'
+                    ? { previousSnapshot: d.previousSnapshot as TacticsSnapshotRecord }
+                    : { previousSnapshot: null }),
                 };
                 onUpdate();
               }
@@ -1159,44 +2457,29 @@ class MaydanBackendService {
             handleErr(OperationType.GET, 'tactics/current')
           )
         );
-        // Load all player portraits only when opening Tactical Studio (for Poster & Mini Cards)
         this.tabUnsubs.push(
           onSnapshot(
-            query(collection(db, 'playerPhotos'), where('teamId', '==', TEAM_ID)),
+            query(collection(db, 'lineupVotes'), where('teamId', '==', TEAM_ID)),
             (snap) => {
               quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
-              const nextMap: Record<string, { dataUrl: string; photoZoom: number; photoY: number }> = {
-                ...this.photosMap,
-              };
+              const votes: Record<string, string> = {};
               snap.docs.forEach((d) => {
                 const data = d.data();
-                nextMap[d.id] = {
-                  dataUrl: sanitizeImageDataUrl(data.dataUrl, 250000),
-                  photoZoom: Number(data.photoZoom || 105),
-                  photoY: typeof data.photoY === 'number' ? data.photoY : 18,
-                };
+                if (data.vote === 'approve' || data.vote === 'swap') {
+                  votes[d.id] = data.vote;
+                }
               });
-              this.photosMap = nextMap;
-              this.mergePhotosIntoPlayers(state);
+              state.lineupVotes = votes;
               onUpdate();
             },
-            handleErr(OperationType.LIST, 'playerPhotos')
+            handleErr(OperationType.LIST, 'lineupVotes')
           )
         );
+        subPlayerPhotosTeam();
         break;
       }
       case 'ready': {
-        this.tabUnsubs.push(
-          onSnapshot(
-            query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID)),
-            (snap) => {
-              quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
-              state.attendance = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-              onUpdate();
-            },
-            handleErr(OperationType.LIST, 'attendance')
-          )
-        );
+        subAttendance();
         subReadiness();
         subReports();
         subPitchHub();
@@ -1206,7 +2489,6 @@ class MaydanBackendService {
         subMatches();
         subReports();
         subAdminRatings();
-        // One-shot non-realtime fetch of aggregated peer stats on screen open
         void this.refreshPeerRatingStats(state);
         break;
       }
@@ -1273,6 +2555,8 @@ class MaydanBackendService {
   ): Promise<Record<string, unknown> | void> {
     const uid = this.activeUid || auth.currentUser?.uid;
     if (!uid) throw new Error('يرجى تسجيل الدخول أولاً');
+    const isMulti = this.isMultiMode();
+    const tid = this.activeTeamId;
 
     switch (action) {
       case 'displayName': {
@@ -1282,23 +2566,73 @@ class MaydanBackendService {
           throw new Error(check.errorAr || 'أدخل الاسم الظاهر في الملعب (حرفان على الأقل)');
         }
         try {
-          await updateDoc(doc(db, 'players', playerId), {
-            name: check.name,
-            updatedAt: serverTimestamp(),
-          });
+          if (isMulti) {
+            await updateDoc(doc(db, 'teams', tid, 'members', playerId), {
+              name: check.name,
+              updatedAtMs: Date.now(),
+              updatedAt: serverTimestamp(),
+            });
+            await this.refreshMultiMembers();
+          } else {
+            await updateDoc(doc(db, 'players', playerId), {
+              name: check.name,
+              updatedAt: serverTimestamp(),
+            });
+          }
         } catch (err) {
-          this.handleWriteError(err, OperationType.UPDATE, `players/${playerId}`);
+          this.handleWriteError(err, OperationType.UPDATE, isMulti ? `teams/${tid}/members/${playerId}` : `players/${playerId}`);
         }
         return { name: check.name };
       }
 
       case 'profile': {
         const playerId = String(currentUser.id || uid);
-        const ref = doc(db, 'players', playerId);
         const nameCheck = sanitizePlayerDisplayName(payload.name ?? currentUser.name);
         const safeName = nameCheck.valid
           ? nameCheck.name
           : clampStr(currentUser.name, 80) || 'لاعب';
+
+        if (isMulti) {
+          const cleanPhoto = 'photo' in payload
+            ? sanitizeImageDataUrl(payload.photo, 250000)
+            : sanitizeImageDataUrl(currentUser.photo, 250000);
+          const updateData: Record<string, unknown> = {
+            name: safeName,
+            jersey: Math.round(clampNum(payload.jersey ?? currentUser.jersey, 0, 99, 10)),
+            age: Math.round(clampNum(payload.age ?? currentUser.age, 10, 70, 18)),
+            height: Math.round(clampNum(payload.height ?? currentUser.height, 100, 230, 175)),
+            weight: Math.round(clampNum(payload.weight ?? currentUser.weight, 30, 160, 70)),
+            foot: sanitizeFoot(payload.foot ?? currentUser.foot),
+            primaryPos: sanitizePrimaryPos(payload.primaryPos ?? currentUser.primaryPos),
+            secondaryPos: sanitizeSecondaryPos(payload.secondaryPos ?? currentUser.secondaryPos),
+            photo: cleanPhoto,
+            hasPhoto: Boolean(cleanPhoto),
+            photoZoom: Math.round(clampNum(payload.photoZoom ?? currentUser.photoZoom, 90, 160, 105)),
+            photoY: Math.round(clampNum(payload.photoY ?? currentUser.photoY, 0, 60, 18)),
+            top3Strengths: clampStr(payload.top3Strengths ?? currentUser.top3Strengths, 200),
+            weak3Points: clampStr(payload.weak3Points ?? currentUser.weak3Points, 200),
+            seasonGoal: clampStr(payload.seasonGoal ?? currentUser.seasonGoal, 200),
+            availableStatus: normalizePublicAvailableStatus(currentUser.availableStatus),
+            roleModelStarId: sanitizeStarId(payload.roleModelStarId ?? currentUser.roleModelStarId),
+            updatedAtMs: Date.now(),
+            updatedAt: serverTimestamp(),
+          };
+          if (payload.skills && typeof payload.skills === 'object') {
+            updateData.skills = sanitizeSkills(payload.skills as Record<string, unknown>, 10);
+          }
+          const cleanStats6 = sanitizeStats6(payload.stats6);
+          if (cleanStats6) updateData.stats6 = cleanStats6;
+          if ('roleOverride' in payload) updateData.roleOverride = sanitizeRoleOverride(payload.roleOverride);
+          try {
+            await updateDoc(doc(db, 'teams', tid, 'members', playerId), stripForbiddenHealthFields(updateData));
+            await this.refreshMultiMembers();
+          } catch (err) {
+            this.handleWriteError(err, OperationType.UPDATE, `teams/${tid}/members/${playerId}`);
+          }
+          return;
+        }
+
+        const ref = doc(db, 'players', playerId);
         const updateData: Record<string, unknown> = {
           name: safeName,
           jersey: Math.round(clampNum(payload.jersey ?? currentUser.jersey, 0, 99, 10)),
@@ -1359,6 +2693,22 @@ class MaydanBackendService {
         const cleanPhoto = sanitizeImageDataUrl(payload.photo, 250000);
         const zoom = Math.round(clampNum(payload.photoZoom ?? currentUser.photoZoom, 90, 160, 105));
         const y = Math.round(clampNum(payload.photoY ?? currentUser.photoY, 0, 60, 18));
+        if (isMulti) {
+          try {
+            await updateDoc(doc(db, 'teams', tid, 'members', playerId), {
+              photo: cleanPhoto,
+              hasPhoto: Boolean(cleanPhoto),
+              photoZoom: zoom,
+              photoY: y,
+              updatedAtMs: Date.now(),
+              updatedAt: serverTimestamp(),
+            });
+            await this.refreshMultiMembers();
+          } catch (err) {
+            this.handleWriteError(err, OperationType.UPDATE, `teams/${tid}/members/${playerId}`);
+          }
+          return;
+        }
         const batch = writeBatch(db);
         batch.set(doc(db, 'playerPhotos', playerId), {
           teamId: TEAM_ID,
@@ -1387,12 +2737,21 @@ class MaydanBackendService {
         const playerId = String(currentUser.id || uid);
         const roleModelStarId = sanitizeStarId(payload.roleModelStarId);
         try {
-          await updateDoc(doc(db, 'players', playerId), {
-            roleModelStarId,
-            updatedAt: serverTimestamp(),
-          });
+          if (isMulti) {
+            await updateDoc(doc(db, 'teams', tid, 'members', playerId), {
+              roleModelStarId,
+              updatedAtMs: Date.now(),
+              updatedAt: serverTimestamp(),
+            });
+            await this.refreshMultiMembers();
+          } else {
+            await updateDoc(doc(db, 'players', playerId), {
+              roleModelStarId,
+              updatedAt: serverTimestamp(),
+            });
+          }
         } catch (err) {
-          handleFirestoreError(err, OperationType.UPDATE, `players/${playerId}`);
+          handleFirestoreError(err, OperationType.UPDATE, isMulti ? `teams/${tid}/members/${playerId}` : `players/${playerId}`);
         }
         return;
       }
@@ -1402,6 +2761,56 @@ class MaydanBackendService {
           throw new Error('إضافة لاعب للقائمة متاحة للكابتن فقط');
         }
         const id = String(payload.id || makeId('p')).replace(/[^a-zA-Z0-9_-]/g, '');
+        if (isMulti) {
+          const teamMeta = (this.activeState?.settings || {}) as Record<string, unknown>;
+          const maxM = Math.max(6, Math.min(100, Number(teamMeta.maxMembersPerTeam || DEFAULT_MAX_MEMBERS_PER_TEAM)));
+          const curM = Math.max(this.activeState?.players?.length || 0, Number(teamMeta.memberCount || 0));
+          if (curM >= maxM) {
+            throw new Error(`اكتمل عدد أعضاء الفريق حالياً (الحد الأقصى ${maxM} لاعباً).`);
+          }
+          const batch = writeBatch(db);
+          batch.set(doc(db, 'teams', tid, 'members', id), {
+            id,
+            uid: id,
+            ownerUid: '',
+            teamId: tid,
+            name: clampStr(payload.name, 80) || 'لاعب',
+            role: 'member',
+            isOrganizer: false,
+            jersey: Math.round(clampNum(payload.jersey, 0, 99, 7)),
+            age: Math.round(clampNum(payload.age, 10, 70, 18)),
+            height: 175,
+            weight: 70,
+            foot: sanitizeFoot(payload.foot),
+            primaryPos: sanitizePrimaryPos(payload.primaryPos),
+            secondaryPos: 'لا يوجد',
+            photo: '',
+            hasPhoto: false,
+            photoZoom: 105,
+            photoY: 18,
+            skills: sanitizeSkills(payload.skills as Record<string, unknown> | undefined, 10),
+            top3Strengths: '',
+            weak3Points: '',
+            seasonGoal: '',
+            availableStatus: 'متاح',
+            roleModelStarId: '',
+            joinedAtMs: Date.now(),
+            updatedAtMs: Date.now(),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          batch.update(doc(db, 'teams', tid), {
+            memberCount: increment(1),
+            updatedAt: serverTimestamp(),
+          });
+          try {
+            await batch.commit();
+            await this.refreshMultiMembers();
+          } catch (err) {
+            this.handleWriteError(err, OperationType.CREATE, `teams/${tid}/members/${id}`);
+          }
+          return;
+        }
         try {
           await setDoc(doc(db, 'players', id), {
             id,
@@ -1443,6 +2852,78 @@ class MaydanBackendService {
         const cleanStats6 = sanitizeStats6(payload.stats6);
         const cleanRoleOverride = sanitizeRoleOverride(payload.roleOverride);
         const cleanReferredBy = sanitizeReferralCode(payload.referredBy);
+
+        if (isMulti) {
+          const teamMeta = (this.activeState?.settings || {}) as Record<string, unknown>;
+          const maxM = Math.max(6, Math.min(100, Number(teamMeta.maxMembersPerTeam || DEFAULT_MAX_MEMBERS_PER_TEAM)));
+          const curM = Math.max(this.activeState?.players?.length || 0, Number(teamMeta.memberCount || 0));
+          if (curM >= maxM) {
+            throw new Error(`اكتمل عدد أعضاء الفريق حالياً (الحد الأقصى ${maxM} لاعباً).`);
+          }
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'teams', tid, 'joinRequests', applicantUid), {
+            status: 'approved',
+            updatedAt: serverTimestamp(),
+          });
+          const newMemberDoc: Record<string, unknown> = {
+            id: applicantUid,
+            uid: applicantUid,
+            ownerUid: applicantUid,
+            teamId: tid,
+            name: clampStr(payload.name, 80) || 'لاعب',
+            role: 'member',
+            isOrganizer: false,
+            jersey: Math.round(clampNum(payload.jersey, 1, 99, 7)),
+            age: 18,
+            height: 175,
+            weight: 70,
+            foot: 'يمين',
+            primaryPos: sanitizePrimaryPos(payload.primaryPos),
+            secondaryPos: 'لا يوجد',
+            photo: '',
+            hasPhoto: false,
+            photoZoom: 105,
+            photoY: 18,
+            skills: cleanStats6
+              ? stats6ToLegacySkills(cleanStats6)
+              : sanitizeSkills({
+                  speed: 7,
+                  shooting: 6,
+                  passing: 7,
+                  dribbling: 6,
+                  defending: 6,
+                  stamina: 7,
+                  vision: 6,
+                  teamwork: 7,
+                  control: 7,
+                  positioning: 6,
+                }),
+            top3Strengths: '',
+            weak3Points: '',
+            seasonGoal: '',
+            availableStatus: 'متاح',
+            roleModelStarId: '',
+            joinedAtMs: Date.now(),
+            updatedAtMs: Date.now(),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          };
+          if (cleanStats6) newMemberDoc.stats6 = cleanStats6;
+          if (cleanRoleOverride) newMemberDoc.roleOverride = cleanRoleOverride;
+          batch.set(doc(db, 'teams', tid, 'members', applicantUid), newMemberDoc);
+          batch.update(doc(db, 'teams', tid), {
+            memberCount: increment(1),
+            updatedAt: serverTimestamp(),
+          });
+          try {
+            await batch.commit();
+            await this.refreshMultiMembers();
+          } catch (err) {
+            handleFirestoreError(err, OperationType.WRITE, `teams/${tid}/joinRequests/${applicantUid}`);
+          }
+          return;
+        }
+
         const batch = writeBatch(db);
         batch.update(doc(db, 'joinRequests', applicantUid), {
           status: 'approved',
@@ -1505,36 +2986,85 @@ class MaydanBackendService {
         const applicantUid = String(payload.id || payload.uid || '');
         if (!applicantUid) return;
         try {
-          await updateDoc(doc(db, 'joinRequests', applicantUid), {
-            status: 'rejected',
-            updatedAt: serverTimestamp(),
-          });
+          if (isMulti) {
+            await updateDoc(doc(db, 'teams', tid, 'joinRequests', applicantUid), {
+              status: 'rejected',
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            await updateDoc(doc(db, 'joinRequests', applicantUid), {
+              status: 'rejected',
+              updatedAt: serverTimestamp(),
+            });
+          }
         } catch (err) {
-          this.handleWriteError(err, OperationType.UPDATE, `joinRequests/${applicantUid}`);
+          this.handleWriteError(err, OperationType.UPDATE, isMulti ? `teams/${tid}/joinRequests/${applicantUid}` : `joinRequests/${applicantUid}`);
         }
         return;
       }
 
       case 'attendance': {
-        const id = makeId('att');
+        const playerId = String(currentUser.id || uid).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100) || uid;
+        const dateStr = sanitizeDateStr(payload.date);
+        const typeStr = clampStr(payload.type || 'مباراة', 40) || 'مباراة';
+        const status = normalizeAttendanceStatus(payload.status);
+        const cleanPlayerName = clampStr(payload.playerName || currentUser.name, 80) || 'لاعب';
+
+        if (isMulti) {
+          const matchKey = buildAttendanceMatchKey(dateStr, typeStr);
+          const attDocRef = doc(db, 'teams', tid, 'attendance', matchKey);
+          try {
+            await runTransaction(db, async (tx) => {
+              const snap = await tx.get(attDocRef);
+              const prevData = snap.exists() ? snap.data() : {};
+              const prevResponses =
+                prevData.responses && typeof prevData.responses === 'object'
+                  ? { ...(prevData.responses as Record<string, unknown>) }
+                  : {};
+              prevResponses[playerId] = {
+                uid: playerId,
+                playerName: cleanPlayerName,
+                status,
+                updatedAtMs: Date.now(),
+              };
+              tx.set(attDocRef, {
+                matchKey,
+                teamId: tid,
+                date: dateStr,
+                type: typeStr,
+                responses: prevResponses,
+                updatedAtMs: Date.now(),
+                updatedAt: serverTimestamp(),
+              });
+            });
+          } catch (err) {
+            this.handleWriteError(err, OperationType.WRITE, `teams/${tid}/attendance/${matchKey}`);
+          }
+          return;
+        }
+
+        const id = `${dateStr}__${playerId}`;
+        const attRef = doc(db, 'attendance', id);
         try {
-          await setDoc(doc(db, 'attendance', id), {
-            teamId: TEAM_ID,
-            playerId: String(currentUser.id || uid),
-            ownerUid: uid,
-            playerName: clampStr(payload.playerName || currentUser.name, 80) || 'لاعب',
-            date: sanitizeDateStr(payload.date),
-            type: clampStr(payload.type || 'مباراة', 40) || 'مباراة',
-            status:
-              payload.status === 'ما فيني'
-                ? 'ما فيني'
-                : payload.status === 'متردد'
-                  ? 'متردد'
-                  : 'جاي',
-            createdAt: serverTimestamp(),
+          await runTransaction(db, async (tx) => {
+            const snap = await tx.get(attRef);
+            const createdAtVal = snap.exists() && snap.data().createdAt
+              ? snap.data().createdAt
+              : serverTimestamp();
+            tx.set(attRef, {
+              teamId: TEAM_ID,
+              playerId,
+              ownerUid: uid,
+              playerName: cleanPlayerName,
+              date: dateStr,
+              type: typeStr,
+              status,
+              createdAt: createdAtVal,
+              updatedAt: serverTimestamp(),
+            });
           });
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `attendance/${id}`);
+          this.handleWriteError(err, OperationType.WRITE, `attendance/${id}`);
         }
         return;
       }
@@ -1542,24 +3072,71 @@ class MaydanBackendService {
       case 'readiness': {
         const id = makeId('rd');
         try {
-          await setDoc(doc(db, 'readiness', id), {
-            teamId: TEAM_ID,
-            playerId: String(currentUser.id || uid),
-            ownerUid: uid,
-            date: sanitizeDateStr(payload.date),
-            sleep: Math.round(clampNum(payload.sleep, 1, 10, 8)),
-            fatigue: Math.round(clampNum(payload.fatigue, 1, 10, 8)),
-            mood: Math.round(clampNum(payload.mood, 1, 10, 8)),
-            createdAt: serverTimestamp(),
-          });
+          if (isMulti) {
+            await setDoc(doc(db, 'teams', tid, 'members', uid, 'private', id), {
+              kind: 'readiness',
+              uid,
+              teamId: tid,
+              date: sanitizeDateStr(payload.date),
+              sleep: Math.round(clampNum(payload.sleep, 1, 10, 8)),
+              fatigue: Math.round(clampNum(payload.fatigue, 1, 10, 8)),
+              mood: Math.round(clampNum(payload.mood, 1, 10, 8)),
+              updatedAtMs: Date.now(),
+              createdAt: serverTimestamp(),
+            });
+            await this.refreshMyPrivateRecords();
+          } else {
+            await setDoc(doc(db, 'readiness', id), {
+              teamId: TEAM_ID,
+              playerId: String(currentUser.id || uid),
+              ownerUid: uid,
+              date: sanitizeDateStr(payload.date),
+              sleep: Math.round(clampNum(payload.sleep, 1, 10, 8)),
+              fatigue: Math.round(clampNum(payload.fatigue, 1, 10, 8)),
+              mood: Math.round(clampNum(payload.mood, 1, 10, 8)),
+              createdAt: serverTimestamp(),
+            });
+          }
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `readiness/${id}`);
+          handleFirestoreError(err, OperationType.CREATE, isMulti ? `teams/${tid}/members/${uid}/private/${id}` : `readiness/${id}`);
         }
         return;
       }
 
       case 'injury': {
         const id = makeId('inj');
+        const severity =
+          payload.severity === 'متوسطة' || payload.severity === 'شديدة'
+            ? payload.severity
+            : 'خفيفة';
+        if (isMulti) {
+          const batch = writeBatch(db);
+          batch.set(doc(db, 'teams', tid, 'members', uid, 'private', id), {
+            kind: 'injury',
+            uid,
+            teamId: tid,
+            type: clampStr(payload.type, 80) || 'التواء الكاحل',
+            location: clampStr(payload.location, 100) || 'القدم',
+            severity,
+            date: sanitizeDateStr(payload.date),
+            expectedReturn: sanitizeDateStr(payload.expectedReturn),
+            updatedAtMs: Date.now(),
+            createdAt: serverTimestamp(),
+          });
+          batch.update(doc(db, 'teams', tid, 'members', String(currentUser.id || uid)), {
+            availableStatus: 'غير متاح',
+            updatedAtMs: Date.now(),
+            updatedAt: serverTimestamp(),
+          });
+          try {
+            await batch.commit();
+            await this.refreshMyPrivateRecords();
+            await this.refreshMultiMembers();
+          } catch (err) {
+            handleFirestoreError(err, OperationType.CREATE, `teams/${tid}/members/${uid}/private/${id}`);
+          }
+          return;
+        }
         const batch = writeBatch(db);
         batch.set(doc(db, 'injuries', id), {
           teamId: TEAM_ID,
@@ -1567,15 +3144,11 @@ class MaydanBackendService {
           ownerUid: uid,
           type: clampStr(payload.type, 80) || 'التواء الكاحل',
           location: clampStr(payload.location, 100) || 'القدم',
-          severity:
-            payload.severity === 'متوسطة' || payload.severity === 'شديدة'
-              ? payload.severity
-              : 'خفيفة',
+          severity,
           date: sanitizeDateStr(payload.date),
           expectedReturn: sanitizeDateStr(payload.expectedReturn),
           createdAt: serverTimestamp(),
         });
-        // Update public availability status without leaking medical reason
         batch.update(doc(db, 'players', String(currentUser.id || uid)), {
           availableStatus: 'unavailable',
           updatedAt: serverTimestamp(),
@@ -1591,26 +3164,36 @@ class MaydanBackendService {
       case 'recoverAvailable': {
         const playerId = String(currentUser.id || uid);
         try {
-          await updateDoc(doc(db, 'players', playerId), {
-            availableStatus: 'available',
-            updatedAt: serverTimestamp(),
-          });
+          if (isMulti) {
+            await updateDoc(doc(db, 'teams', tid, 'members', playerId), {
+              availableStatus: 'متاح',
+              updatedAtMs: Date.now(),
+              updatedAt: serverTimestamp(),
+            });
+            await this.refreshMultiMembers();
+          } else {
+            await updateDoc(doc(db, 'players', playerId), {
+              availableStatus: 'available',
+              updatedAt: serverTimestamp(),
+            });
+          }
         } catch (err) {
-          this.handleWriteError(err, OperationType.UPDATE, `players/${playerId}`);
+          this.handleWriteError(err, OperationType.UPDATE, isMulti ? `teams/${tid}/members/${playerId}` : `players/${playerId}`);
         }
         return;
       }
 
       case 'match': {
-        if (!this.activeIsCaptain) {
-          throw new Error('تسجيل نتيجة المباراة الرسمية متاح للكابتن فقط');
+        if (!this.isTeamOrganizer(uid)) {
+          throw new Error('تسجيل نتيجة المباراة الرسمية متاح لمؤسس الفريق والمنظّمين فقط');
         }
         const id = String(payload.id || makeId('m')).replace(/[^a-zA-Z0-9_-]/g, '');
         const ourScore = Math.round(clampNum(payload.ourScore, 0, 99, 0));
         const oppScore = Math.round(clampNum(payload.oppScore, 0, 99, 0));
+        const matchRef = isMulti ? doc(db, 'teams', tid, 'matches', id) : doc(db, 'matches', id);
         try {
-          await setDoc(doc(db, 'matches', id), {
-            teamId: TEAM_ID,
+          await setDoc(matchRef, {
+            teamId: tid,
             date: sanitizeDateStr(payload.date),
             opponent: clampStr(payload.opponent, 80) || 'خصم',
             ourScore,
@@ -1619,40 +3202,145 @@ class MaydanBackendService {
             createdBy: uid,
             createdAt: serverTimestamp(),
           });
+          if (isMulti) await this.refreshMatchesPage(undefined, false);
         } catch (err) {
-          this.handleWriteError(err, OperationType.CREATE, `matches/${id}`);
+          this.handleWriteError(err, OperationType.CREATE, isMulti ? `teams/${tid}/matches/${id}` : `matches/${id}`);
         }
         return;
       }
 
       case 'report': {
         const id = makeId('rep');
-        const reportDoc: Record<string, unknown> = {
-          teamId: TEAM_ID,
-          playerId: String(currentUser.id || uid),
-          ownerUid: uid,
-          opponent: clampStr(payload.opponent, 80) || 'خصم',
-          goals: Math.round(clampNum(payload.goals, 0, 30, 0)),
-          assists: Math.round(clampNum(payload.assists, 0, 30, 0)),
-          minutes: Math.round(clampNum(payload.minutes, 1, 180, 50)),
-          interceptions: Math.round(clampNum(payload.interceptions, 0, 60, 0)),
-          turnovers: Math.round(clampNum(payload.turnovers, 0, 60, 0)),
-          rating: Math.round(clampNum(payload.rating, 1, 10, 8)),
-          rpe: Math.round(clampNum(payload.rpe, 1, 10, 7)),
-          bestMoment: clampStr(payload.bestMoment, 200),
-          worstMoment: clampStr(payload.worstMoment, 200),
-          motmVote: clampStr(payload.motmVote, 128),
-          pitchMode: sanitizePitchMode(payload.pitchMode),
-          matchResult: sanitizeMatchResult(payload.matchResult),
-          goalsConceded: Math.round(clampNum(payload.goalsConceded, 0, 30, 0)),
-          createdAt: serverTimestamp(),
-        };
+        const nowMs = Date.now();
+        const playerId = String(currentUser.id || uid).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128) || uid;
+        const playerName = clampStr(payload.playerName || currentUser.name, 80) || 'لاعب';
+        const opponent = clampStr(payload.opponent, 80) || 'خصم';
+        const goalsNum = Number(payload.goals ?? 0);
+        const assistsNum = Number(payload.assists ?? 0);
+        const minutesNum = Number(payload.minutes ?? 50);
+
+        const initialCheck = evaluateReportSubmissionGuard({
+          goals: goalsNum,
+          assists: assistsNum,
+          minutes: minutesNum,
+          goalsConceded: payload.goalsConceded,
+          nowMs,
+        });
+        if (!initialCheck.allowed) {
+          throw new Error(initialCheck.errorAr || 'بيانات التقرير غير صالحة');
+        }
+
+        const throttleRef = isMulti ? doc(db, 'teams', tid, 'reportThrottle', uid) : doc(db, 'reportThrottle', uid);
+        const reportRef = isMulti ? doc(db, 'teams', tid, 'reports', id) : doc(db, 'reports', id);
         const sid = String(payload.matchSessionId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
-        if (sid) reportDoc.matchSessionId = sid;
+
         try {
-          await setDoc(doc(db, 'reports', id), reportDoc);
+          await runTransaction(db, async (tx) => {
+            const thSnap = await tx.get(throttleRef);
+            let lastMs = 0;
+            if (thSnap.exists()) {
+              const d = thSnap.data();
+              const tsMillis =
+                d.updatedAt && typeof d.updatedAt.toMillis === 'function'
+                  ? Number(d.updatedAt.toMillis())
+                  : Number(d.lastReportAtMs || 0);
+              lastMs = Math.max(tsMillis, Number(d.lastReportAtMs || 0));
+            }
+            const txCheck = evaluateReportSubmissionGuard({
+              goals: goalsNum,
+              assists: assistsNum,
+              minutes: minutesNum,
+              goalsConceded: payload.goalsConceded,
+              lastReportAtMs: lastMs,
+              nowMs,
+            });
+            if (!txCheck.allowed) {
+              throw new Error(
+                txCheck.errorAr ||
+                  `حماية نقاط الخبرة: انتظر ${Math.ceil(REPORT_COOLDOWN_MS / 60000)} دقيقة بين التقارير.`
+              );
+            }
+
+            const reportDoc: Record<string, unknown> = {
+              teamId: tid,
+              playerId,
+              ownerUid: uid,
+              playerName,
+              opponent,
+              goals: Math.min(MAX_GOALS_PER_MATCH, txCheck.sanitized.goals),
+              assists: Math.min(MAX_ASSISTS_PER_MATCH, txCheck.sanitized.assists),
+              minutes: txCheck.sanitized.minutes,
+              interceptions: Math.round(clampNum(payload.interceptions, 0, 60, 0)),
+              turnovers: Math.round(clampNum(payload.turnovers, 0, 60, 0)),
+              rating: Math.round(clampNum(payload.rating, 1, 10, 8)),
+              rpe: Math.round(clampNum(payload.rpe, 1, 10, 7)),
+              bestMoment: clampStr(payload.bestMoment, 200),
+              worstMoment: clampStr(payload.worstMoment, 200),
+              motmVote: clampStr(payload.motmVote, 128),
+              pitchMode: sanitizePitchMode(payload.pitchMode),
+              matchResult: sanitizeMatchResult(payload.matchResult),
+              goalsConceded: Math.min(MAX_CONCEDED_PER_MATCH, txCheck.sanitized.goalsConceded),
+              confirmedByUids: [],
+              verified: false,
+              createdAtMs: nowMs,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+            if (sid) reportDoc.matchSessionId = sid;
+
+            tx.set(throttleRef, {
+              uid,
+              teamId: tid,
+              lastReportAtMs: nowMs,
+              updatedAt: serverTimestamp(),
+            });
+            tx.set(reportRef, reportDoc);
+          });
+          if (isMulti) await this.refreshReportsPage(undefined, false);
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `reports/${id}`);
+          if (err instanceof Error && !err.message.includes('Missing or insufficient permissions')) {
+            throw err;
+          }
+          this.handleWriteError(err, OperationType.CREATE, isMulti ? `teams/${tid}/reports/${id}` : `reports/${id}`);
+        }
+        return;
+      }
+
+      case 'confirmReport': {
+        const reportId = String(payload.reportId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+        if (!reportId) throw new Error('معرّف التقرير غير صالح');
+        const repRef = isMulti ? doc(db, 'teams', tid, 'reports', reportId) : doc(db, 'reports', reportId);
+        try {
+          await runTransaction(db, async (tx) => {
+            const snap = await tx.get(repRef);
+            if (!snap.exists()) {
+              throw new Error('لم يتم العثور على التقرير');
+            }
+            const data = snap.data();
+            const check = applyReportConfirmation(
+              {
+                ownerUid: String(data.ownerUid || ''),
+                playerId: String(data.playerId || ''),
+                confirmedByUids: Array.isArray(data.confirmedByUids) ? (data.confirmedByUids as string[]) : [],
+              },
+              uid
+            );
+            if (!check.ok) {
+              throw new Error(check.errorAr || 'لا يمكنك توثيق هذا التقرير');
+            }
+            if (check.alreadyConfirmed) return;
+            tx.update(repRef, {
+              confirmedByUids: check.confirmedByUids,
+              verified: true,
+              updatedAt: serverTimestamp(),
+            });
+          });
+          if (isMulti) await this.refreshReportsPage(undefined, false);
+        } catch (err) {
+          if (err instanceof Error && !err.message.includes('Missing or insufficient permissions')) {
+            throw err;
+          }
+          this.handleWriteError(err, OperationType.UPDATE, isMulti ? `teams/${tid}/reports/${reportId}` : `reports/${reportId}`);
         }
         return;
       }
@@ -1665,14 +3353,14 @@ class MaydanBackendService {
           throw new Error('لا يمكنك تقييم نفسك');
         }
         const ballotId = `${targetId}__${uid}`;
-        const ballotRef = doc(db, 'peerRatings', ballotId);
-        const statRef = doc(db, 'peerRatingStats', targetId);
+        const ballotRef = isMulti ? doc(db, 'teams', tid, 'peerRatings', ballotId) : doc(db, 'peerRatings', ballotId);
+        const statRef = isMulti ? doc(db, 'teams', tid, 'peerRatingStats', targetId) : doc(db, 'peerRatingStats', targetId);
 
         let existingBallot;
         try {
           existingBallot = await getDoc(ballotRef);
         } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `peerRatings/${ballotId}`);
+          handleFirestoreError(err, OperationType.GET, isMulti ? `teams/${tid}/peerRatings/${ballotId}` : `peerRatings/${ballotId}`);
         }
 
         const batch = writeBatch(db);
@@ -1687,7 +3375,7 @@ class MaydanBackendService {
           batch.set(
             statRef,
             {
-              teamId: TEAM_ID,
+              teamId: tid,
               targetId,
               count: increment(1),
               totalScore: increment(score),
@@ -1711,27 +3399,29 @@ class MaydanBackendService {
         try {
           await batch.commit();
         } catch (err) {
-          this.handleWriteError(err, OperationType.WRITE, `peerRatings/${ballotId}`);
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/peerRatings/${ballotId}` : `peerRatings/${ballotId}`);
         }
         return;
       }
 
       case 'adminRating': {
         if (!this.activeIsCaptain) {
-          throw new Error('تقييم الكابتن الرسمي متاح للكابتن فقط');
+          throw new Error('تقييم الكابتن الرسمي متاح لمؤسس الفريق فقط');
         }
         const targetId = String(payload.targetId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
         const score = Math.round(clampNum(payload.score, 1, 10, 7));
         if (!targetId) throw new Error('اختر لاعباً لتسجيل تقييم الكابتن');
+        const arRef = isMulti ? doc(db, 'teams', tid, 'adminRatings', targetId) : doc(db, 'adminRatings', targetId);
         try {
-          await setDoc(doc(db, 'adminRatings', targetId), {
-            teamId: TEAM_ID,
+          await setDoc(arRef, {
+            teamId: tid,
             targetId,
             score,
             updatedAt: serverTimestamp(),
           });
+          if (isMulti) await this.refreshAdminRatings();
         } catch (err) {
-          this.handleWriteError(err, OperationType.WRITE, `adminRatings/${targetId}`);
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/adminRatings/${targetId}` : `adminRatings/${targetId}`);
         }
         return;
       }
@@ -1740,21 +3430,38 @@ class MaydanBackendService {
         const text = clampStr(payload.text, 500);
         if (!text) return;
         const id = makeId('sugg');
+        const suggRef = isMulti ? doc(db, 'teams', tid, 'suggestions', id) : doc(db, 'suggestions', id);
         try {
-          await setDoc(doc(db, 'suggestions', id), {
-            teamId: TEAM_ID,
+          await setDoc(suggRef, {
+            teamId: tid,
             text,
             createdAt: serverTimestamp(),
           });
+          if (isMulti && this.activeState) {
+            this.activeState.suggestions.unshift({ id, teamId: tid, text, createdAtMs: Date.now() });
+            if (this.activeOnUpdate) this.activeOnUpdate();
+          }
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, `suggestions/${id}`);
+          handleFirestoreError(err, OperationType.CREATE, isMulti ? `teams/${tid}/suggestions/${id}` : `suggestions/${id}`);
         }
         return;
       }
 
       case 'tactics': {
-        if (!this.activeIsCaptain) {
-          throw new Error('حفظ التشكيلة الرسمية متاح للكابتن فقط');
+        const curSettings = (this.activeState?.settings || {}) as Record<string, unknown>;
+        const orgUids = Array.isArray(curSettings.organizerUids)
+          ? (curSettings.organizerUids as string[])
+          : [];
+        const lineupPerm =
+          curSettings.lineupPublishMode === 'organizers' || curSettings.lineupPermission === 'organizers'
+            ? 'organizers'
+            : 'all';
+        const canPublish =
+          this.activeIsCaptain ||
+          lineupPerm === 'all' ||
+          orgUids.includes(uid);
+        if (!canPublish) {
+          throw new Error('نشر التشكيلة الرسمية مقتصر حالياً على منشئ الفريق ومنظّمي التشكيلة');
         }
         const rawSlots = (payload.slots && typeof payload.slots === 'object'
           ? payload.slots
@@ -1767,34 +3474,393 @@ class MaydanBackendService {
               .slice(0, 128);
           }
         }
+        const nextFormation = sanitizeFormation(payload.formation);
+        const pubByName = clampStr(payload.publishedByName || currentUser.name || 'لاعب', 80) || 'لاعب';
+        const pubAtMs = Date.now();
+        const tacticsRef = isMulti ? doc(db, 'teams', tid, 'tactics', 'current') : doc(db, 'tactics', 'current');
         try {
-          await setDoc(doc(db, 'tactics', 'current'), {
-            teamId: TEAM_ID,
-            formation: sanitizeFormation(payload.formation),
-            slots,
+          await runTransaction(db, async (tx) => {
+            const snap = await tx.get(tacticsRef);
+            let prevSnapshot: TacticsSnapshotRecord | null = null;
+            if (snap.exists()) {
+              const cur = snap.data();
+              prevSnapshot = {
+                formation: sanitizeFormation(cur.formation),
+                slots: (cur.slots && typeof cur.slots === 'object' ? cur.slots : {}) as Record<string, string>,
+                ...(cur.publishedByUid ? { publishedByUid: String(cur.publishedByUid) } : {}),
+                ...(cur.publishedByName ? { publishedByName: String(cur.publishedByName) } : {}),
+                ...(typeof cur.publishedAtMs === 'number' ? { publishedAtMs: cur.publishedAtMs } : {}),
+              };
+            }
+            tx.set(tacticsRef, {
+              teamId: tid,
+              formation: nextFormation,
+              slots,
+              publishedByUid: uid,
+              publishedByName: pubByName,
+              publishedAtMs: pubAtMs,
+              ...(prevSnapshot ? { previousSnapshot: prevSnapshot } : {}),
+              updatedAt: serverTimestamp(),
+            });
+          });
+        } catch (err) {
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/tactics/current` : 'tactics/current');
+        }
+        return;
+      }
+
+      case 'undoTactics': {
+        const curSettings = (this.activeState?.settings || {}) as Record<string, unknown>;
+        const orgUids = Array.isArray(curSettings.organizerUids)
+          ? (curSettings.organizerUids as string[])
+          : [];
+        const lineupPerm =
+          curSettings.lineupPublishMode === 'organizers' || curSettings.lineupPermission === 'organizers'
+            ? 'organizers'
+            : 'all';
+        const canPublish =
+          this.activeIsCaptain ||
+          lineupPerm === 'all' ||
+          orgUids.includes(uid);
+        if (!canPublish) {
+          throw new Error('التراجع عن نشر التشكيلة متاح لمنشئ الفريق والمنظّمين فقط');
+        }
+        const tacticsRef = isMulti ? doc(db, 'teams', tid, 'tactics', 'current') : doc(db, 'tactics', 'current');
+        try {
+          let restored: TacticsSnapshotRecord | null = null;
+          await runTransaction(db, async (tx) => {
+            const snap = await tx.get(tacticsRef);
+            if (!snap.exists()) throw new Error('لا توجد تشكيلة سابقة للتراجع إليها');
+            const prev = snap.data().previousSnapshot as TacticsSnapshotRecord | undefined;
+            if (!prev || typeof prev !== 'object') {
+              throw new Error('لا توجد نسخة سابقة محفوظة للتراجع');
+            }
+            restored = {
+              formation: sanitizeFormation(prev.formation),
+              slots: (prev.slots && typeof prev.slots === 'object' ? prev.slots : {}) as Record<string, string>,
+              ...(prev.publishedByUid ? { publishedByUid: String(prev.publishedByUid) } : {}),
+              ...(prev.publishedByName ? { publishedByName: String(prev.publishedByName) } : {}),
+              ...(typeof prev.publishedAtMs === 'number' ? { publishedAtMs: prev.publishedAtMs } : {}),
+            };
+            tx.set(tacticsRef, {
+              teamId: tid,
+              ...restored,
+              previousSnapshot: null,
+              updatedAt: serverTimestamp(),
+            });
+          });
+          return restored ? { tactics: restored } : undefined;
+        } catch (err) {
+          if (err instanceof Error && !err.message.includes('Missing or insufficient permissions')) {
+            throw err;
+          }
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/tactics/current` : 'tactics/current');
+        }
+        return;
+      }
+
+      case 'voteLineup': {
+        const vote = payload.vote === 'swap' ? 'swap' : 'approve';
+        const voteRef = isMulti ? doc(db, 'teams', tid, 'lineupVotes', uid) : doc(db, 'lineupVotes', uid);
+        try {
+          await setDoc(voteRef, {
+            teamId: tid,
+            uid,
+            vote,
             updatedAt: serverTimestamp(),
           });
         } catch (err) {
-          this.handleWriteError(err, OperationType.WRITE, 'tactics/current');
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/lineupVotes/${uid}` : `lineupVotes/${uid}`);
+        }
+        return;
+      }
+
+      case 'leaveTeam': {
+        if (this.activeIsCaptain) {
+          throw new Error('منشئ الفريق لا يمكنه المغادرة مباشرة — انقل القيادة لعضو آخر أولاً أو استخدم حذف الفريق.');
+        }
+        if (isMulti) {
+          const remainingIds = this.activeTeams.map((t) => t.id).filter((id) => id !== tid);
+          const batch = writeBatch(db);
+          batch.delete(doc(db, 'teams', tid, 'members', uid));
+          batch.delete(doc(db, 'teams', tid, 'joinRequests', uid));
+          batch.update(doc(db, 'teams', tid), {
+            memberCount: increment(-1),
+            organizerUids: arrayRemove(uid),
+            updatedAt: serverTimestamp(),
+          });
+          batch.set(
+            doc(db, 'users', uid),
+            {
+              uid,
+              teamIds: arrayRemove(tid),
+              activeTeamId: remainingIds[0] || '',
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+          try {
+            await batch.commit();
+            this.activeTeams = this.activeTeams.filter((t) => t.id !== tid);
+          } catch (err) {
+            this.handleWriteError(err, OperationType.DELETE, `teams/${tid}/members/${uid}`);
+          }
+          return;
+        }
+        const batch = writeBatch(db);
+        batch.delete(doc(db, 'players', uid));
+        batch.delete(doc(db, 'playerPhotos', uid));
+        batch.delete(doc(db, 'joinRequests', uid));
+        try {
+          await batch.commit();
+        } catch (err) {
+          this.handleWriteError(err, OperationType.DELETE, `players/${uid}`);
         }
         return;
       }
 
       case 'settings': {
-        if (!this.activeIsCaptain) {
-          throw new Error('تعديل إعدادات وهوية الفريق متاح للكابتن فقط');
+        const curSettings = (this.activeState?.settings || {}) as Record<string, unknown>;
+        const orgUids = Array.isArray(curSettings.organizerUids)
+          ? (curSettings.organizerUids as string[])
+          : [];
+        const isDesignatedOrganizer = !this.activeIsCaptain && orgUids.includes(uid);
+
+        if (!this.activeIsCaptain && !isDesignatedOrganizer) {
+          throw new Error('تعديل إعدادات وهوية الفريق متاح لمؤسس الفريق والمنظّمين فقط');
         }
-        const appName = clampStr(payload.appName || 'ميدان 6v6', 60) || 'ميدان 6v6';
-        const teamName = clampStr(payload.teamName || 'فريق السداسي', 80) || 'فريق السداسي';
-        const primaryColor = sanitizeHexColor(payload.primaryColor, ROYAL_PRIMARY);
-        const secondaryColor = sanitizeHexColor(payload.secondaryColor, ROYAL_SECONDARY);
-        const logo = sanitizeImageDataUrl(payload.logo, 180000);
-        const inviteCode = sanitizeInviteCode(payload.inviteCode);
-        if (!inviteCode) {
-          throw new Error('كود الدعوة غير صالح (يجب أن يكون 8 خانات على الأقل)');
+
+        const teamName = clampStr(payload.teamName || curSettings.teamName || 'فريق السداسي', 80) || 'فريق السداسي';
+        const lineupPublishMode = sanitizeLineupPublishMode(payload.lineupPublishMode ?? payload.lineupPermission);
+        const defaultCurrency = clampStr(payload.defaultCurrency || curSettings.defaultCurrency || 'ريال', 20) || 'ريال';
+        const defaultPitchCost = Math.round(clampNum(payload.defaultPitchCost ?? curSettings.defaultPitchCost, 0, 100000, 0) * 10) / 10;
+
+        if (isMulti) {
+          const logoCheck = sanitizeTeamLogo50Kb(payload.logo !== undefined ? payload.logo : curSettings.logo);
+          if (!logoCheck.ok) {
+            throw new Error(logoCheck.errorAr || 'حجم شعار الفريق يتجاوز 50 كيلوبايت');
+          }
+          const logo = logoCheck.dataUrl;
+
+          if (isDesignatedOrganizer) {
+            try {
+              await updateDoc(doc(db, 'teams', tid), {
+                teamName,
+                logo,
+                defaultCurrency,
+                defaultPitchCost,
+                lineupPublishMode,
+                updatedAtMs: Date.now(),
+                updatedAt: serverTimestamp(),
+              });
+            } catch (err) {
+              this.handleWriteError(err, OperationType.UPDATE, `teams/${tid}`);
+            }
+            return;
+          }
+
+          const appName = clampStr(payload.appName || curSettings.appName || 'ميدان 6v6', 60) || 'ميدان 6v6';
+          const primaryColor = sanitizeHexColor(payload.primaryColor || curSettings.primaryColor, ROYAL_PRIMARY);
+          const secondaryColor = sanitizeHexColor(payload.secondaryColor || curSettings.secondaryColor, ROYAL_SECONDARY);
+          const inviteCode =
+            sanitizeInviteCode(payload.inviteCode || curSettings.inviteCode) || generateSecureInviteCode(12);
+          const memberShareCode =
+            sanitizeInviteCode(payload.memberShareCode || curSettings.memberShareCode) ||
+            generateSecureInviteCode(12);
+          const joinMode = sanitizeJoinMode(
+            payload.joinMode !== undefined
+              ? payload.joinMode
+              : payload.requireApproval === false
+                ? 'instant'
+                : 'approval'
+          );
+          const requireApproval = joinMode === 'approval';
+          const lockSkills = Boolean(payload.lockSkills);
+          const maxMembersPerTeam = Math.round(
+            clampNum(payload.maxMembersPerTeam ?? curSettings.maxMembersPerTeam, 6, 100, DEFAULT_MAX_MEMBERS_PER_TEAM)
+          );
+          const founderUid = String(curSettings.founderUid || curSettings.creatorUid || uid).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128) || uid;
+          const rawOrgUids = Array.isArray(payload.organizerUids) ? payload.organizerUids : orgUids;
+          const cleanOrgUids = Array.from(
+            new Set(
+              [...rawOrgUids.map((x) => String(x || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128))]
+                .filter((x) => Boolean(x) && x !== founderUid)
+            )
+          ).slice(0, 30);
+
+          const authCtx = { isFirebaseMode: true, isCaptainSession: true };
+          const mainInvRec = createSmartInvitationRecord(
+            {
+              teamId: tid,
+              customCode: inviteCode,
+              teamName,
+              appName,
+              primaryColor,
+              joinMode,
+              requireApproval,
+              isMemberShareCode: false,
+              usageType: 'multi',
+              maxUses: 20,
+              durationDays: 7,
+            },
+            authCtx
+          );
+          const shareInvRec = createSmartInvitationRecord(
+            {
+              teamId: tid,
+              customCode: memberShareCode,
+              teamName,
+              appName,
+              primaryColor,
+              joinMode: 'approval',
+              requireApproval: true,
+              isMemberShareCode: true,
+              usageType: 'multi',
+              maxUses: 100,
+              durationDays: 90,
+            },
+            authCtx
+          );
+
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'teams', tid), {
+            appName,
+            teamName,
+            primaryColor,
+            secondaryColor,
+            logo,
+            inviteCode,
+            memberShareCode,
+            joinMode,
+            lineupPublishMode,
+            lockSkills,
+            maxMembersPerTeam,
+            organizerUids: cleanOrgUids,
+            defaultCurrency,
+            defaultPitchCost,
+            updatedAtMs: Date.now(),
+            updatedAt: serverTimestamp(),
+          });
+          batch.set(
+            doc(db, 'inviteCodes', inviteCode),
+            {
+              code: inviteCode,
+              active: true,
+              joinMode,
+              requireApproval,
+              isMemberShareCode: false,
+              teamId: tid,
+              teamName,
+              appName,
+              primaryColor,
+              usageType: mainInvRec.usageType,
+              maxUses: mainInvRec.maxUses,
+              usedCount: 0,
+              durationDays: mainInvRec.durationDays,
+              createdAtMs: mainInvRec.createdAtMs,
+              expiresAtMs: mainInvRec.expiresAtMs,
+              status: 'active',
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+          batch.set(
+            doc(db, 'inviteCodes', memberShareCode),
+            {
+              code: memberShareCode,
+              active: true,
+              joinMode: 'approval',
+              requireApproval: true,
+              isMemberShareCode: true,
+              teamId: tid,
+              teamName,
+              appName,
+              primaryColor,
+              usageType: shareInvRec.usageType,
+              maxUses: shareInvRec.maxUses,
+              usedCount: 0,
+              durationDays: shareInvRec.durationDays,
+              createdAtMs: shareInvRec.createdAtMs,
+              expiresAtMs: shareInvRec.expiresAtMs,
+              status: 'active',
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+          try {
+            await batch.commit();
+          } catch (err) {
+            this.handleWriteError(err, OperationType.WRITE, `teams/${tid}`);
+          }
+          return;
         }
+
+        // Single-Team Legacy Settings
+        const logo = sanitizeImageDataUrl(payload.logo !== undefined ? payload.logo : curSettings.logo, 180000);
+        if (isDesignatedOrganizer) {
+          try {
+            await updateDoc(doc(db, 'settings', 'team'), {
+              teamName,
+              logo,
+              defaultCurrency,
+              defaultPitchCost,
+              lineupPermission: lineupPublishMode,
+              updatedAt: serverTimestamp(),
+            });
+          } catch (err) {
+            this.handleWriteError(err, OperationType.UPDATE, 'settings/team');
+          }
+          return;
+        }
+
+        const appName = clampStr(payload.appName || curSettings.appName || 'ميدان 6v6', 60) || 'ميدان 6v6';
+        const primaryColor = sanitizeHexColor(payload.primaryColor || curSettings.primaryColor, ROYAL_PRIMARY);
+        const secondaryColor = sanitizeHexColor(payload.secondaryColor || curSettings.secondaryColor, ROYAL_SECONDARY);
+        const inviteCode =
+          sanitizeInviteCode(payload.inviteCode || curSettings.inviteCode) || generateSecureInviteCode(12);
+        const memberShareCode =
+          sanitizeInviteCode(payload.memberShareCode || curSettings.memberShareCode) ||
+          generateSecureInviteCode(12);
         const requireApproval = payload.requireApproval !== false;
         const lockSkills = Boolean(payload.lockSkills);
+        const creatorUid = String(curSettings.creatorUid || uid).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128) || uid;
+        const rawOrgUids = Array.isArray(payload.organizerUids) ? payload.organizerUids : orgUids;
+        const cleanOrgUids = Array.from(
+          new Set(
+            [creatorUid, ...rawOrgUids.map((x) => String(x || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128))]
+              .filter(Boolean)
+          )
+        ).slice(0, 30);
+
+        const authCtx = { isFirebaseMode: true, isCaptainSession: true };
+        const mainInvRec = createSmartInvitationRecord(
+          {
+            customCode: inviteCode,
+            teamName,
+            appName,
+            primaryColor,
+            requireApproval,
+            isMemberShareCode: false,
+            usageType: 'multi',
+            maxUses: 20,
+            durationDays: 7,
+          },
+          authCtx
+        );
+        const shareInvRec = createSmartInvitationRecord(
+          {
+            customCode: memberShareCode,
+            teamName,
+            appName,
+            primaryColor,
+            requireApproval: true,
+            isMemberShareCode: true,
+            usageType: 'multi',
+            maxUses: 100,
+            durationDays: 90,
+          },
+          authCtx
+        );
 
         const batch = writeBatch(db);
         batch.set(doc(db, 'settings', 'team'), {
@@ -1805,9 +3871,15 @@ class MaydanBackendService {
           secondaryColor,
           logo,
           inviteCode,
+          memberShareCode,
           requireApproval,
           lockSkills,
           themeVersion: 'royal_v2',
+          creatorUid,
+          organizerUids: cleanOrgUids,
+          lineupPermission: lineupPublishMode,
+          defaultCurrency,
+          defaultPitchCost,
           updatedAt: serverTimestamp(),
         });
         batch.set(doc(db, 'publicMeta', 'branding'), {
@@ -1824,10 +3896,40 @@ class MaydanBackendService {
             code: inviteCode,
             active: true,
             requireApproval,
+            isMemberShareCode: false,
             teamId: TEAM_ID,
             teamName,
             appName,
             primaryColor,
+            usageType: mainInvRec.usageType,
+            maxUses: mainInvRec.maxUses,
+            usedCount: 0,
+            durationDays: mainInvRec.durationDays,
+            createdAtMs: mainInvRec.createdAtMs,
+            expiresAtMs: mainInvRec.expiresAtMs,
+            status: 'active',
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+        batch.set(
+          doc(db, 'inviteCodes', memberShareCode),
+          {
+            code: memberShareCode,
+            active: true,
+            requireApproval: true,
+            isMemberShareCode: true,
+            teamId: TEAM_ID,
+            teamName,
+            appName,
+            primaryColor,
+            usageType: shareInvRec.usageType,
+            maxUses: shareInvRec.maxUses,
+            usedCount: 0,
+            durationDays: shareInvRec.durationDays,
+            createdAtMs: shareInvRec.createdAtMs,
+            expiresAtMs: shareInvRec.expiresAtMs,
+            status: 'active',
             updatedAt: serverTimestamp(),
           },
           { merge: true }
@@ -1843,29 +3945,38 @@ class MaydanBackendService {
       case 'createSmartInvite':
       case 'rotateInviteCode': {
         if (!this.activeIsCaptain) {
-          throw new Error('إنشاء وتدوير دعوات الفريق متاح للكابتن فقط');
+          throw new Error('إنشاء وتدوير دعوات الفريق متاح لمؤسس الفريق فقط');
         }
         const currSettings = (this.activeState?.settings || {}) as Record<string, unknown>;
-        const requireApproval =
-          typeof payload.requireApproval === 'boolean'
+        const isMemberShareCode = payload.isMemberShareCode === true;
+        const teamJoinMode = sanitizeJoinMode(
+          currSettings.joinMode ?? (currSettings.requireApproval === false ? 'instant' : 'approval')
+        );
+        const requireApproval = isMemberShareCode
+          ? true
+          : typeof payload.requireApproval === 'boolean'
             ? payload.requireApproval
-            : currSettings.requireApproval !== false;
+            : teamJoinMode === 'approval';
+        const joinMode = requireApproval ? 'approval' : 'instant';
         const teamName = clampStr(payload.teamName || currSettings.teamName || 'فريق السداسي', 80) || 'فريق السداسي';
         const appName = clampStr(payload.appName || currSettings.appName || 'ميدان 6v6', 60) || 'ميدان 6v6';
         const primaryColor = sanitizeHexColor(payload.primaryColor || currSettings.primaryColor, ROYAL_PRIMARY);
 
-        const smartRec = createSmartInvitationRecord({
-          isCaptain: this.activeIsCaptain,
-          createdBy: uid,
-          teamId: TEAM_ID,
-          teamName,
-          appName,
-          primaryColor,
-          requireApproval,
-          usageType: payload.usageType,
-          maxUses: payload.maxUses,
-          durationDays: payload.durationDays,
-        });
+        const smartRec = createSmartInvitationRecord(
+          {
+            teamId: tid,
+            teamName,
+            appName,
+            primaryColor,
+            joinMode,
+            requireApproval,
+            isMemberShareCode,
+            usageType: payload.usageType,
+            maxUses: payload.maxUses,
+            durationDays: payload.durationDays,
+          },
+          { isFirebaseMode: true, isCaptainSession: this.activeIsCaptain }
+        );
 
         const newCode = smartRec.code;
         const prevCode =
@@ -1874,15 +3985,25 @@ class MaydanBackendService {
             : '';
 
         const batch = writeBatch(db);
-        batch.update(doc(db, 'settings', 'team'), {
-          inviteCode: newCode,
-          updatedAt: serverTimestamp(),
-        });
+        const teamMetaRef = isMulti ? doc(db, 'teams', tid) : doc(db, 'settings', 'team');
+        if (isMemberShareCode) {
+          batch.update(teamMetaRef, {
+            memberShareCode: newCode,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          batch.update(teamMetaRef, {
+            inviteCode: newCode,
+            updatedAt: serverTimestamp(),
+          });
+        }
         batch.set(doc(db, 'inviteCodes', newCode), {
           code: newCode,
           active: true,
+          joinMode,
           requireApproval: smartRec.requireApproval,
-          teamId: TEAM_ID,
+          isMemberShareCode: Boolean(smartRec.isMemberShareCode),
+          teamId: tid,
           teamName: smartRec.teamName,
           appName: smartRec.appName,
           primaryColor: smartRec.primaryColor,
@@ -1893,42 +4014,65 @@ class MaydanBackendService {
           createdAtMs: smartRec.createdAtMs,
           expiresAtMs: smartRec.expiresAtMs,
           status: 'active',
+          updatedAt: serverTimestamp(),
+        });
+        const adminLogRef = isMulti
+          ? doc(db, 'teams', tid, 'inviteAdminLogs', newCode)
+          : doc(db, 'inviteAdminLogs', newCode);
+        batch.set(adminLogRef, {
+          code: newCode,
           createdBy: uid,
+          createdAtMs: smartRec.createdAtMs,
           updatedAt: serverTimestamp(),
         });
         if (prevCode && prevCode !== newCode) {
-          batch.set(
-            doc(db, 'inviteCodes', prevCode),
-            {
-              code: prevCode,
-              active: false,
-              requireApproval: smartRec.requireApproval,
-              status: 'revoked',
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
-        }
-        try {
-          await batch.commit();
-        } catch (err) {
-          this.handleWriteError(err, OperationType.WRITE, `inviteCodes/${newCode}`);
-        }
-        return { inviteCode: newCode, invite: smartRec };
-      }
-
-      case 'revokeSmartInvite': {
-        if (!this.activeIsCaptain) {
-          throw new Error('إلغاء دعوات الفريق متاح للكابتن فقط');
-        }
-        const targetCode = sanitizeInviteCode(payload.code || payload.inviteCode);
-        if (!targetCode) throw new Error('كود الدعوة غير صالح');
-        try {
-          await updateDoc(doc(db, 'inviteCodes', targetCode), {
+          batch.update(doc(db, 'inviteCodes', prevCode), {
             active: false,
             status: 'revoked',
             updatedAt: serverTimestamp(),
           });
+        }
+        try {
+          await batch.commit();
+          if (isMulti && this.activeState) {
+            this.activeState.inviteCodes = [
+              { code: newCode, ...smartRec },
+              ...(this.activeState.inviteCodes || []).filter((x) => x.code !== prevCode),
+            ];
+            if (this.activeOnUpdate) this.activeOnUpdate();
+          }
+        } catch (err) {
+          this.handleWriteError(err, OperationType.WRITE, `inviteCodes/${newCode}`);
+        }
+        return { inviteCode: newCode, invite: smartRec, record: smartRec };
+      }
+
+      case 'revokeSmartInvite': {
+        if (!this.activeIsCaptain) {
+          throw new Error('إلغاء دعوات الفريق متاح لمؤسس الفريق فقط');
+        }
+        const targetCode = sanitizeInviteCode(payload.code || payload.inviteCode);
+        if (!targetCode) throw new Error('كود الدعوة غير صالح');
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'inviteCodes', targetCode), {
+          active: false,
+          status: 'revoked',
+          updatedAt: serverTimestamp(),
+        });
+        const adminLogRef = isMulti
+          ? doc(db, 'teams', tid, 'inviteAdminLogs', targetCode)
+          : doc(db, 'inviteAdminLogs', targetCode);
+        batch.set(
+          adminLogRef,
+          {
+            code: targetCode,
+            revokedBy: uid,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+        try {
+          await batch.commit();
         } catch (err) {
           this.handleWriteError(err, OperationType.UPDATE, `inviteCodes/${targetCode}`);
         }
@@ -1937,15 +4081,38 @@ class MaydanBackendService {
 
       case 'updateRole': {
         if (!this.activeIsCaptain) {
-          throw new Error('تغيير صلاحيات اللاعبين متاح للكابتن فقط');
+          throw new Error('تغيير صلاحيات اللاعبين متاح لمؤسس الفريق فقط');
         }
         const targetId = String(payload.id || '');
         const ownerUid = String(payload.ownerUid || '');
-        const newRole = payload.role === 'admin' ? 'admin' : 'player';
+        const newRole = payload.role === 'admin' || payload.role === 'organizer' ? payload.role : 'player';
         if (!targetId) return;
+
+        if (isMulti) {
+          const isOrg = newRole === 'admin' || newRole === 'organizer';
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'teams', tid, 'members', targetId), {
+            role: isOrg ? 'organizer' : 'member',
+            isOrganizer: isOrg,
+            updatedAtMs: Date.now(),
+            updatedAt: serverTimestamp(),
+          });
+          batch.update(doc(db, 'teams', tid), {
+            organizerUids: isOrg ? arrayUnion(targetId) : arrayRemove(targetId),
+            updatedAt: serverTimestamp(),
+          });
+          try {
+            await batch.commit();
+            await this.refreshMultiMembers();
+          } catch (err) {
+            this.handleWriteError(err, OperationType.WRITE, `teams/${tid}/members/${targetId}`);
+          }
+          return;
+        }
+
         const batch = writeBatch(db);
         batch.update(doc(db, 'players', targetId), {
-          role: newRole,
+          role: newRole === 'admin' ? 'admin' : 'player',
           updatedAt: serverTimestamp(),
         });
         if (ownerUid && ownerUid !== uid) {
@@ -1968,11 +4135,11 @@ class MaydanBackendService {
       }
 
       case 'pitchSession': {
-        if (!this.activeIsCaptain) {
-          throw new Error('تعديل موعد المباراة والقَطّة متاح للكابتن فقط');
+        if (!this.isTeamOrganizer(uid)) {
+          throw new Error('تعديل موعد المباراة والقَطّة متاح لمؤسس الفريق والمنظّمين فقط');
         }
         const sessionDoc = {
-          teamId: TEAM_ID,
+          teamId: tid,
           title: clampStr(payload.title || 'مباراة السداسي الأسبوعية', 80) || 'مباراة السداسي الأسبوعية',
           matchDate: sanitizeDateStr(payload.matchDate),
           matchTime: sanitizeTimeStr(payload.matchTime, '20:30'),
@@ -1984,17 +4151,20 @@ class MaydanBackendService {
           paidTotal: Math.round(clampNum(payload.paidTotal, 0, 100000, 0) * 10) / 10,
           updatedAt: serverTimestamp(),
         };
+        const psRef = isMulti
+          ? doc(db, 'teams', tid, 'pitchSessions', 'current')
+          : doc(db, 'pitchSessions', 'current');
         try {
-          await setDoc(doc(db, 'pitchSessions', 'current'), sessionDoc);
+          await setDoc(psRef, sessionDoc);
         } catch (err) {
-          this.handleWriteError(err, OperationType.WRITE, 'pitchSessions/current');
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/pitchSessions/current` : 'pitchSessions/current');
         }
         return;
       }
 
       case 'pitchPayment': {
-        if (!this.activeIsCaptain) {
-          throw new Error('تحديث حالة دفع القَطّة متاح للكابتن فقط');
+        if (!this.isTeamOrganizer(uid)) {
+          throw new Error('تحديث حالة دفع القَطّة متاح لمؤسس الفريق والمنظّمين فقط');
         }
         const pay = (payload.payment || {}) as Record<string, unknown>;
         const sess = (payload.session || {}) as Record<string, unknown>;
@@ -2003,8 +4173,15 @@ class MaydanBackendService {
         const paymentId = `current__${playerId}`;
 
         const batch = writeBatch(db);
-        batch.set(doc(db, 'pitchPayments', paymentId), {
-          teamId: TEAM_ID,
+        const payRef = isMulti
+          ? doc(db, 'teams', tid, 'pitchPayments', paymentId)
+          : doc(db, 'pitchPayments', paymentId);
+        const sessRef = isMulti
+          ? doc(db, 'teams', tid, 'pitchSessions', 'current')
+          : doc(db, 'pitchSessions', 'current');
+
+        batch.set(payRef, {
+          teamId: tid,
           sessionId: 'current',
           playerId,
           ownerUid: String(pay.ownerUid || playerId).slice(0, 128),
@@ -2013,8 +4190,8 @@ class MaydanBackendService {
           paid: Boolean(pay.paid),
           updatedAt: serverTimestamp(),
         });
-        batch.set(doc(db, 'pitchSessions', 'current'), {
-          teamId: TEAM_ID,
+        batch.set(sessRef, {
+          teamId: tid,
           title: clampStr(sess.title || 'مباراة السداسي الأسبوعية', 80) || 'مباراة السداسي الأسبوعية',
           matchDate: sanitizeDateStr(sess.matchDate),
           matchTime: sanitizeTimeStr(sess.matchTime, '20:30'),
@@ -2029,7 +4206,7 @@ class MaydanBackendService {
         try {
           await batch.commit();
         } catch (err) {
-          this.handleWriteError(err, OperationType.WRITE, `pitchPayments/${paymentId}`);
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/pitchPayments/${paymentId}` : `pitchPayments/${paymentId}`);
         }
         return;
       }
@@ -2037,6 +4214,9 @@ class MaydanBackendService {
       case 'importBackup': {
         if (!this.activeIsCaptain) {
           throw new Error('استيراد النسخة الاحتياطية متاح للكابتن فقط');
+        }
+        if (isMulti) {
+          throw new Error('استيراد النسخ الكاملة متاح من معالج الترقية أو وضع الفريق الواحد.');
         }
         const clean = sanitizeBackupImport(payload.raw);
         await this.importCleanBackupToFirestore(clean, uid);
@@ -2054,27 +4234,33 @@ class MaydanBackendService {
         const ourScore = Math.round(clampNum(payload.ourScore, 0, 99, 0));
         const oppScore = Math.round(clampNum(payload.oppScore, 0, 99, 0));
         const result = ourScore > oppScore ? 'فوز' : ourScore < oppScore ? 'خسارة' : 'تعادل';
+        const msRef = isMulti ? doc(db, 'teams', tid, 'matchSessions', id) : doc(db, 'matchSessions', id);
+        const msDoc = {
+          id,
+          teamId: tid,
+          date: sanitizeDateStr(payload.date),
+          opponent: clampStr(payload.opponent, 80) || 'خصم',
+          pitchMode: sanitizePitchMode(payload.pitchMode),
+          ourScore,
+          oppScore,
+          result,
+          createdBy: uid,
+          participantIds,
+          confirmers: [uid],
+          status: 'draft',
+          votingOpen: false,
+          voterUids: [],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
         try {
-          await setDoc(doc(db, 'matchSessions', id), {
-            id,
-            teamId: TEAM_ID,
-            date: sanitizeDateStr(payload.date),
-            opponent: clampStr(payload.opponent, 80) || 'خصم',
-            pitchMode: sanitizePitchMode(payload.pitchMode),
-            ourScore,
-            oppScore,
-            result,
-            createdBy: uid,
-            participantIds,
-            confirmers: [uid],
-            status: 'draft',
-            votingOpen: false,
-            voterUids: [],
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
+          await setDoc(msRef, msDoc);
+          if (isMulti && this.activeState) {
+            this.activeState.matchSessions = [msDoc, ...(this.activeState.matchSessions || [])];
+            if (this.activeOnUpdate) this.activeOnUpdate();
+          }
         } catch (err) {
-          this.handleWriteError(err, OperationType.CREATE, `matchSessions/${id}`);
+          this.handleWriteError(err, OperationType.CREATE, isMulti ? `teams/${tid}/matchSessions/${id}` : `matchSessions/${id}`);
         }
         return;
       }
@@ -2087,15 +4273,22 @@ class MaydanBackendService {
           : [uid];
         const status = payload.status === 'verified' ? 'verified' : 'draft';
         const votingOpen = status === 'verified';
+        const msRef = isMulti ? doc(db, 'teams', tid, 'matchSessions', sessionId) : doc(db, 'matchSessions', sessionId);
         try {
-          await updateDoc(doc(db, 'matchSessions', sessionId), {
+          await updateDoc(msRef, {
             confirmers,
             status,
             votingOpen,
             updatedAt: serverTimestamp(),
           });
+          if (isMulti && this.activeState) {
+            this.activeState.matchSessions = (this.activeState.matchSessions || []).map((s) =>
+              s.id === sessionId ? { ...s, confirmers, status, votingOpen } : s
+            );
+            if (this.activeOnUpdate) this.activeOnUpdate();
+          }
         } catch (err) {
-          this.handleWriteError(err, OperationType.UPDATE, `matchSessions/${sessionId}`);
+          this.handleWriteError(err, OperationType.UPDATE, isMulti ? `teams/${tid}/matchSessions/${sessionId}` : `matchSessions/${sessionId}`);
         }
         return;
       }
@@ -2116,8 +4309,6 @@ class MaydanBackendService {
         }
         if (!sessionId || !validBallots.length) return;
 
-        // Chunk atomic (ballot + tally) pairs into max 4 targets per writeBatch
-        // to stay strictly under Firestore's 20 document-access-per-batch security rule limit (even on 11v11).
         const CHUNK_SIZE = 4;
         try {
           for (let i = 0; i < validBallots.length; i += CHUNK_SIZE) {
@@ -2127,8 +4318,10 @@ class MaydanBackendService {
             for (const { targetId, score } of chunk) {
               const ballotId = `${sessionId}__${targetId}__${uid}`;
               const tallyId = `${sessionId}__${targetId}`;
+              const bRef = isMulti ? doc(db, 'teams', tid, 'matchVoteBallots', ballotId) : doc(db, 'matchVoteBallots', ballotId);
+              const tRef = isMulti ? doc(db, 'teams', tid, 'matchVoteTallies', tallyId) : doc(db, 'matchVoteTallies', tallyId);
 
-              batch.set(doc(db, 'matchVoteBallots', ballotId), {
+              batch.set(bRef, {
                 sessionId,
                 targetId,
                 voterUid: uid,
@@ -2136,9 +4329,9 @@ class MaydanBackendService {
                 createdAt: serverTimestamp(),
               });
               batch.set(
-                doc(db, 'matchVoteTallies', tallyId),
+                tRef,
                 {
-                  teamId: TEAM_ID,
+                  teamId: tid,
                   sessionId,
                   targetId,
                   eligibleCount,
@@ -2160,15 +4353,19 @@ class MaydanBackendService {
               );
             }
             if (isLastChunk) {
-              batch.update(doc(db, 'matchSessions', sessionId), {
+              const msRef = isMulti ? doc(db, 'teams', tid, 'matchSessions', sessionId) : doc(db, 'matchSessions', sessionId);
+              batch.update(msRef, {
                 voterUids: arrayUnion(uid),
                 updatedAt: serverTimestamp(),
               });
             }
             await batch.commit();
           }
+          if (isMulti && this.activeState) {
+            await this.refreshMatchVoteTallies(this.activeState);
+          }
         } catch (err) {
-          this.handleWriteError(err, OperationType.WRITE, `matchVoteBallots/${sessionId}`);
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/matchVoteBallots/${sessionId}` : `matchVoteBallots/${sessionId}`);
         }
         return;
       }
@@ -2181,25 +4378,31 @@ class MaydanBackendService {
         if (verifierUids.length !== 2 || verifierUids[0] === verifierUids[1] || verifierUids.includes(uid)) {
           throw new Error('يجب اختيار زميلين مختلفين غيرك للتحقق من المهمة');
         }
+        const mcRef = isMulti ? doc(db, 'teams', tid, 'missionClaims', id) : doc(db, 'missionClaims', id);
+        const mcDoc = {
+          id,
+          teamId: tid,
+          missionId: String(payload.missionId || 'clean_sheet'),
+          missionTitle: clampStr(payload.missionTitle, 80) || 'مهمة الفريق',
+          xpReward: Math.round(clampNum(payload.xpReward, 10, 100, 30)),
+          claimantUid: uid,
+          claimantName: clampStr(payload.claimantName || currentUser.name, 80) || 'لاعب',
+          note: clampStr(payload.note, 200),
+          verifierUids,
+          approverUids: [],
+          rejectorUids: [],
+          status: 'pending',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
         try {
-          await setDoc(doc(db, 'missionClaims', id), {
-            id,
-            teamId: TEAM_ID,
-            missionId: String(payload.missionId || 'clean_sheet'),
-            missionTitle: clampStr(payload.missionTitle, 80) || 'مهمة الفريق',
-            xpReward: Math.round(clampNum(payload.xpReward, 10, 100, 30)),
-            claimantUid: uid,
-            claimantName: clampStr(payload.claimantName || currentUser.name, 80) || 'لاعب',
-            note: clampStr(payload.note, 200),
-            verifierUids,
-            approverUids: [],
-            rejectorUids: [],
-            status: 'pending',
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
+          await setDoc(mcRef, mcDoc);
+          if (isMulti && this.activeState) {
+            this.activeState.missionClaims = [mcDoc, ...(this.activeState.missionClaims || [])];
+            if (this.activeOnUpdate) this.activeOnUpdate();
+          }
         } catch (err) {
-          this.handleWriteError(err, OperationType.CREATE, `missionClaims/${id}`);
+          this.handleWriteError(err, OperationType.CREATE, isMulti ? `teams/${tid}/missionClaims/${id}` : `missionClaims/${id}`);
         }
         return;
       }
@@ -2215,15 +4418,22 @@ class MaydanBackendService {
           : [];
         const status =
           payload.status === 'verified' || payload.status === 'rejected' ? payload.status : 'pending';
+        const mcRef = isMulti ? doc(db, 'teams', tid, 'missionClaims', claimId) : doc(db, 'missionClaims', claimId);
         try {
-          await updateDoc(doc(db, 'missionClaims', claimId), {
+          await updateDoc(mcRef, {
             approverUids,
             rejectorUids,
             status,
             updatedAt: serverTimestamp(),
           });
+          if (isMulti && this.activeState) {
+            this.activeState.missionClaims = (this.activeState.missionClaims || []).map((c) =>
+              c.id === claimId ? { ...c, approverUids, rejectorUids, status } : c
+            );
+            if (this.activeOnUpdate) this.activeOnUpdate();
+          }
         } catch (err) {
-          this.handleWriteError(err, OperationType.UPDATE, `missionClaims/${claimId}`);
+          this.handleWriteError(err, OperationType.UPDATE, isMulti ? `teams/${tid}/missionClaims/${claimId}` : `missionClaims/${claimId}`);
         }
         return;
       }
@@ -2276,7 +4486,7 @@ class MaydanBackendService {
               })
               .filter((t) => t.en.length > 0 && t.ar.length > 0)
           : [];
-        const docRef = doc(db, 'footballLibrary', artId);
+        const docRef = isMulti ? doc(db, 'teams', tid, 'footballLibrary', artId) : doc(db, 'footballLibrary', artId);
         try {
           const existingSnap = await getDoc(docRef);
           const createdAtVal = existingSnap.exists()
@@ -2284,7 +4494,7 @@ class MaydanBackendService {
             : serverTimestamp();
           await setDoc(docRef, {
             id: artId,
-            teamId: TEAM_ID,
+            teamId: tid,
             titleAr: clampStr(payload.titleAr, 140) || 'ملخص كروي تعليمي',
             originalLang: clampStr(payload.originalLang, 40) || 'الإنجليزية',
             publisher: clampStr(payload.publisher, 100) || 'مصدر كروي دولي',
@@ -2305,7 +4515,7 @@ class MaydanBackendService {
           });
           await this.refreshFootballLibrary();
         } catch (err) {
-          this.handleWriteError(err, OperationType.WRITE, `footballLibrary/${artId}`);
+          this.handleWriteError(err, OperationType.WRITE, isMulti ? `teams/${tid}/footballLibrary/${artId}` : `footballLibrary/${artId}`);
         }
         return;
       }
@@ -2316,11 +4526,12 @@ class MaydanBackendService {
         }
         const artId = String(payload.id || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
         if (!artId) throw new Error('معرّف المقال غير صالح');
+        const docRef = isMulti ? doc(db, 'teams', tid, 'footballLibrary', artId) : doc(db, 'footballLibrary', artId);
         try {
-          await deleteDoc(doc(db, 'footballLibrary', artId));
+          await deleteDoc(docRef);
           await this.refreshFootballLibrary();
         } catch (err) {
-          this.handleWriteError(err, OperationType.DELETE, `footballLibrary/${artId}`);
+          this.handleWriteError(err, OperationType.DELETE, isMulti ? `teams/${tid}/footballLibrary/${artId}` : `footballLibrary/${artId}`);
         }
         return;
       }
@@ -2329,7 +4540,11 @@ class MaydanBackendService {
         if (!this.activeIsCaptain) {
           throw new Error('مسح البيانات متاح للكابتن فقط');
         }
-        await this.wipeTeamCollections(uid);
+        if (isMulti) {
+          await this.softDeleteMultiTeam(tid);
+        } else {
+          await this.wipeTeamCollections(uid);
+        }
         return;
       }
 
@@ -2338,16 +4553,856 @@ class MaydanBackendService {
     }
   }
 
+  // ==================== PHASE 6: MULTI-TEAM & MIGRATION ENGINE ====================
+
+  async acceptPrivacyNotice(fbUser?: User | null): Promise<void> {
+    const u = fbUser || auth.currentUser;
+    const uid = u?.uid || this.activeUid;
+    if (!uid) return;
+    markPrivacyNoticeAcceptedLocally(uid);
+    const payload = buildPrivacyNoticeAcceptedPayload(uid);
+    try {
+      await setDoc(
+        doc(db, 'users', uid),
+        {
+          uid,
+          displayName: clampStr(u?.displayName || 'لاعب', 80) || 'لاعب',
+          privacyAcceptedAt: payload.privacyAcceptedAt,
+          privacyNoticeVersion: payload.privacyNoticeVersion,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      this.userDoc = { ...(this.userDoc || { uid }), ...payload };
+    } catch (err) {
+      if (isQuotaExceededError(err)) quotaMonitor.markQuotaExceeded(true);
+      console.warn('acceptPrivacyNotice remote sync notice:', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async setAllowNewTeams(allow: boolean): Promise<void> {
+    if (!this.isPlatformOwner) {
+      throw new Error('هذا الإعداد متاح لمالك المنصة فقط');
+    }
+    try {
+      await setDoc(
+        doc(db, 'platform', 'config'),
+        {
+          allowNewTeams: Boolean(allow),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      this.platformConfig = { allowNewTeams: Boolean(allow) };
+    } catch (err) {
+      this.handleWriteError(err, OperationType.WRITE, 'platform/config');
+    }
+  }
+
+  async createMultiTeam(input: {
+    teamName: string;
+    primaryColor?: string;
+    secondaryColor?: string;
+    logo?: string;
+    joinMode?: 'approval' | 'instant';
+    lineupPublishMode?: 'organizers' | 'all';
+    defaultCurrency?: string;
+    defaultPitchCost?: number;
+    playerName?: string;
+    jersey?: number;
+    primaryPos?: string;
+  }): Promise<{ teamId: string; team: MultiTeamMeta }> {
+    const fbUser = auth.currentUser;
+    if (!fbUser || !fbUser.emailVerified) {
+      throw new Error('يرجى تسجيل الدخول بحساب Google أولاً لإنشاء فريق');
+    }
+    const uid = fbUser.uid;
+    const cfg = await this.fetchPlatformConfig();
+    const uSnap = await getDoc(doc(db, 'users', uid));
+    quotaMonitor.recordReads('oneShot', 1);
+    const uData = uSnap.exists() ? uSnap.data() : {};
+    const ownedIds = Array.isArray(uData.ownedTeamIds) ? (uData.ownedTeamIds as string[]) : [];
+    const joinedIds = Array.isArray(uData.teamIds) ? (uData.teamIds as string[]) : [];
+
+    const elig = checkTeamQuotaEligibility({
+      action: 'create',
+      ownedTeamIds: ownedIds,
+      joinedTeamIds: joinedIds,
+      allowNewTeams: cfg.allowNewTeams,
+    });
+    if (!elig.allowed) {
+      throw new Error(elig.errorAr || 'لا يمكن إنشاء فريق جديد حالياً');
+    }
+
+    const teamId = generateMultiTeamId();
+    const joinMode = sanitizeJoinMode(input.joinMode);
+    const requireApproval = joinMode === 'approval';
+    const lineupPublishMode = sanitizeLineupPublishMode(input.lineupPublishMode);
+    const teamName = clampStr(input.teamName || 'فريق السداسي', 40) || 'فريق السداسي';
+    const primaryColor = sanitizeHexColor(input.primaryColor, ROYAL_PRIMARY);
+    const secondaryColor = sanitizeHexColor(input.secondaryColor, ROYAL_SECONDARY);
+    const logoCheck = sanitizeTeamLogo50Kb(input.logo || '');
+    if (!logoCheck.ok) {
+      throw new Error(logoCheck.errorAr || 'حجم الشعار يتجاوز 50 كيلوبايت');
+    }
+
+    const authCtx = { isFirebaseMode: true, isCaptainSession: true };
+    const mainInvite = createSmartInvitationRecord(
+      {
+        teamId,
+        teamName,
+        appName: 'ميدان 6v6',
+        primaryColor,
+        joinMode,
+        requireApproval,
+        isMemberShareCode: false,
+        usageType: 'multi',
+        maxUses: 25,
+        durationDays: 14,
+      },
+      authCtx
+    );
+    const memberShareInvite = createSmartInvitationRecord(
+      {
+        teamId,
+        teamName,
+        appName: 'ميدان 6v6',
+        primaryColor,
+        joinMode: 'approval',
+        requireApproval: true,
+        isMemberShareCode: true,
+        usageType: 'multi',
+        maxUses: 100,
+        durationDays: 90,
+      },
+      authCtx
+    );
+
+    const payload = buildDefaultTeamCreatePayload({
+      teamId,
+      teamName,
+      founderUid: uid,
+      defaultCurrency: input.defaultCurrency,
+      defaultPitchCost: input.defaultPitchCost,
+      primaryColor,
+      secondaryColor,
+      logo: logoCheck.dataUrl,
+      joinMode,
+      lineupPublishMode,
+      inviteCode: mainInvite.code,
+      memberShareCode: memberShareInvite.code,
+    });
+
+    const { name: creatorDisplayName } = resolveEffectivePlayerName({
+      savedName: input.playerName || '',
+      googleDisplayName: fbUser.displayName,
+      email: fbUser.email,
+      fallback: 'مؤسس الفريق',
+    });
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'teams', teamId), {
+      ...payload,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'teams', teamId, 'members', uid), {
+      id: uid,
+      uid,
+      ownerUid: uid,
+      teamId,
+      name: creatorDisplayName,
+      role: 'founder',
+      isOrganizer: true,
+      jersey: Math.round(clampNum(input.jersey, 1, 99, 10)),
+      age: 20,
+      height: 176,
+      weight: 70,
+      foot: 'يمين',
+      primaryPos: sanitizePrimaryPos(input.primaryPos || 'لاعب وسط'),
+      secondaryPos: 'جناح',
+      photo: '',
+      hasPhoto: false,
+      photoZoom: 105,
+      photoY: 18,
+      skills: sanitizeSkills({
+        speed: 7,
+        shooting: 7,
+        passing: 8,
+        dribbling: 7,
+        defending: 6,
+        stamina: 7,
+        vision: 8,
+        teamwork: 7,
+        control: 7,
+        positioning: 6,
+      }),
+      top3Strengths: '',
+      weak3Points: '',
+      seasonGoal: '',
+      availableStatus: 'متاح',
+      roleModelStarId: '',
+      joinedAtMs: Date.now(),
+      updatedAtMs: Date.now(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'teams', teamId, 'tactics', 'current'), {
+      teamId,
+      formation: '2-2-1',
+      slots: {},
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'inviteCodes', mainInvite.code), {
+      code: mainInvite.code,
+      active: true,
+      joinMode,
+      requireApproval,
+      isMemberShareCode: false,
+      teamId,
+      teamName,
+      appName: 'ميدان 6v6',
+      primaryColor,
+      usageType: mainInvite.usageType,
+      maxUses: mainInvite.maxUses,
+      usedCount: 0,
+      durationDays: mainInvite.durationDays,
+      createdAtMs: mainInvite.createdAtMs,
+      expiresAtMs: mainInvite.expiresAtMs,
+      status: 'active',
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'teams', teamId, 'inviteAdminLogs', mainInvite.code), {
+      code: mainInvite.code,
+      createdBy: uid,
+      createdAtMs: mainInvite.createdAtMs,
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'inviteCodes', memberShareInvite.code), {
+      code: memberShareInvite.code,
+      active: true,
+      joinMode: 'approval',
+      requireApproval: true,
+      isMemberShareCode: true,
+      teamId,
+      teamName,
+      appName: 'ميدان 6v6',
+      primaryColor,
+      usageType: memberShareInvite.usageType,
+      maxUses: memberShareInvite.maxUses,
+      usedCount: 0,
+      durationDays: memberShareInvite.durationDays,
+      createdAtMs: memberShareInvite.createdAtMs,
+      expiresAtMs: memberShareInvite.expiresAtMs,
+      status: 'active',
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(doc(db, 'teams', teamId, 'inviteAdminLogs', memberShareInvite.code), {
+      code: memberShareInvite.code,
+      createdBy: uid,
+      createdAtMs: memberShareInvite.createdAtMs,
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(
+      doc(db, 'users', uid),
+      {
+        uid,
+        displayName: creatorDisplayName,
+        teamIds: arrayUnion(teamId),
+        ownedTeamIds: arrayUnion(teamId),
+        activeTeamId: teamId,
+        privacyAcceptedAt: Number(uData.privacyAcceptedAt || Date.now()),
+        privacyNoticeVersion: String(uData.privacyNoticeVersion || PRIVACY_NOTICE_VERSION),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    try {
+      await batch.commit();
+      markPrivacyNoticeAcceptedLocally(uid);
+      this.activeStorageMode = 'multi';
+      this.activeTeamId = teamId;
+      this.activeIsCaptain = true;
+      this.activeTeams = sortActiveTeamsList([...this.activeTeams, payload], teamId);
+      return { teamId, team: payload };
+    } catch (err) {
+      this.handleWriteError(err, OperationType.WRITE, `teams/${teamId}`);
+    }
+  }
+
+  async switchActiveTeam(teamId: string): Promise<{ teamId: string; isCaptain: boolean }> {
+    const uid = this.activeUid || auth.currentUser?.uid;
+    const cleanId = sanitizeTeamId(teamId);
+    if (!uid || !cleanId) throw new Error('معرّف الفريق غير صالح');
+    const target = this.activeTeams.find((t) => t.id === cleanId && !t.deletedAt);
+    if (!target) {
+      throw new Error('لست عضواً في هذا الفريق أو تم حذفه');
+    }
+    this.stopListeners();
+    try {
+      await setDoc(
+        doc(db, 'users', uid),
+        {
+          uid,
+          activeTeamId: cleanId,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      if (this.userDoc) this.userDoc.activeTeamId = cleanId;
+      this.activeStorageMode = 'multi';
+      this.activeTeamId = cleanId;
+      this.activeIsCaptain = target.founderUid === uid;
+      return { teamId: cleanId, isCaptain: this.activeIsCaptain };
+    } catch (err) {
+      this.handleWriteError(err, OperationType.UPDATE, `users/${uid}`);
+    }
+  }
+
+  async transferTeamFounder(newFounderUid: string): Promise<void> {
+    const uid = this.activeUid || auth.currentUser?.uid;
+    if (!uid || !this.isMultiMode() || !this.activeIsCaptain) {
+      throw new Error('نقل قيادة الفريق متاح للمؤسس الحالي فقط');
+    }
+    const targetUid = String(newFounderUid || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+    if (!targetUid || targetUid === uid) {
+      throw new Error('اختر عضواً آخر من الفريق لنقل القيادة إليه');
+    }
+    const tid = this.activeTeamId;
+    const targetSnap = await getDoc(doc(db, 'teams', tid, 'members', targetUid));
+    if (!targetSnap.exists()) {
+      throw new Error('العضو المختار غير موجود في الفريق');
+    }
+
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'teams', tid), {
+      founderUid: targetUid,
+      organizerUids: arrayUnion(uid),
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.update(doc(db, 'teams', tid, 'members', targetUid), {
+      role: 'founder',
+      isOrganizer: true,
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.update(doc(db, 'teams', tid, 'members', uid), {
+      role: 'organizer',
+      isOrganizer: true,
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(
+      doc(db, 'users', uid),
+      {
+        uid,
+        ownedTeamIds: arrayRemove(tid),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    try {
+      await batch.commit();
+      this.activeIsCaptain = false;
+      this.activeTeams = this.activeTeams.map((t) =>
+        t.id === tid ? { ...t, founderUid: targetUid } : t
+      );
+      await this.refreshMultiMembers();
+    } catch (err) {
+      this.handleWriteError(err, OperationType.WRITE, `teams/${tid}`);
+    }
+  }
+
+  async softDeleteMultiTeam(teamId?: string): Promise<void> {
+    const uid = this.activeUid || auth.currentUser?.uid;
+    const tid = sanitizeTeamId(teamId || this.activeTeamId);
+    if (!uid || !tid || tid === TEAM_ID) {
+      throw new Error('معرّف الفريق غير صالح للحذف');
+    }
+    const remainingIds = this.activeTeams.map((t) => t.id).filter((id) => id !== tid);
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'teams', tid), {
+      deletedAt: serverTimestamp(),
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    });
+    batch.set(
+      doc(db, 'users', uid),
+      {
+        uid,
+        teamIds: arrayRemove(tid),
+        ownedTeamIds: arrayRemove(tid),
+        activeTeamId: remainingIds[0] || '',
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    try {
+      await batch.commit();
+      this.activeTeams = this.activeTeams.filter((t) => t.id !== tid);
+    } catch (err) {
+      this.handleWriteError(err, OperationType.UPDATE, `teams/${tid}`);
+    }
+  }
+
+  async deleteMyPrivateTeamData(teamId?: string): Promise<number> {
+    const uid = this.activeUid || auth.currentUser?.uid;
+    const tid = sanitizeTeamId(teamId || this.activeTeamId);
+    if (!uid || !tid || tid === TEAM_ID) {
+      throw new Error('حذف البيانات الخاصة من هذا المسار متاح لفرق المنصة');
+    }
+    const snap = await getDocs(collection(db, 'teams', tid, 'members', uid, 'private'));
+    let deletedCount = 0;
+    for (const chunk of chunkItemsForBatch(snap.docs, 400)) {
+      const batch = writeBatch(db);
+      chunk.forEach((d) => {
+        batch.delete(d.ref);
+        deletedCount++;
+      });
+      await batch.commit();
+    }
+    if (this.activeState) {
+      this.activeState.readiness = [];
+      this.activeState.injuries = [];
+      if (this.activeOnUpdate) this.activeOnUpdate();
+    }
+    return deletedCount;
+  }
+
+  async exportLegacyTeamBackupJson(): Promise<Record<string, unknown>> {
+    if (!this.isPlatformOwner) {
+      throw new Error('تصدير نسخة الفريق الواحد متاح لمؤسس المنصة فقط');
+    }
+    const [
+      settingsSnap,
+      playersSnap,
+      matchesSnap,
+      reportsSnap,
+      attSnap,
+      rdSnap,
+      injSnap,
+      tacticsSnap,
+      suggSnap,
+      admRatingsSnap,
+      psSnap,
+      ppSnap,
+    ] = await Promise.all([
+      getDoc(doc(db, 'settings', 'team')),
+      getDocs(query(collection(db, 'players'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'matches'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'reports'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'readiness'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'injuries'), where('teamId', '==', TEAM_ID))),
+      getDoc(doc(db, 'tactics', 'current')),
+      getDocs(query(collection(db, 'suggestions'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'adminRatings'), where('teamId', '==', TEAM_ID))),
+      getDoc(doc(db, 'pitchSessions', 'current')),
+      getDocs(query(collection(db, 'pitchPayments'), where('teamId', '==', TEAM_ID))),
+    ]);
+
+    return {
+      version: 6,
+      exportedAt: new Date().toISOString(),
+      sourceTeamId: TEAM_ID,
+      settings: settingsSnap.exists() ? settingsSnap.data() : {},
+      players: playersSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      matches: matchesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      reports: reportsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      attendance: attSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      readiness: rdSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      injuries: injSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      tactics: tacticsSnap.exists() ? tacticsSnap.data() : { formation: '2-2-1', slots: {} },
+      suggestions: suggSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      adminRatings: admRatingsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      pitchSession: psSnap.exists() ? psSnap.data() : null,
+      pitchPayments: ppSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    };
+  }
+
+  async runLegacyToMultiMigration(input: {
+    backupConfirmedAtMs: number;
+    onProgress?: (msg: string, pct: number) => void;
+  }): Promise<{
+    targetTeamId: string;
+    checkpoint: MigrationCheckpoint;
+    logoAdjusted: boolean;
+  }> {
+    if (!this.isPlatformOwner) {
+      throw new Error('معالج الترقية متاح لمالك الفريق الأساسي فقط');
+    }
+    const uid = this.activeUid || auth.currentUser?.uid;
+    if (!uid) throw new Error('يرجى تسجيل الدخول أولاً');
+    if (!input.backupConfirmedAtMs) {
+      throw new Error('الخطوة 1 مطلوبة: احفظ النسخة الاحتياطية JSON أولاً قبل النسخ.');
+    }
+
+    const reportProgress = input.onProgress || (() => {});
+    const existingCkpt = loadMigrationCheckpoint();
+    const targetTeamId = sanitizeTeamId(existingCkpt?.targetTeamId) || generateMultiTeamId();
+    const ckpt: MigrationCheckpoint = existingCkpt && existingCkpt.targetTeamId === targetTeamId
+      ? existingCkpt
+      : {
+          sourceTeamId: TEAM_ID,
+          targetTeamId,
+          backupConfirmedAtMs: input.backupConfirmedAtMs,
+          copiedSections: [],
+        };
+    saveMigrationCheckpoint(ckpt);
+
+    reportProgress('جاري قراءة بيانات الفريق الحالي...', 10);
+    const [
+      settingsSnap,
+      playersSnap,
+      matchesSnap,
+      reportsSnap,
+      attSnap,
+      rdSnap,
+      injSnap,
+      tacticsSnap,
+      suggSnap,
+      admRatingsSnap,
+      psSnap,
+      ppSnap,
+    ] = await Promise.all([
+      getDoc(doc(db, 'settings', 'team')),
+      getDocs(query(collection(db, 'players'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'matches'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'reports'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'readiness'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'injuries'), where('teamId', '==', TEAM_ID))),
+      getDoc(doc(db, 'tactics', 'current')),
+      getDocs(query(collection(db, 'suggestions'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'adminRatings'), where('teamId', '==', TEAM_ID))),
+      getDoc(doc(db, 'pitchSessions', 'current')),
+      getDocs(query(collection(db, 'pitchPayments'), where('teamId', '==', TEAM_ID))),
+    ]);
+
+    const legSettings = settingsSnap.exists() ? settingsSnap.data() : {};
+    const logoCheck = sanitizeTeamLogo50Kb(legSettings.logo || '');
+    const logoAdjusted = !logoCheck.ok;
+    const safeLogo = logoCheck.ok ? logoCheck.dataUrl : '';
+    const founderUid = String(legSettings.creatorUid || uid);
+    const organizerUids = Array.isArray(legSettings.organizerUids)
+      ? (legSettings.organizerUids as string[]).filter((x) => x !== founderUid)
+      : [];
+    const joinMode = legSettings.requireApproval === false ? 'instant' : 'approval';
+    const lineupPublishMode = legSettings.lineupPermission === 'organizers' ? 'organizers' : 'all';
+
+    // Section 1: team header doc
+    if (!ckpt.copiedSections.includes('team')) {
+      reportProgress('نسخ إعدادات وهوية الفريق...', 25);
+      const teamPayload = buildDefaultTeamCreatePayload({
+        teamId: targetTeamId,
+        teamName: String(legSettings.teamName || 'فريق السداسي'),
+        founderUid,
+        defaultCurrency: String(legSettings.defaultCurrency || 'ريال'),
+        defaultPitchCost: Number(legSettings.defaultPitchCost || 0),
+        primaryColor: String(legSettings.primaryColor || ROYAL_PRIMARY),
+        secondaryColor: String(legSettings.secondaryColor || ROYAL_SECONDARY),
+        logo: safeLogo,
+        joinMode,
+        lineupPublishMode,
+        inviteCode: String(legSettings.inviteCode || generateSecureInviteCode(12)),
+        memberShareCode: String(legSettings.memberShareCode || generateSecureInviteCode(12)),
+      });
+      teamPayload.organizerUids = organizerUids;
+      teamPayload.maxMembersPerTeam = Math.max(DEFAULT_MAX_MEMBERS_PER_TEAM, Math.min(100, playersSnap.size));
+      teamPayload.memberCount = Math.max(1, Math.min(teamPayload.maxMembersPerTeam, playersSnap.size));
+      await setDoc(doc(db, 'teams', targetTeamId), {
+        ...teamPayload,
+        migratedFrom: TEAM_ID,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      ckpt.copiedSections.push('team');
+      saveMigrationCheckpoint(ckpt);
+    }
+
+    // Section 2: Members + Private Split
+    if (!ckpt.copiedSections.includes('members')) {
+      reportProgress('نسخ الأعضاء وفصل السجلات الخاصة...', 45);
+      const rdAll = rdSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const injAll = injSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const writeOps: Array<(b: ReturnType<typeof writeBatch>) => void> = [];
+      for (const pDoc of playersSnap.docs) {
+        const split = splitPlayerPublicAndPrivate({
+          teamId: targetTeamId,
+          rawPlayer: { id: pDoc.id, ...pDoc.data() },
+          founderUid,
+          organizerUids,
+          readinessRecords: rdAll,
+          injuryRecords: injAll,
+        });
+        writeOps.push((b) => {
+          b.set(doc(db, 'teams', targetTeamId, 'members', split.publicMember.uid), {
+            ...split.publicMember,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        });
+        for (const priv of split.privateRecords) {
+          writeOps.push((b) => {
+            b.set(
+              doc(db, 'teams', targetTeamId, 'members', split.publicMember.uid, 'private', priv.id),
+              {
+                ...priv.data,
+                createdAt: serverTimestamp(),
+              }
+            );
+          });
+        }
+      }
+      for (const chunk of chunkItemsForBatch(writeOps, MIGRATION_BATCH_WRITE_LIMIT)) {
+        const batch = writeBatch(db);
+        chunk.forEach((fn) => fn(batch));
+        await batch.commit();
+      }
+      ckpt.copiedSections.push('members');
+      saveMigrationCheckpoint(ckpt);
+    }
+
+    // Section 3: Attendance consolidated docs + Tactics + Pitch
+    if (!ckpt.copiedSections.includes('tactics_attendance')) {
+      reportProgress('نسخ الحضور المجمّع والتشكيلة والقَطّة...', 65);
+      const consolidatedAtt = groupLegacyAttendanceByMatchKey(
+        attSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      );
+      const writeOps: Array<(b: ReturnType<typeof writeBatch>) => void> = [];
+      for (const aDoc of consolidatedAtt) {
+        writeOps.push((b) => {
+          b.set(doc(db, 'teams', targetTeamId, 'attendance', aDoc.matchKey), {
+            ...aDoc,
+            teamId: targetTeamId,
+            updatedAt: serverTimestamp(),
+          });
+        });
+      }
+      const tac = tacticsSnap.exists() ? tacticsSnap.data() : { formation: '2-2-1', slots: {} };
+      writeOps.push((b) => {
+        b.set(doc(db, 'teams', targetTeamId, 'tactics', 'current'), {
+          ...tac,
+          teamId: targetTeamId,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      if (psSnap.exists()) {
+        writeOps.push((b) => {
+          b.set(doc(db, 'teams', targetTeamId, 'pitchSessions', 'current'), {
+            ...psSnap.data(),
+            teamId: targetTeamId,
+            updatedAt: serverTimestamp(),
+          });
+        });
+      }
+      for (const pp of ppSnap.docs) {
+        writeOps.push((b) => {
+          b.set(doc(db, 'teams', targetTeamId, 'pitchPayments', pp.id), {
+            ...pp.data(),
+            teamId: targetTeamId,
+            updatedAt: serverTimestamp(),
+          });
+        });
+      }
+      for (const chunk of chunkItemsForBatch(writeOps, MIGRATION_BATCH_WRITE_LIMIT)) {
+        const batch = writeBatch(db);
+        chunk.forEach((fn) => fn(batch));
+        await batch.commit();
+      }
+      ckpt.copiedSections.push('tactics_attendance');
+      saveMigrationCheckpoint(ckpt);
+    }
+
+    // Section 4: Matches + Reports + Suggestions + AdminRatings
+    if (!ckpt.copiedSections.includes('history')) {
+      reportProgress('نسخ سجل المباريات والتقارير والتقييمات...', 88);
+      const writeOps: Array<(b: ReturnType<typeof writeBatch>) => void> = [];
+      matchesSnap.docs.forEach((d) => {
+        writeOps.push((b) =>
+          b.set(doc(db, 'teams', targetTeamId, 'matches', d.id), { ...d.data(), teamId: targetTeamId })
+        );
+      });
+      reportsSnap.docs.forEach((d) => {
+        writeOps.push((b) =>
+          b.set(doc(db, 'teams', targetTeamId, 'reports', d.id), { ...d.data(), teamId: targetTeamId, updatedAt: serverTimestamp() })
+        );
+      });
+      suggSnap.docs.forEach((d) => {
+        writeOps.push((b) =>
+          b.set(doc(db, 'teams', targetTeamId, 'suggestions', d.id), { ...d.data(), teamId: targetTeamId })
+        );
+      });
+      admRatingsSnap.docs.forEach((d) => {
+        writeOps.push((b) =>
+          b.set(doc(db, 'teams', targetTeamId, 'adminRatings', d.id), { ...d.data(), teamId: targetTeamId, updatedAt: serverTimestamp() })
+        );
+      });
+      for (const chunk of chunkItemsForBatch(writeOps, MIGRATION_BATCH_WRITE_LIMIT)) {
+        const batch = writeBatch(db);
+        chunk.forEach((fn) => fn(batch));
+        await batch.commit();
+      }
+      ckpt.copiedSections.push('history');
+      ckpt.completedAtMs = Date.now();
+      saveMigrationCheckpoint(ckpt);
+    }
+
+    reportProgress('اكتمل النسخ بأمان — جاهز لمرحلة التحقق!', 100);
+    return { targetTeamId, checkpoint: ckpt, logoAdjusted };
+  }
+
+  async verifyLegacyToMultiMigration(targetTeamId: string): Promise<{
+    ok: boolean;
+    rows: MigrationCountRow[];
+    mismatches: string[];
+  }> {
+    if (!this.isPlatformOwner) {
+      throw new Error('التحقق من الهجرة متاح لمالك الفريق فقط');
+    }
+    const cleanTarget = sanitizeTeamId(targetTeamId);
+    if (!cleanTarget) throw new Error('معرّف الوجهة غير صالح');
+
+    const [
+      srcPlayers,
+      srcRd,
+      srcInj,
+      srcMatches,
+      srcReports,
+      srcAtt,
+      srcSugg,
+      dstMembers,
+      dstMatches,
+      dstReports,
+      dstAtt,
+      dstTac,
+      dstSugg,
+    ] = await Promise.all([
+      getDocs(query(collection(db, 'players'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'readiness'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'injuries'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'matches'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'reports'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'attendance'), where('teamId', '==', TEAM_ID))),
+      getDocs(query(collection(db, 'suggestions'), where('teamId', '==', TEAM_ID))),
+      getDocs(collection(db, 'teams', cleanTarget, 'members')),
+      getDocs(collection(db, 'teams', cleanTarget, 'matches')),
+      getDocs(collection(db, 'teams', cleanTarget, 'reports')),
+      getDocs(collection(db, 'teams', cleanTarget, 'attendance')),
+      getDoc(doc(db, 'teams', cleanTarget, 'tactics', 'current')),
+      getDocs(collection(db, 'teams', cleanTarget, 'suggestions')),
+    ]);
+
+    let dstPrivateCount = 0;
+    for (const mDoc of dstMembers.docs) {
+      const pSnap = await getDocs(collection(db, 'teams', cleanTarget, 'members', mDoc.id, 'private'));
+      dstPrivateCount += pSnap.size;
+    }
+
+    const groupedAtt = groupLegacyAttendanceByMatchKey(srcAtt.docs.map((d) => ({ id: d.id, ...d.data() })));
+    const report = verifyMigrationCountReport(
+      {
+        members: srcPlayers.size,
+        privateRecords: srcRd.size + srcInj.size,
+        matches: srcMatches.size,
+        reports: srcReports.size,
+        attendanceDocs: groupedAtt.length,
+        tactics: 1,
+        suggestions: srcSugg.size,
+      },
+      {
+        members: dstMembers.size,
+        privateRecords: dstPrivateCount,
+        matches: dstMatches.size,
+        reports: dstReports.size,
+        attendanceDocs: dstAtt.size,
+        tactics: dstTac.exists() ? 1 : 0,
+        suggestions: dstSugg.size,
+      }
+    );
+
+    const ckpt = loadMigrationCheckpoint();
+    if (ckpt) {
+      ckpt.verifiedOk = report.ok;
+      saveMigrationCheckpoint(ckpt);
+    }
+    return report;
+  }
+
+  async confirmSwitchToMigratedTeam(targetTeamId: string): Promise<void> {
+    if (!this.isPlatformOwner) {
+      throw new Error('هذا الإجراء متاح لمالك الفريق فقط');
+    }
+    const uid = this.activeUid || auth.currentUser?.uid;
+    const cleanTarget = sanitizeTeamId(targetTeamId);
+    if (!uid || !cleanTarget) throw new Error('معرّف الفريق غير صالح');
+
+    await setDoc(
+      doc(db, 'users', uid),
+      {
+        uid,
+        teamIds: arrayUnion(cleanTarget),
+        ownedTeamIds: arrayUnion(cleanTarget),
+        activeTeamId: cleanTarget,
+        migratedToTeamId: cleanTarget,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    saveMigrationCheckpoint(null);
+    this.activeStorageMode = 'multi';
+    this.activeTeamId = cleanTarget;
+  }
+
   private async importCleanBackupToFirestore(
     clean: ReturnType<typeof sanitizeBackupImport>,
     captainUid: string
   ): Promise<void> {
     const ops: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
 
+    const backupShareCode = generateSecureInviteCode(12);
+    const authCtx = { isFirebaseMode: true, isCaptainSession: true };
+    const mainRec = createSmartInvitationRecord(
+      {
+        customCode: clean.settings.inviteCode,
+        teamName: clean.settings.teamName,
+        appName: clean.settings.appName,
+        primaryColor: clean.settings.primaryColor,
+        requireApproval: clean.settings.requireApproval,
+        isMemberShareCode: false,
+        usageType: 'multi',
+        maxUses: 20,
+        durationDays: 7,
+      },
+      authCtx
+    );
+    const shareRec = createSmartInvitationRecord(
+      {
+        customCode: backupShareCode,
+        teamName: clean.settings.teamName,
+        appName: clean.settings.appName,
+        primaryColor: clean.settings.primaryColor,
+        requireApproval: true,
+        isMemberShareCode: true,
+        usageType: 'multi',
+        maxUses: 100,
+        durationDays: 90,
+      },
+      authCtx
+    );
+
     ops.push((b) => {
       b.set(doc(db, 'settings', 'team'), {
         teamId: TEAM_ID,
         ...clean.settings,
+        memberShareCode: backupShareCode,
+        creatorUid: captainUid,
+        organizerUids: [captainUid],
+        lineupPermission: 'all',
+        defaultCurrency: 'ريال',
+        defaultPitchCost: 0,
         updatedAt: serverTimestamp(),
       });
       b.set(doc(db, 'publicMeta', 'branding'), {
@@ -2362,6 +5417,36 @@ class MaydanBackendService {
         code: clean.settings.inviteCode,
         active: true,
         requireApproval: clean.settings.requireApproval,
+        isMemberShareCode: false,
+        teamId: TEAM_ID,
+        teamName: clean.settings.teamName,
+        appName: clean.settings.appName,
+        primaryColor: clean.settings.primaryColor,
+        usageType: mainRec.usageType,
+        maxUses: mainRec.maxUses,
+        usedCount: 0,
+        durationDays: mainRec.durationDays,
+        createdAtMs: mainRec.createdAtMs,
+        expiresAtMs: mainRec.expiresAtMs,
+        status: 'active',
+        updatedAt: serverTimestamp(),
+      });
+      b.set(doc(db, 'inviteCodes', backupShareCode), {
+        code: backupShareCode,
+        active: true,
+        requireApproval: true,
+        isMemberShareCode: true,
+        teamId: TEAM_ID,
+        teamName: clean.settings.teamName,
+        appName: clean.settings.appName,
+        primaryColor: clean.settings.primaryColor,
+        usageType: shareRec.usageType,
+        maxUses: shareRec.maxUses,
+        usedCount: 0,
+        durationDays: shareRec.durationDays,
+        createdAtMs: shareRec.createdAtMs,
+        expiresAtMs: shareRec.expiresAtMs,
+        status: 'active',
         updatedAt: serverTimestamp(),
       });
       b.set(doc(db, 'tactics', 'current'), {
@@ -2433,15 +5518,17 @@ class MaydanBackendService {
       });
     }
 
+    const playerNameMap = new Map(clean.players.map((p) => [String(p.id), String(p.name || 'لاعب')]));
     for (const r of clean.reports) {
       ops.push((b) => {
         b.set(doc(db, 'reports', String(r.id)), {
           teamId: TEAM_ID,
           playerId: r.playerId,
-          ownerUid: String(r.ownerUid || ''),
+          ownerUid: String(r.ownerUid || captainUid),
+          playerName: playerNameMap.get(String(r.playerId)) || 'لاعب',
           opponent: r.opponent,
-          goals: r.goals,
-          assists: r.assists,
+          goals: Math.min(MAX_GOALS_PER_MATCH, Number(r.goals || 0)),
+          assists: Math.min(MAX_ASSISTS_PER_MATCH, Number(r.assists || 0)),
           minutes: r.minutes,
           interceptions: r.interceptions,
           turnovers: r.turnovers,
@@ -2452,8 +5539,12 @@ class MaydanBackendService {
           motmVote: r.motmVote,
           pitchMode: sanitizePitchMode(r.pitchMode),
           matchResult: sanitizeMatchResult(r.matchResult),
-          goalsConceded: Math.round(clampNum(r.goalsConceded, 0, 30, 0)),
+          goalsConceded: Math.round(clampNum(r.goalsConceded, 0, MAX_CONCEDED_PER_MATCH, 0)),
+          confirmedByUids: [],
+          verified: false,
+          createdAtMs: Date.now(),
           createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         });
       });
     }
@@ -2463,12 +5554,13 @@ class MaydanBackendService {
         b.set(doc(db, 'attendance', String(a.id)), {
           teamId: TEAM_ID,
           playerId: a.playerId,
-          ownerUid: String(a.ownerUid || ''),
+          ownerUid: String(a.ownerUid || captainUid),
           playerName: a.playerName,
           date: a.date,
           type: a.type,
-          status: a.status,
+          status: normalizeAttendanceStatus(a.status),
           createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         });
       });
     }
@@ -2525,7 +5617,6 @@ class MaydanBackendService {
       });
     }
 
-    // Commit in chunks of 180 operations (safely below Firestore's 500 batch limit)
     for (let i = 0; i < ops.length; i += 180) {
       const batch = writeBatch(db);
       for (const fn of ops.slice(i, i + 180)) fn(batch);
@@ -2550,6 +5641,7 @@ class MaydanBackendService {
       'pitchPayments',
       'matchSessions',
       'missionClaims',
+      'lineupVotes',
     ];
     for (const colName of colNames) {
       const snap = await getDocs(query(collection(db, colName), where('teamId', '==', TEAM_ID)));
@@ -2564,7 +5656,6 @@ class MaydanBackendService {
       }
     }
 
-    // Delete non-captain players
     const pSnap = await getDocs(query(collection(db, 'players'), where('teamId', '==', TEAM_ID)));
     const batch = writeBatch(db);
     pSnap.docs.forEach((d) => {
