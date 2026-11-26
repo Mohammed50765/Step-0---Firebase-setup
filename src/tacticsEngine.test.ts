@@ -20,6 +20,8 @@ function makeMockFrames(count = 4, dur = 2400): TacticalKeyframe[] {
     ourPos: [{ x: 20 + i * 15, y: 80 - i * 15 }],
     oppPos: [{ x: 50, y: 20 + i * 10 }],
     ball: { x: 20 + i * 15, y: 80 - i * 15 },
+    activeIndices: [0],
+    arrows: [],
   }));
 }
 

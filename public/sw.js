@@ -1,26 +1,30 @@
 /**
- * ميدان 6v6 — Service Worker آمن وخفيف (Static Shell Only)
- * - يخزن الأصول الثابتة فقط (HTML/Icons/Manifest).
- * - لا يخزن أبداً طلبات Firestore أو Google Auth أو أي بيانات خاصة.
- * - يدعم التحديث الفوري ومسح الكاش الكامل عند تسجيل الخروج.
+ * ميدان 6v6 — Service Worker آمن وخفيف للإطلاق التجاري (Static Shell Only)
+ * - يخزن الأصول الثابتة الآمنة فقط (الأيقونات والشعار والأصول المجمّعة).
+ * - لا يخزن أبداً طلبات Firestore أو Google Auth أو App Check أو روابط الدعوة أو أي بيانات خاصة.
+ * - يستخدم Network-First لـ index.html و manifest.webmanifest حتى لا يُحبس المستخدم على نسخة قديمة.
+ * - يدعم التحديث الفوري ومسح الكاش الكامل عند تسجيل الخروج أو حذف الحساب.
  */
-const CACHE_VERSION = 'maydan-static-v2';
+const CACHE_VERSION = 'maydan-static-v3';
 const STATIC_ASSETS = [
-  '/manifest.webmanifest',
   '/icon.svg',
   '/icon-192.png',
   '/icon-512.png',
   '/apple-touch-icon.png',
-  '/favicon-32x32.png'
+  '/favicon-32x32.png',
+  '/assets/midan-crest.webp'
 ];
 
 const NEVER_CACHE_PATTERNS = [
   'firestore.googleapis.com',
   'identitytoolkit.googleapis.com',
   'securetoken.googleapis.com',
+  'firebaseappcheck.googleapis.com',
   'googleapis.com',
   'accounts.google.com',
   'apis.google.com',
+  'gstatic.com/recaptcha',
+  'recaptcha.net',
   'firebaseinstallations',
   'firebaseio.com',
   '/__/',
@@ -36,7 +40,14 @@ function isSensitiveOrDynamicRequest(request) {
     for (let i = 0; i < NEVER_CACHE_PATTERNS.length; i++) {
       if (full.indexOf(NEVER_CACHE_PATTERNS[i]) !== -1) return true;
     }
-    if (url.search && (url.search.indexOf('join=') !== -1 || url.search.indexOf('token=') !== -1)) {
+    const q = url.search.toLowerCase();
+    if (
+      q &&
+      (q.indexOf('join=') !== -1 ||
+        q.indexOf('code=') !== -1 ||
+        q.indexOf('invite=') !== -1 ||
+        q.indexOf('token=') !== -1)
+    ) {
       return true;
     }
     return false;
@@ -83,17 +94,35 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
+  // Navigation & HTML shell: strictly Network-First so updates deploy immediately
   if (request.mode === 'navigate' || url.pathname === '/' || url.pathname === '/index.html') {
     event.respondWith(
-      fetch(request).catch(() => new Response(
-        '<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>ميدان 6v6 — بدون اتصال</title><body style="background:#08090c;color:#f8fafc;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px;"><div><h1 style="color:#FACC15;">📡 لا يوجد اتصال بالإنترنت</h1><p>تحقّق من الاتصال ثم أعد تحميل الصفحة للمتابعة في ميدان 6v6.</p></div></body></html>',
+      fetch(request, { cache: 'no-cache' }).catch(() => new Response(
+        '<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ميدان 6v6 — بدون اتصال</title><body style="background:#08090c;color:#f8fafc;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px;"><div><h1 style="color:#FACC15;">📡 لا يوجد اتصال بالإنترنت</h1><p>تحقّق من الاتصال ثم أعد تحميل الصفحة للمتابعة في ميدان 6v6.</p></div></body></html>',
         { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
       ))
     );
     return;
   }
 
-  const isStaticFile = /\.(?:png|svg|ico|webmanifest|css|js|woff2?)$/i.test(url.pathname);
+  // Manifest: Network-First with cache fallback so icon/name updates propagate cleanly
+  if (url.pathname === '/manifest.webmanifest') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.ok && response.type === 'basic') {
+            const copy = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy)).catch(() => {});
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // Immutable hashed Vite bundles & static media icons/fonts
+  const isStaticFile = /\.(?:png|webp|svg|ico|css|js|woff2?)$/i.test(url.pathname);
   if (!isStaticFile) {
     return;
   }

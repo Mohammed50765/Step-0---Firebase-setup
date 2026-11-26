@@ -19,7 +19,7 @@ import {
   resolvePositionRole,
   type Stats6,
   type VerifiedMatchInput,
-} from './ratingEngine.ts';
+} from './ratingEngine';
 
 describe('Maydan Realistic Anti-Inflation Rating Engine (Phase A)', () => {
   it('enforces exact 360-point creation budget with 40–85 bounds and blocks invalid totals', () => {
@@ -292,7 +292,7 @@ describe('Maydan Realistic Anti-Inflation Rating Engine (Phase A)', () => {
   });
 
   it('enforces 3-layer separation, single-match swing cap, captain rating separation, and respectful comparison', async () => {
-    const { buildRespectfulComparisonSummary } = await import('./ratingEngine.ts');
+    const { buildRespectfulComparisonSummary } = await import('./ratingEngine');
     const baseStats: Stats6 = { PAC: 66, SHO: 68, DRI: 66, PAS: 54, DEF: 50, PHY: 56 };
 
     // 1 single huge match must NEVER cause a big OVR swing (capped at +1)

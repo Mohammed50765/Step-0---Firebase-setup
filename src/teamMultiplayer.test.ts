@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { MinimalPlayer } from './tacticsData';
 import {
   REPORT_COOLDOWN_MS,
   MAX_GOALS_PER_MATCH,
@@ -158,7 +159,7 @@ test('applyReportConfirmation prevents self-confirmation and verifies teammate r
 });
 
 test('autoBalanceConfirmedAttendees splits confirmed players evenly by rating', () => {
-  const players = [
+  const players: MinimalPlayer[] = [
     { id: 'p1', name: 'أحمد', primaryPos: 'مهاجم', skills: { speed: 9, shooting: 9, passing: 8 } },
     { id: 'p2', name: 'خالد', primaryPos: 'حارس مرمى', skills: { defending: 8, positioning: 8 } },
     { id: 'p3', name: 'سعد', primaryPos: 'مدافع', skills: { defending: 7, stamina: 8 } },

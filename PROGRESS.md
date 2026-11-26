@@ -180,4 +180,21 @@
   - تقدير استهلاك Spark اليومي (`10` فرق × `15` لاعباً × `3` فتحات = `450` جلسة/يوم): نحو **`~1,450–2,700` قراءة يومياً** بفضل `persistentLocalCache` ومستمع دائم واحد (`teams/{teamId}`) ومستمعات تبويب كسولة وحدّ `limit(20)` — أي أقل من **`6%`** من حد Spark المجاني (`50,000` قراءة/يوم).
   - **حالة النشر:** ⏸️ متوقف تماماً عند **«بوابة القواعد»** — لم يتم استدعاء `deploy_firebase` أو `DeployRules` أو تشغيل أي هجرة بيانات فعلية بانتظار عبارة **«انشر القواعد»**.
 
+---
 
+# سجل التقدم — تجهيز الإطلاق التجاري (Production Release Readiness & Hardening)
+
+تاريخ التنفيذ: 2026-11-26
+النسخة الاحتياطية قبل البدء: `backups/release-hardening-before/`
+التقرير الكامل: `RELEASE_READINESS_REPORT.md`
+
+- [x] **النسخة الاحتياطية وفحص الأسرار:** حفظ نسخة تراجع كاملة في `backups/release-hardening-before/` وتأكيد خلو المستودع من أي أسرار أو مفاتيح خاصة.
+- [x] **TypeScript Strict (`tsconfig.json`) وإصلاحات فعلية:** `npm run typecheck` (`0` أخطاء، صفر `any`/`@ts-ignore`) مع إصلاح `s.roleGroup` في `src/tacticsLayout.ts` والمفتاح المكرر في `src/backend.ts`.
+- [x] **تحصين الخصوصية للأجهزة المشتركة (`src/localCachePrivacy.ts` و`src/firebase.ts` و`src/backend.ts`):** اعتماد `memoryLocalCache()` افتراضياً، وتفعيل `persistentLocalCache()` اختيارياً للأجهزة الشخصية فقط من إعدادات الفريق، ومسح شامل لمفاتيح التخزين المحلي والـ SW عند تسجيل الخروج.
+- [x] **App Check اختياري + تشخيص الاتصال + حذف الحساب والشفافية القانونية:** إضافة `ReCaptchaV3Provider` الاختياري عبر `VITE_RECAPTCHA_SITE_KEY` (في `.env.example` فارغاً بدون Enforcement)، ودالة `deleteMyAccountAndData()` بحذف من خطوتين (كتابة `حذف`)، وتوسيع `#privacyNoticeModal` بسياسة الخصوصية والشروط وإفصاح `/private/*` وبريد الدعم `ammarfara210@gmail.com`.
+- [x] **إصلاحات قواعد Firestore الحرجة وتشغيل المحاكي الفعلي (`41/41` ناجح):**
+  - حل تجاوز سقف الـ 1,000 تعبير في `firestore.rules`، وإضافة فحص `resource != null` في سطر 1846، ونقل منفذ المحاكي إلى `127.0.0.1:8089` لتجنب تعارض Nginx على `8080`.
+  - اجتياز **41/41** اختباراً على محاكي Firestore الفعلي (`#1–#36` + حالات التحصين الجديدة `#37–#42` شاملة محاكاة هجرة كاملة من `main` إلى `teams/{tid}`).
+- [x] **تحسين الأصول والـ PWA وCI:** ضغط الشعار من `3.0 MB` إلى `69 KB` WebP (`97.7%` توفير)، وتحديث `public/sw.js` (`maydan-static-v3`) و`firebase.json` (Hosting)، وإضافة `/.github/workflows/ci.yml` الصارم والتحقق من تطابق `bun.lock`.
+- [x] **التحقق الشامل:** `npm run typecheck` (0 أخطاء)، `npm run lint` (0 أخطاء)، `npm test` (**110/110**)، محاكي القواعد (**41/41**)، `npm run build` (ناجح)، واختبار Chromium E2E على المقاسات `360/390/412/1440` (`0` أخطاء، `0px` طفح، `0` ظهور لـ FIFA/فيفا، `0` مفاتيح متبقية بعد الخروج).
+- **الحالة النهائية:** **`READY FOR CLOSED BETA`** — لم يتم نشر القواعد أو الاستضافة تلقائياً؛ راجع قائمة خطوات Firebase Console اليدوية في `RELEASE_READINESS_REPORT.md`.

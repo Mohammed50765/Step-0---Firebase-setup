@@ -1,0 +1,56 @@
+name: Maydan 6v6 CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, Lint, Unit Tests, Firestore Rules & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Java 21 (Firestore Emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: TypeScript Strict Check
+        run: npm run typecheck
+
+      - name: Lint HTML & Firestore Rules
+        run: npm run lint
+
+      - name: Run Unit Test Suite
+        run: npm test
+
+      - name: Run Firestore Security Rules Emulator Tests
+        run: firebase emulators:exec --only firestore --project maydan-6v6-rules-test "npm run test:rules"
+
+      - name: Production Vite Build
+        run: npm run build

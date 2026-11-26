@@ -174,6 +174,7 @@ test('resolveYourRoleCard uses real currentUser data and never invents fake OVR'
       oppPos: [],
       ball: { x: 50, y: 50 },
       activeIndices: [3],
+      arrows: [],
     },
     spotlightSlotIdx: null,
     getRoleInfo: (idx) => getRoleSpotlightSequence('6v6', '2-2-1', idx),

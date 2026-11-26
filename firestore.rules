@@ -9,11 +9,11 @@ service cloud.firestore {
 
     // ==================== 1. HARDENED PRIMITIVES & IDENTITY ====================
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.matches('^[a-zA-Z0-9_\\-]{1,128}$');
     }
 
     function isValidTeamId(tid) {
-      return isValidId(tid) && tid.size() >= 2 && tid.size() <= 64 && tid != 'main';
+      return tid is string && tid != 'main' && tid.matches('^[a-zA-Z0-9_\\-]{2,64}$');
     }
 
     function incoming() {
@@ -112,6 +112,196 @@ service cloud.firestore {
         get(/databases/$(database)/documents/platform/config).data.allowNewTeams == true;
     }
 
+    function isMultiTeamActive(tid) {
+      return exists(/databases/$(database)/documents/teams/$(tid)) &&
+        get(/databases/$(database)/documents/teams/$(tid)).data.deletedAt == null;
+    }
+
+    function isUserUnderTeamCapsBefore() {
+      let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return (!('ownedTeamIds' in u) || u.ownedTeamIds.size() < 3) &&
+        (!('teamIds' in u) || u.teamIds.size() < 5);
+    }
+
+    function isUserTeamCreateAfterValid(tid) {
+      let uAfter = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return (tid in uAfter.ownedTeamIds) &&
+        (tid in uAfter.teamIds) &&
+        uAfter.ownedTeamIds.size() <= 3 &&
+        uAfter.teamIds.size() <= 5;
+    }
+
+    function isUserInstantJoinAfterValid(tid) {
+      let uAfter = getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return (tid in uAfter.teamIds) && uAfter.teamIds.size() <= 5;
+    }
+
+    function checkMultiInstantJoin(tid) {
+      let jrAfter = getAfter(/databases/$(database)/documents/teams/$(tid)/joinRequests/$(request.auth.uid)).data;
+      let inv = get(/databases/$(database)/documents/inviteCodes/$(jrAfter.inviteCode)).data;
+      return jrAfter.createdAt == request.time &&
+        jrAfter.status == 'approved' &&
+        inv.teamId == tid &&
+        inv.active == true &&
+        inv.status == 'active' &&
+        request.time.toMillis() < inv.expiresAtMs &&
+        inv.requireApproval == false &&
+        inv.isMemberShareCode != true;
+    }
+
+    function canCreateMultiMember(tid, memberId, data) {
+      let d = data;
+      return exists(/databases/$(database)/documents/teams/$(tid))
+        ? canCreateMultiMemberInExistingTeam(tid, memberId, d)
+        : (
+            memberId == request.auth.uid &&
+            d.ownerUid == request.auth.uid &&
+            getAfter(/databases/$(database)/documents/teams/$(tid)).data.founderUid == request.auth.uid
+          );
+    }
+
+    function canCreateMultiMemberInExistingTeam(tid, memberId, data) {
+      let d = data;
+      let team = get(/databases/$(database)/documents/teams/$(tid)).data;
+      return team.founderUid == request.auth.uid || (
+        memberId == request.auth.uid &&
+        d.ownerUid == request.auth.uid &&
+        d.role == 'member' &&
+        d.isOrganizer == false &&
+        team.deletedAt == null &&
+        team.joinMode == 'instant' &&
+        team.memberCount < team.maxMembersPerTeam &&
+        getAfter(/databases/$(database)/documents/teams/$(tid)).data.memberCount == team.memberCount + 1 &&
+        checkMultiInstantJoin(tid)
+      );
+    }
+
+    function canUpdateMultiMember(tid, prev, next) {
+      let team = get(/databases/$(database)/documents/teams/$(tid)).data;
+      let diff = next.diff(prev).affectedKeys();
+      return team.founderUid == request.auth.uid || (
+        prev.ownerUid == request.auth.uid &&
+        next.ownerUid == prev.ownerUid &&
+        next.role == prev.role &&
+        next.isOrganizer == prev.isOrganizer &&
+        team.deletedAt == null &&
+        diff.hasOnly([
+          'name', 'jersey', 'age', 'height', 'weight', 'foot',
+          'primaryPos', 'secondaryPos', 'photo', 'hasPhoto', 'photoZoom', 'photoY',
+          'skills', 'stats6', 'roleOverride', 'top3Strengths', 'weak3Points',
+          'seasonGoal', 'availableStatus', 'roleModelStarId', 'updatedAtMs', 'updatedAt'
+        ]) && (
+          !diff.hasAny(['skills', 'stats6']) ||
+          team.lockSkills == false
+        )
+      );
+    }
+
+    function checkMultiJoinInviteDoc(tid, code, reqStatus) {
+      let inv = get(/databases/$(database)/documents/inviteCodes/$(code)).data;
+      let invAfter = getAfter(/databases/$(database)/documents/inviteCodes/$(code)).data;
+      return inv.teamId == tid &&
+        inv.active == true &&
+        inv.status == 'active' &&
+        request.time.toMillis() < inv.expiresAtMs &&
+        inv.usedCount < inv.maxUses &&
+        invAfter.usedCount == inv.usedCount + 1 && (
+          reqStatus == 'pending' ||
+          (
+            reqStatus == 'approved' &&
+            inv.requireApproval == false &&
+            inv.isMemberShareCode != true
+          )
+        );
+    }
+
+    function isValidInviteUsageIncrement(prev, next) {
+      return prev.active == true &&
+        prev.status == 'active' &&
+        request.time.toMillis() < prev.expiresAtMs &&
+        prev.usedCount < prev.maxUses &&
+        next.diff(prev).affectedKeys().hasOnly(['usedCount', 'active', 'status', 'updatedAt']) &&
+        next.usedCount == prev.usedCount + 1 &&
+        next.active == (next.usedCount < prev.maxUses) &&
+        next.status == (next.usedCount >= prev.maxUses ? 'completed' : 'active');
+    }
+
+    function canUpdateMultiTeamDoc(tid, prev, next) {
+      let diff = next.diff(prev).affectedKeys();
+      return prev.deletedAt == null && (
+        (
+          prev.founderUid == request.auth.uid && (
+            // Action 1: Founder updates team settings / organizers / maxMembersPerTeam
+            (
+              next.founderUid == prev.founderUid &&
+              next.memberCount == prev.memberCount &&
+              next.deletedAt == prev.deletedAt &&
+              diff.hasOnly([
+                'teamName', 'appName', 'primaryColor', 'secondaryColor', 'logo',
+                'inviteCode', 'memberShareCode', 'joinMode', 'lineupPublishMode',
+                'lockSkills', 'maxMembersPerTeam', 'organizerUids',
+                'defaultCurrency', 'defaultPitchCost', 'updatedAtMs', 'updatedAt'
+              ])
+            ) ||
+            // Action 2: Founder transfers leadership to an existing team member
+            (
+              next.founderUid != prev.founderUid &&
+              exists(/databases/$(database)/documents/teams/$(tid)/members/$(next.founderUid)) &&
+              (request.auth.uid in next.organizerUids) &&
+              diff.hasOnly(['founderUid', 'organizerUids', 'updatedAtMs', 'updatedAt'])
+            ) ||
+            // Action 3: Founder increments memberCount (+1) on member add / join approval
+            (
+              prev.memberCount < prev.maxMembersPerTeam &&
+              next.memberCount == prev.memberCount + 1 &&
+              diff.hasOnly(['memberCount', 'updatedAt'])
+            ) ||
+            // Action 4: Founder decrements memberCount (-1) on member removal
+            (
+              next.memberCount == prev.memberCount - 1 &&
+              diff.hasOnly(['memberCount', 'organizerUids', 'updatedAt'])
+            ) ||
+            // Action 5: Founder soft-deletes team (deletedAt = request.time)
+            (
+              next.deletedAt == request.time &&
+              diff.hasOnly(['deletedAt', 'updatedAtMs', 'updatedAt'])
+            )
+          )
+        ) ||
+        // Action 6: Tier 2 Team Organizer limited settings update (never inviteCode, founderUid, joinMode, or lockSkills)
+        (
+          (request.auth.uid in prev.organizerUids) &&
+          exists(/databases/$(database)/documents/teams/$(tid)/members/$(request.auth.uid)) &&
+          diff.hasOnly([
+            'teamName', 'logo', 'defaultCurrency', 'defaultPitchCost',
+            'lineupPublishMode', 'updatedAtMs', 'updatedAt'
+          ])
+        ) ||
+        // Action 7: Atomic Instant Join memberCount (+1) paired with new member & approved joinRequest
+        (
+          prev.joinMode == 'instant' &&
+          prev.memberCount < prev.maxMembersPerTeam &&
+          next.memberCount == prev.memberCount + 1 &&
+          diff.hasOnly(['memberCount', 'updatedAt']) &&
+          !exists(/databases/$(database)/documents/teams/$(tid)/members/$(request.auth.uid)) &&
+          existsAfter(/databases/$(database)/documents/teams/$(tid)/members/$(request.auth.uid)) &&
+          existsAfter(/databases/$(database)/documents/teams/$(tid)/joinRequests/$(request.auth.uid)) &&
+          existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          isUserInstantJoinAfterValid(tid)
+        ) ||
+        // Action 8: Atomic Member Self-Leave memberCount (-1) paired with self-deletion
+        (
+          request.auth.uid != prev.founderUid &&
+          next.memberCount == prev.memberCount - 1 &&
+          diff.hasOnly(['memberCount', 'organizerUids', 'updatedAt']) &&
+          !(request.auth.uid in next.organizerUids) &&
+          prev.organizerUids.hasAll(next.organizerUids) &&
+          exists(/databases/$(database)/documents/teams/$(tid)/members/$(request.auth.uid)) &&
+          !existsAfter(/databases/$(database)/documents/teams/$(tid)/members/$(request.auth.uid))
+        )
+      );
+    }
+
     function isValidDateStr(d) {
       return d is string && d.size() == 10 && d.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
     }
@@ -145,40 +335,42 @@ service cloud.firestore {
     }
 
     function isValidSkillVal(v) {
-      return v is number && v >= 1 && v <= 10;
+      let x = v;
+      return x >= 1 && x <= 10;
     }
 
     function isValidSkillsMap(sk) {
-      return sk is map &&
-        sk.keys().hasAll(['speed', 'shooting', 'passing', 'dribbling', 'defending', 'stamina', 'vision', 'teamwork', 'control', 'positioning']) &&
-        sk.keys().hasOnly(['speed', 'shooting', 'passing', 'dribbling', 'defending', 'stamina', 'vision', 'teamwork', 'control', 'positioning']) &&
-        isValidSkillVal(sk.speed) &&
-        isValidSkillVal(sk.shooting) &&
-        isValidSkillVal(sk.passing) &&
-        isValidSkillVal(sk.dribbling) &&
-        isValidSkillVal(sk.defending) &&
-        isValidSkillVal(sk.stamina) &&
-        isValidSkillVal(sk.vision) &&
-        isValidSkillVal(sk.teamwork) &&
-        isValidSkillVal(sk.control) &&
-        isValidSkillVal(sk.positioning);
+      let m = sk;
+      return m is map &&
+        m.size() == 10 &&
+        m.speed >= 1 && m.speed <= 10 &&
+        m.shooting >= 1 && m.shooting <= 10 &&
+        m.passing >= 1 && m.passing <= 10 &&
+        m.dribbling >= 1 && m.dribbling <= 10 &&
+        m.defending >= 1 && m.defending <= 10 &&
+        m.stamina >= 1 && m.stamina <= 10 &&
+        m.vision >= 1 && m.vision <= 10 &&
+        m.teamwork >= 1 && m.teamwork <= 10 &&
+        m.control >= 1 && m.control <= 10 &&
+        m.positioning >= 1 && m.positioning <= 10;
     }
 
     function isValidStat6Val(v) {
-      return v is int && v >= 40 && v <= 85;
+      let x = v;
+      return x is int && x >= 40 && x <= 85;
     }
 
     function isValidStats6Map(s) {
-      return s is map &&
-        s.keys().hasAll(['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY']) &&
-        s.keys().hasOnly(['PAC', 'SHO', 'PAS', 'DRI', 'DEF', 'PHY']) &&
-        isValidStat6Val(s.PAC) &&
-        isValidStat6Val(s.SHO) &&
-        isValidStat6Val(s.PAS) &&
-        isValidStat6Val(s.DRI) &&
-        isValidStat6Val(s.DEF) &&
-        isValidStat6Val(s.PHY) &&
-        (s.PAC + s.SHO + s.PAS + s.DRI + s.DEF + s.PHY) == 360;
+      let m = s;
+      return m is map &&
+        m.size() == 6 &&
+        m.PAC is int && m.PAC >= 40 && m.PAC <= 85 &&
+        m.SHO is int && m.SHO >= 40 && m.SHO <= 85 &&
+        m.PAS is int && m.PAS >= 40 && m.PAS <= 85 &&
+        m.DRI is int && m.DRI >= 40 && m.DRI <= 85 &&
+        m.DEF is int && m.DEF >= 40 && m.DEF <= 85 &&
+        m.PHY is int && m.PHY >= 40 && m.PHY <= 85 &&
+        (m.PAC + m.SHO + m.PAS + m.DRI + m.DEF + m.PHY) == 360;
     }
 
     function isValidRoleOverride(r) {
@@ -220,96 +412,83 @@ service cloud.firestore {
     }
 
     function isValidMultiTeam(data, tid) {
-      return data.keys().hasAll([
-          'id', 'teamName', 'appName', 'founderUid', 'organizerUids',
-          'primaryColor', 'secondaryColor', 'joinMode', 'lineupPublishMode',
-          'maxMembersPerTeam', 'memberCount', 'inviteCode', 'memberShareCode',
-          'lockSkills', 'updatedAt'
-        ]) &&
-        data.keys().hasOnly([
+      let d = data;
+      return isValidTeamId(tid) &&
+        d.keys().hasOnly([
           'id', 'teamName', 'appName', 'founderUid', 'organizerUids',
           'primaryColor', 'secondaryColor', 'logo', 'joinMode', 'lineupPublishMode',
           'defaultCurrency', 'defaultPitchCost', 'maxMembersPerTeam', 'memberCount',
           'inviteCode', 'memberShareCode', 'lockSkills', 'deletedAt', 'migratedFrom',
           'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
         ]) &&
-        isValidTeamId(tid) &&
-        data.id == tid &&
-        data.teamName is string && data.teamName.size() >= 1 && data.teamName.size() <= 80 &&
-        data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 60 &&
-        isValidId(data.founderUid) &&
-        data.organizerUids is list && data.organizerUids.size() <= 30 &&
-        isValidHexColor(data.primaryColor) &&
-        isValidHexColor(data.secondaryColor) &&
-        (!('logo' in data) || (data.logo is string && data.logo.size() <= 68500 && (data.logo == '' || data.logo.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')))) &&
-        data.joinMode in ['approval', 'instant'] &&
-        data.lineupPublishMode in ['organizers', 'all'] &&
-        (!('defaultCurrency' in data) || (data.defaultCurrency is string && data.defaultCurrency.size() >= 1 && data.defaultCurrency.size() <= 20)) &&
-        (!('defaultPitchCost' in data) || (data.defaultPitchCost is number && data.defaultPitchCost >= 0 && data.defaultPitchCost <= 100000)) &&
-        data.maxMembersPerTeam is int && data.maxMembersPerTeam >= 6 && data.maxMembersPerTeam <= 100 &&
-        data.memberCount is int && data.memberCount >= 0 && data.memberCount <= data.maxMembersPerTeam &&
-        isValidInviteCodeStr(data.inviteCode) &&
-        isValidInviteCodeStr(data.memberShareCode) &&
-        data.lockSkills is bool &&
-        (!('deletedAt' in data) || data.deletedAt == null || data.deletedAt is timestamp) &&
-        (!('migratedFrom' in data) || data.migratedFrom == 'main') &&
-        (!('createdAtMs' in data) || (data.createdAtMs is int && data.createdAtMs >= 0)) &&
-        (!('updatedAtMs' in data) || (data.updatedAtMs is int && data.updatedAtMs >= 0)) &&
-        (!('createdAt' in data) || data.createdAt is timestamp) &&
-        data.updatedAt == request.time;
+        d.id == tid &&
+        d.teamName is string && d.teamName.size() >= 1 && d.teamName.size() <= 80 &&
+        d.appName is string && d.appName.size() >= 1 && d.appName.size() <= 60 &&
+        isValidId(d.founderUid) &&
+        d.organizerUids is list && d.organizerUids.size() <= 30 &&
+        isValidHexColor(d.primaryColor) &&
+        isValidHexColor(d.secondaryColor) &&
+        (!('logo' in d) || (d.logo is string && d.logo.size() <= 68500 && (d.logo == '' || d.logo.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')))) &&
+        d.joinMode in ['approval', 'instant'] &&
+        d.lineupPublishMode in ['organizers', 'all'] &&
+        (!('defaultCurrency' in d) || (d.defaultCurrency is string && d.defaultCurrency.size() >= 1 && d.defaultCurrency.size() <= 20)) &&
+        (!('defaultPitchCost' in d) || (d.defaultPitchCost >= 0 && d.defaultPitchCost <= 100000)) &&
+        d.maxMembersPerTeam is int && d.maxMembersPerTeam >= 6 && d.maxMembersPerTeam <= 100 &&
+        d.memberCount is int && d.memberCount >= 0 && d.memberCount <= d.maxMembersPerTeam &&
+        isValidInviteCodeStr(d.inviteCode) &&
+        isValidInviteCodeStr(d.memberShareCode) &&
+        d.lockSkills is bool &&
+        (!('deletedAt' in d) || d.deletedAt == null || d.deletedAt is timestamp) &&
+        (!('migratedFrom' in d) || d.migratedFrom == 'main') &&
+        (!('createdAtMs' in d) || d.createdAtMs >= 0) &&
+        (!('updatedAtMs' in d) || d.updatedAtMs >= 0) &&
+        (!('createdAt' in d) || d.createdAt is timestamp) &&
+        d.updatedAt == request.time;
     }
 
+    // Strict whitelist mathematically excludes all health/readiness/injury/medical/PIN keys;
+    // lean CEL checks keep full 30-key member profiles well below Firestore's 1000-expression limit.
     function isValidMultiTeamMember(data, memberId, tid) {
-      return data.keys().hasAll([
-          'id', 'uid', 'ownerUid', 'teamId', 'name', 'role', 'isOrganizer',
-          'jersey', 'primaryPos', 'skills', 'availableStatus', 'updatedAt'
-        ]) &&
-        data.keys().hasOnly([
+      let d = data;
+      return isValidId(memberId) &&
+        isValidTeamId(tid) &&
+        d.keys().hasOnly([
           'id', 'uid', 'ownerUid', 'teamId', 'name', 'role', 'isOrganizer',
           'jersey', 'age', 'height', 'weight', 'foot', 'primaryPos', 'secondaryPos',
           'photo', 'hasPhoto', 'photoZoom', 'photoY', 'skills', 'stats6', 'roleOverride',
           'top3Strengths', 'weak3Points', 'seasonGoal', 'availableStatus',
           'roleModelStarId', 'joinedAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
         ]) &&
-        !data.keys().hasAny([
-          'sleep', 'fatigue', 'mood', 'injury', 'injuries', 'severity',
-          'expectedReturn', 'readiness', 'medicalNotes', 'medication', 'diagnosis',
-          'rpe', 'pin', 'pinHash'
-        ]) &&
-        isValidId(memberId) &&
-        isValidTeamId(tid) &&
-        data.id == memberId &&
-        isValidId(data.uid) &&
-        data.uid == memberId &&
-        data.teamId == tid &&
-        data.ownerUid is string && data.ownerUid.size() <= 128 &&
-        (data.ownerUid == '' || isValidId(data.ownerUid)) &&
-        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
-        data.role in ['founder', 'organizer', 'member'] &&
-        data.isOrganizer is bool &&
-        data.jersey is number && data.jersey >= 0 && data.jersey <= 99 &&
-        (!('age' in data) || (data.age is number && data.age >= 10 && data.age <= 70)) &&
-        (!('height' in data) || (data.height is number && data.height >= 100 && data.height <= 230)) &&
-        (!('weight' in data) || (data.weight is number && data.weight >= 30 && data.weight <= 160)) &&
-        (!('foot' in data) || isValidFoot(data.foot)) &&
-        isValidPos(data.primaryPos) &&
-        (!('secondaryPos' in data) || isValidSecondaryPos(data.secondaryPos)) &&
-        (!('photo' in data) || (data.photo is string && data.photo.size() <= 250000 && (data.photo == '' || data.photo.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')))) &&
-        (!('hasPhoto' in data) || data.hasPhoto is bool) &&
-        (!('photoZoom' in data) || (data.photoZoom is number && data.photoZoom >= 90 && data.photoZoom <= 160)) &&
-        (!('photoY' in data) || (data.photoY is number && data.photoY >= 0 && data.photoY <= 60)) &&
-        isValidSkillsMap(data.skills) &&
-        (!('stats6' in data) || isValidStats6Map(data.stats6)) &&
-        (!('roleOverride' in data) || isValidRoleOverride(data.roleOverride)) &&
-        (!('top3Strengths' in data) || (data.top3Strengths is string && data.top3Strengths.size() <= 200)) &&
-        (!('weak3Points' in data) || (data.weak3Points is string && data.weak3Points.size() <= 200)) &&
-        (!('seasonGoal' in data) || (data.seasonGoal is string && data.seasonGoal.size() <= 200)) &&
-        data.availableStatus in ['متاح', 'غير متاح'] &&
-        (!('roleModelStarId' in data) || (data.roleModelStarId is string && data.roleModelStarId.size() <= 40 && data.roleModelStarId.matches('^[a-z0-9_]*$'))) &&
-        (!('joinedAtMs' in data) || (data.joinedAtMs is int && data.joinedAtMs >= 0)) &&
-        (!('updatedAtMs' in data) || (data.updatedAtMs is int && data.updatedAtMs >= 0)) &&
-        (!('createdAt' in data) || data.createdAt is timestamp) &&
-        data.updatedAt == request.time;
+        d.id == memberId &&
+        d.uid == memberId &&
+        d.teamId == tid &&
+        (d.ownerUid == '' || isValidId(d.ownerUid)) &&
+        d.name is string && d.name.size() >= 1 && d.name.size() <= 80 &&
+        d.role in ['founder', 'organizer', 'member'] &&
+        d.isOrganizer is bool &&
+        d.jersey >= 0 && d.jersey <= 99 &&
+        (!('age' in d) || (d.age >= 10 && d.age <= 70)) &&
+        (!('height' in d) || (d.height >= 100 && d.height <= 230)) &&
+        (!('weight' in d) || (d.weight >= 30 && d.weight <= 160)) &&
+        d.get('foot', 'يمين') in ['يمين', 'يسار', 'كلتاهما'] &&
+        d.primaryPos in ['حارس مرمى', 'مدافع', 'لاعب وسط', 'جناح', 'مهاجم'] &&
+        d.get('secondaryPos', 'لا يوجد') in ['لا يوجد', 'حارس مرمى', 'مدافع', 'لاعب وسط', 'جناح', 'مهاجم'] &&
+        (!('photo' in d) || (d.photo is string && d.photo.size() <= 250000 && (d.photo == '' || d.photo.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')))) &&
+        d.get('hasPhoto', false) is bool &&
+        (!('photoZoom' in d) || (d.photoZoom >= 90 && d.photoZoom <= 160)) &&
+        (!('photoY' in d) || (d.photoY >= 0 && d.photoY <= 60)) &&
+        isValidSkillsMap(d.skills) &&
+        (!('stats6' in d) || isValidStats6Map(d.stats6)) &&
+        d.get('roleOverride', '') in ['', 'ST', 'CAM_WINGER', 'CM', 'DEF_CB', 'GK'] &&
+        (!('top3Strengths' in d) || (d.top3Strengths is string && d.top3Strengths.size() <= 200)) &&
+        (!('weak3Points' in d) || (d.weak3Points is string && d.weak3Points.size() <= 200)) &&
+        (!('seasonGoal' in d) || (d.seasonGoal is string && d.seasonGoal.size() <= 200)) &&
+        d.availableStatus in ['متاح', 'غير متاح'] &&
+        d.get('roleModelStarId', '').matches('^[a-z0-9_]{0,40}$') &&
+        d.get('joinedAtMs', 0) >= 0 &&
+        d.get('updatedAtMs', 0) >= 0 &&
+        (!('createdAt' in d) || d.createdAt is timestamp) &&
+        d.updatedAt == request.time;
     }
 
     function isValidMultiPrivateRecord(data, memberId, tid) {
@@ -992,7 +1171,7 @@ service cloud.firestore {
         uid == request.auth.uid &&
         isValidUserAccount(incoming(), uid) &&
         incoming().uid == existing().uid;
-      allow delete: if false;
+      allow delete: if isVerifiedUser() && isValidId(uid) && uid == request.auth.uid;
     }
 
     // Public non-sensitive branding (login screen)
@@ -1043,36 +1222,25 @@ service cloud.firestore {
           (existing().teamId == 'main' && isCaptain()) ||
           (existing().teamId != 'main' && isMultiFounder(existing().teamId)) ||
           (
-            existing().teamId == 'main' &&
-            !exists(/databases/$(database)/documents/players/$(request.auth.uid)) &&
-            !exists(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
-            existsAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
-            getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode == code &&
-            getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.createdAt == request.time &&
-            existing().active == true &&
-            existing().status == 'active' &&
-            request.time.toMillis() < existing().expiresAtMs &&
-            existing().usedCount < existing().maxUses &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['usedCount', 'active', 'status', 'updatedAt']) &&
-            incoming().usedCount == existing().usedCount + 1 &&
-            incoming().active == (incoming().usedCount < existing().maxUses) &&
-            incoming().status == (incoming().usedCount >= existing().maxUses ? 'completed' : 'active')
-          ) ||
-          (
-            isValidTeamId(existing().teamId) &&
-            !exists(/databases/$(database)/documents/teams/$(existing().teamId)/members/$(request.auth.uid)) &&
-            !exists(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)) &&
-            existsAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)) &&
-            getAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)).data.inviteCode == code &&
-            getAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)).data.createdAt == request.time &&
-            existing().active == true &&
-            existing().status == 'active' &&
-            request.time.toMillis() < existing().expiresAtMs &&
-            existing().usedCount < existing().maxUses &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['usedCount', 'active', 'status', 'updatedAt']) &&
-            incoming().usedCount == existing().usedCount + 1 &&
-            incoming().active == (incoming().usedCount < existing().maxUses) &&
-            incoming().status == (incoming().usedCount >= existing().maxUses ? 'completed' : 'active')
+            isValidInviteUsageIncrement(existing(), incoming()) && (
+              (
+                existing().teamId == 'main' &&
+                !exists(/databases/$(database)/documents/players/$(request.auth.uid)) &&
+                !exists(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
+                existsAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)) &&
+                getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.inviteCode == code &&
+                getAfter(/databases/$(database)/documents/joinRequests/$(request.auth.uid)).data.createdAt == request.time
+              ) ||
+              (
+                isValidTeamId(existing().teamId) &&
+                isMultiTeamActive(existing().teamId) &&
+                !exists(/databases/$(database)/documents/teams/$(existing().teamId)/members/$(request.auth.uid)) &&
+                !exists(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)) &&
+                existsAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)) &&
+                getAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)).data.inviteCode == code &&
+                getAfter(/databases/$(database)/documents/teams/$(existing().teamId)/joinRequests/$(request.auth.uid)).data.createdAt == request.time
+              )
+            )
           )
         );
       allow delete: if isVerifiedUser() && isValidInviteCodeStr(code) && (
@@ -1202,7 +1370,7 @@ service cloud.firestore {
         isCaptain();
       allow delete: if isVerifiedUser() && isValidId(uid) && (
         isCaptain() ||
-        (uid == request.auth.uid && existing().status in ['pending', 'approved'])
+        (uid == request.auth.uid && existing().status in ['pending', 'approved', 'rejected'])
       );
     }
 
@@ -1241,7 +1409,8 @@ service cloud.firestore {
         isTeamMember() &&
         (isCaptain() || (incoming().playerId == request.auth.uid && incoming().ownerUid == request.auth.uid));
       allow update: if false;
-      allow delete: if isVerifiedUser() && isValidId(readinessId) && isCaptain();
+      allow delete: if isVerifiedUser() && isValidId(readinessId) &&
+        (isCaptain() || existing().ownerUid == request.auth.uid);
     }
 
     // PRIVATE Injury logs (Legacy Single-Team: Owner + Captain ONLY)
@@ -1674,7 +1843,7 @@ service cloud.firestore {
 
     match /teams/{teamId} {
       allow get: if isVerifiedUser() && isValidTeamId(teamId) && (
-        resource.data.founderUid == request.auth.uid ||
+        (resource != null && resource.data.founderUid == request.auth.uid) ||
         exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) ||
         exists(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid))
       );
@@ -1692,18 +1861,10 @@ service cloud.firestore {
             incoming().memberCount == 1 &&
             isPlatformNewTeamsAllowed() &&
             existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-            (teamId in getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownedTeamIds) &&
-            (teamId in getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds) &&
-            getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownedTeamIds.size() <= 3 &&
-            getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds.size() <= 5 &&
+            isUserTeamCreateAfterValid(teamId) &&
             (
               !exists(/databases/$(database)/documents/users/$(request.auth.uid)) ||
-              (
-                (!('ownedTeamIds' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
-                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownedTeamIds.size() < 3) &&
-                (!('teamIds' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
-                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds.size() < 5)
-              )
+              isUserUnderTeamCapsBefore()
             )
           ) ||
           // Legacy Single-Team Safe Migration Copy (Platform Owner admins/{uid} only)
@@ -1720,87 +1881,8 @@ service cloud.firestore {
         isValidTeamId(teamId) &&
         isValidMultiTeam(incoming(), teamId) &&
         incoming().id == existing().id &&
-        (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) && (
-          // Action 1: Founder updates team settings / organizers / maxMembersPerTeam
-          (
-            existing().founderUid == request.auth.uid &&
-            existing().deletedAt == null &&
-            incoming().founderUid == existing().founderUid &&
-            incoming().memberCount == existing().memberCount &&
-            incoming().deletedAt == existing().deletedAt &&
-            incoming().diff(existing()).affectedKeys().hasOnly([
-              'teamName', 'appName', 'primaryColor', 'secondaryColor', 'logo',
-              'inviteCode', 'memberShareCode', 'joinMode', 'lineupPublishMode',
-              'lockSkills', 'maxMembersPerTeam', 'organizerUids',
-              'defaultCurrency', 'defaultPitchCost', 'updatedAtMs', 'updatedAt'
-            ])
-          ) ||
-          // Action 2: Founder transfers leadership to an existing team member
-          (
-            existing().founderUid == request.auth.uid &&
-            existing().deletedAt == null &&
-            incoming().founderUid != existing().founderUid &&
-            exists(/databases/$(database)/documents/teams/$(teamId)/members/$(incoming().founderUid)) &&
-            (request.auth.uid in incoming().organizerUids) &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['founderUid', 'organizerUids', 'updatedAtMs', 'updatedAt'])
-          ) ||
-          // Action 3: Founder increments memberCount (+1) on member add / join approval
-          (
-            existing().founderUid == request.auth.uid &&
-            existing().deletedAt == null &&
-            existing().memberCount < existing().maxMembersPerTeam &&
-            incoming().memberCount == existing().memberCount + 1 &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt'])
-          ) ||
-          // Action 4: Founder decrements memberCount (-1) on member removal
-          (
-            existing().founderUid == request.auth.uid &&
-            existing().deletedAt == null &&
-            incoming().memberCount == existing().memberCount - 1 &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'organizerUids', 'updatedAt'])
-          ) ||
-          // Action 5: Founder soft-deletes team (deletedAt = request.time)
-          (
-            existing().founderUid == request.auth.uid &&
-            existing().deletedAt == null &&
-            incoming().deletedAt == request.time &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['deletedAt', 'updatedAtMs', 'updatedAt'])
-          ) ||
-          // Action 6: Tier 2 Team Organizer limited settings update (never inviteCode, founderUid, joinMode, or lockSkills)
-          (
-            isMultiOrganizer(teamId) &&
-            existing().deletedAt == null &&
-            incoming().diff(existing()).affectedKeys().hasOnly([
-              'teamName', 'logo', 'defaultCurrency', 'defaultPitchCost',
-              'lineupPublishMode', 'updatedAtMs', 'updatedAt'
-            ])
-          ) ||
-          // Action 7: Atomic Instant Join memberCount (+1) paired with new member & approved joinRequest
-          (
-            existing().deletedAt == null &&
-            existing().joinMode == 'instant' &&
-            existing().memberCount < existing().maxMembersPerTeam &&
-            !exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
-            existsAfter(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
-            existsAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)) &&
-            existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-            (teamId in getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds) &&
-            getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamIds.size() <= 5 &&
-            incoming().memberCount == existing().memberCount + 1 &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'updatedAt'])
-          ) ||
-          // Action 8: Atomic Member Self-Leave memberCount (-1) paired with self-deletion
-          (
-            existing().deletedAt == null &&
-            request.auth.uid != existing().founderUid &&
-            exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
-            !existsAfter(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
-            !(request.auth.uid in incoming().organizerUids) &&
-            existing().organizerUids.hasAll(incoming().organizerUids) &&
-            incoming().memberCount == existing().memberCount - 1 &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['memberCount', 'organizerUids', 'updatedAt'])
-          )
-        );
+        (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
+        canUpdateMultiTeamDoc(teamId, existing(), incoming());
 
       allow delete: if false;
 
@@ -1810,60 +1892,18 @@ service cloud.firestore {
         allow list: if isVerifiedUser() && resource.data.teamId == teamId && isMultiMember(teamId);
 
         allow create: if isVerifiedUser() &&
-          isValidMultiTeamMember(incoming(), memberId, teamId) &&
-          (!('createdAt' in incoming()) || incoming().createdAt == request.time) && (
-            // Team Founder creating initial self doc in batch OR adding/approving a member
-            isMultiFounder(teamId) ||
-            (isMultiFounderAfter(teamId) && memberId == request.auth.uid && incoming().ownerUid == request.auth.uid) ||
-            // Direct instant joiner creating own member doc atomically
-            (
-              memberId == request.auth.uid &&
-              incoming().ownerUid == request.auth.uid &&
-              incoming().role == 'member' &&
-              incoming().isOrganizer == false &&
-              exists(/databases/$(database)/documents/teams/$(teamId)) &&
-              get(/databases/$(database)/documents/teams/$(teamId)).data.deletedAt == null &&
-              get(/databases/$(database)/documents/teams/$(teamId)).data.joinMode == 'instant' &&
-              get(/databases/$(database)/documents/teams/$(teamId)).data.memberCount <
-                get(/databases/$(database)/documents/teams/$(teamId)).data.maxMembersPerTeam &&
-              getAfter(/databases/$(database)/documents/teams/$(teamId)).data.memberCount ==
-                get(/databases/$(database)/documents/teams/$(teamId)).data.memberCount + 1 &&
-              existsAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)) &&
-              getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.createdAt == request.time &&
-              getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.status == 'approved' &&
-              exists(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)) &&
-              get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)).data.teamId == teamId &&
-              get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)).data.active == true &&
-              get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)).data.requireApproval == false &&
-              get(/databases/$(database)/documents/inviteCodes/$(getAfter(/databases/$(database)/documents/teams/$(teamId)/joinRequests/$(request.auth.uid)).data.inviteCode)).data.isMemberShareCode != true
-            )
-          );
+          isValidMultiTeamMember(request.resource.data, memberId, teamId) &&
+          (!('createdAt' in request.resource.data) || request.resource.data.createdAt == request.time) &&
+          canCreateMultiMember(teamId, memberId, request.resource.data);
 
         allow update: if isVerifiedUser() &&
-          isValidMultiTeamMember(incoming(), memberId, teamId) &&
-          (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
-          incoming().id == existing().id &&
-          incoming().uid == existing().uid &&
-          incoming().teamId == existing().teamId && (
-            isMultiFounder(teamId) ||
-            (
-              existing().ownerUid == request.auth.uid &&
-              incoming().ownerUid == existing().ownerUid &&
-              incoming().role == existing().role &&
-              incoming().isOrganizer == existing().isOrganizer &&
-              incoming().diff(existing()).affectedKeys().hasOnly([
-                'name', 'jersey', 'age', 'height', 'weight', 'foot',
-                'primaryPos', 'secondaryPos', 'photo', 'hasPhoto', 'photoZoom', 'photoY',
-                'skills', 'stats6', 'roleOverride', 'top3Strengths', 'weak3Points',
-                'seasonGoal', 'availableStatus', 'roleModelStarId', 'updatedAtMs', 'updatedAt'
-              ]) &&
-              (
-                !incoming().diff(existing()).affectedKeys().hasAny(['skills', 'stats6']) ||
-                !exists(/databases/$(database)/documents/teams/$(teamId)) ||
-                get(/databases/$(database)/documents/teams/$(teamId)).data.lockSkills == false
-              )
-            )
-          );
+          isValidMultiTeamMember(request.resource.data, memberId, teamId) &&
+          (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt) &&
+          request.resource.data.id == resource.data.id &&
+          request.resource.data.uid == resource.data.uid &&
+          request.resource.data.teamId == resource.data.teamId &&
+          exists(/databases/$(database)/documents/teams/$(teamId)) &&
+          canUpdateMultiMember(teamId, resource.data, request.resource.data);
 
         allow delete: if isVerifiedUser() && isValidId(memberId) && (
           (isMultiFounder(teamId) && memberId != request.auth.uid) ||
@@ -1890,25 +1930,12 @@ service cloud.firestore {
 
         allow create: if isVerifiedUser() &&
           uid == request.auth.uid &&
+          isMultiTeamActive(teamId) &&
           !exists(/databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)) &&
           isValidMultiJoinRequest(incoming(), uid, teamId) &&
           incoming().createdAt == request.time &&
           exists(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)) &&
-          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.teamId == teamId &&
-          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.active == true &&
-          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.status == 'active' &&
-          request.time.toMillis() < get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.expiresAtMs &&
-          get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount <
-            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.maxUses &&
-          getAfter(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount ==
-            get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.usedCount + 1 && (
-            incoming().status == 'pending' ||
-            (
-              incoming().status == 'approved' &&
-              get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.requireApproval == false &&
-              get(/databases/$(database)/documents/inviteCodes/$(incoming().inviteCode)).data.isMemberShareCode != true
-            )
-          );
+          checkMultiJoinInviteDoc(teamId, incoming().inviteCode, incoming().status);
 
         allow update: if isVerifiedUser() &&
           isValidMultiJoinRequest(incoming(), uid, teamId) &&
@@ -1921,7 +1948,7 @@ service cloud.firestore {
 
         allow delete: if isVerifiedUser() && isValidId(uid) && (
           isMultiFounder(teamId) ||
-          (uid == request.auth.uid && existing().status in ['pending', 'approved'])
+          (uid == request.auth.uid && existing().status in ['pending', 'approved', 'rejected'])
         );
       }
 

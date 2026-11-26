@@ -537,12 +537,13 @@ export function placePlayerLabels(
   return placed;
 }
 
-function mapArabicPosToGroup(primaryPos?: string): 'GK' | 'DEF' | 'MID' | 'FWD' {
+function mapArabicPosToGroup(primaryPos?: string): 'gk' | 'def' | 'mid' | 'wing' | 'fwd' {
   const s = String(primaryPos || '');
-  if (s.includes('حارس')) return 'GK';
-  if (s.includes('دفاع') || s.includes('ظهير') || s.includes('مدافع')) return 'DEF';
-  if (s.includes('مهاجم') || s.includes('جناح') || s.includes('هجوم')) return 'FWD';
-  return 'MID';
+  if (s.includes('حارس')) return 'gk';
+  if (s.includes('دفاع') || s.includes('ظهير') || s.includes('مدافع')) return 'def';
+  if (s.includes('جناح')) return 'wing';
+  if (s.includes('مهاجم') || s.includes('هجوم')) return 'fwd';
+  return 'mid';
 }
 
 function posShortFromArabic(primaryPos?: string): string {
@@ -583,7 +584,7 @@ export function resolveYourRoleCard(params: {
       isUserAssignedHere = true;
     } else {
       const grp = mapArabicPosToGroup(currentUser.primaryPos);
-      const posMatch = form.slots.findIndex((s) => s.posGroup === grp);
+      const posMatch = form.slots.findIndex((s) => s.roleGroup === grp);
       if (posMatch >= 0) {
         slotIdx = posMatch;
       } else if (frame?.activeIndices?.length && form.slots[frame.activeIndices[0]]) {

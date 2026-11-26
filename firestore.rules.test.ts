@@ -8,8 +8,15 @@
  *   firebase emulators:exec --only firestore "npm run test:rules"
  */
 import test from 'node:test';
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  chunkItemsForBatch,
+  groupLegacyAttendanceByMatchKey,
+  splitPlayerPublicAndPrivate,
+  verifyMigrationCountReport,
+} from './src/multiTeamEngine';
 import {
   assertFails,
   assertSucceeds,
@@ -53,9 +60,9 @@ const BASE_SKILLS = {
 let testEnv: RulesTestEnvironment;
 
 function parseEmulatorHost(): { host: string; port: number } {
-  const raw = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+  const raw = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8089';
   const [host, portStr] = raw.split(':');
-  return { host: host || '127.0.0.1', port: Number(portStr) || 8080 };
+  return { host: host || '127.0.0.1', port: Number(portStr) || 8089 };
 }
 
 async function seedTeamState(): Promise<void> {
@@ -226,13 +233,24 @@ async function seedTeamState(): Promise<void> {
 }
 
 test.before(async () => {
-  const { host, port } = parseEmulatorHost();
+  const { host: rawHost, port } = parseEmulatorHost();
+  const host = rawHost === 'localhost' ? '127.0.0.1' : rawHost;
   const rulesPath = process.env.RULES_FILE || 'firestore.rules';
   const rules = fs.readFileSync(path.resolve(rulesPath), 'utf8');
-  testEnv = await initializeTestEnvironment({
-    projectId: PROJECT_ID,
-    firestore: { host, port, rules },
-  });
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      testEnv = await initializeTestEnvironment({
+        projectId: PROJECT_ID,
+        firestore: { host, port, rules },
+      });
+      return;
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+  throw lastErr;
 });
 
 test.beforeEach(async () => {
@@ -2363,5 +2381,561 @@ test('Multi-Team #36: enforces 45m reportThrottle, peer confirmReport, /pitchPay
   });
   await assertFails(getDoc(doc(founderADb, 'teams', 'team_alpha', 'matchVoteTallies', 'ms_q1__mem_a')));
 });
+
+// ==================== RELEASE-HARDENING #37: Full 25-Key Member Profile Instant Join & Self-Update ====================
+test('Release-Hardening #37: full 25-key member profile with stats6 + photo succeeds under 1000-expression limit', async () => {
+  await seedMultiTeamPair();
+  const joinerFullDb = testEnv.authenticatedContext('joiner_full', { email_verified: true }).firestore();
+
+  const fullBatch = writeBatch(joinerFullDb);
+  fullBatch.set(doc(joinerFullDb, 'teams', 'team_beta', 'joinRequests', 'joiner_full'), {
+    uid: 'joiner_full',
+    teamId: 'team_beta',
+    name: 'لاعب كامل',
+    jersey: 22,
+    primaryPos: 'جناح',
+    stats6: { PAC: 65, SHO: 60, PAS: 60, DRI: 65, DEF: 50, PHY: 60 },
+    roleOverride: 'CAM_WINGER',
+    inviteCode: 'MT-BETA-2222',
+    status: 'approved',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  fullBatch.set(doc(joinerFullDb, 'teams', 'team_beta', 'members', 'joiner_full'), {
+    id: 'joiner_full',
+    uid: 'joiner_full',
+    ownerUid: 'joiner_full',
+    teamId: 'team_beta',
+    name: 'لاعب كامل',
+    role: 'member',
+    isOrganizer: false,
+    jersey: 22,
+    age: 24,
+    height: 178,
+    weight: 72,
+    foot: 'يمين',
+    primaryPos: 'جناح',
+    secondaryPos: 'مهاجم',
+    photo: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+    hasPhoto: true,
+    photoZoom: 110,
+    photoY: 20,
+    skills: BASE_SKILLS,
+    stats6: { PAC: 65, SHO: 60, PAS: 60, DRI: 65, DEF: 50, PHY: 60 },
+    roleOverride: 'CAM_WINGER',
+    top3Strengths: 'سرعة ومراوغة',
+    weak3Points: 'دفاع',
+    seasonGoal: '10 أهداف',
+    availableStatus: 'متاح',
+    roleModelStarId: 'salah',
+    joinedAtMs: Date.now(),
+    updatedAtMs: Date.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  fullBatch.update(doc(joinerFullDb, 'teams', 'team_beta'), { memberCount: increment(1), updatedAt: serverTimestamp() });
+  fullBatch.update(doc(joinerFullDb, 'inviteCodes', 'MT-BETA-2222'), { usedCount: 1, active: true, status: 'active', updatedAt: serverTimestamp() });
+  fullBatch.set(doc(joinerFullDb, 'users', 'joiner_full'), { uid: 'joiner_full', teamIds: ['team_beta'], activeTeamId: 'team_beta', updatedAt: serverTimestamp() }, { merge: true });
+  await assertSucceeds(fullBatch.commit());
+
+  // Full-profile self-update (including skills + stats6 when lockSkills == false) MUST also succeed
+  await assertSucceeds(
+    updateDoc(doc(joinerFullDb, 'teams', 'team_beta', 'members', 'joiner_full'), {
+      jersey: 23,
+      skills: { ...BASE_SKILLS, speed: 9 },
+      stats6: { PAC: 70, SHO: 60, PAS: 60, DRI: 60, DEF: 50, PHY: 60 },
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== RELEASE-HARDENING #38: Removed Member Denied Subsequent Access ====================
+test('Release-Hardening #38: removed member immediately loses read/write access to team documents', async () => {
+  await seedMultiTeamPair();
+  const founderADb = testEnv.authenticatedContext('founder_a', { email_verified: true }).firestore();
+  const memADb = testEnv.authenticatedContext('mem_a', { email_verified: true }).firestore();
+
+  // Member has access before removal
+  await assertSucceeds(getDoc(doc(memADb, 'teams', 'team_alpha')));
+  await assertSucceeds(getDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'founder_a')));
+
+  // Founder removes mem_a
+  const removeBatch = writeBatch(founderADb);
+  removeBatch.delete(doc(founderADb, 'teams', 'team_alpha', 'members', 'mem_a'));
+  removeBatch.update(doc(founderADb, 'teams', 'team_alpha'), { memberCount: increment(-1), updatedAt: serverTimestamp() });
+  await assertSucceeds(removeBatch.commit());
+
+  // Removed member is immediately denied reading team, roster, tactics, and reports
+  await assertFails(getDoc(doc(memADb, 'teams', 'team_alpha')));
+  await assertFails(getDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'founder_a')));
+  await assertFails(getDoc(doc(memADb, 'teams', 'team_alpha', 'reports', 'rep_alpha_seed')));
+  await assertFails(
+    setDoc(doc(memADb, 'teams', 'team_alpha', 'suggestions', 'sugg_after_kick'), {
+      teamId: 'team_alpha',
+      text: 'اقتراح بعد الطرد',
+      createdAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== RELEASE-HARDENING #39: Soft-Deleted Team Blocks Joins & Writes ====================
+test('Release-Hardening #39: soft-deleted team blocks new joinRequests, settings updates, and member self-updates', async () => {
+  await seedMultiTeamPair();
+  const founderADb = testEnv.authenticatedContext('founder_a', { email_verified: true }).firestore();
+  const memADb = testEnv.authenticatedContext('mem_a', { email_verified: true }).firestore();
+  const outsiderDb = testEnv.authenticatedContext('late_joiner', { email_verified: true }).firestore();
+
+  // Founder soft-deletes team_alpha
+  await assertSucceeds(
+    updateDoc(doc(founderADb, 'teams', 'team_alpha'), {
+      deletedAt: serverTimestamp(),
+      updatedAtMs: Date.now(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Subsequent team settings update & member self-update MUST fail
+  await assertFails(updateDoc(doc(founderADb, 'teams', 'team_alpha'), { teamName: 'تعديل بعد الحذف', updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(memADb, 'teams', 'team_alpha', 'members', 'mem_a'), { jersey: 99, updatedAt: serverTimestamp() }));
+
+  // Subsequent joinRequest against soft-deleted team MUST fail even with previously active inviteCode
+  const joinBatch = writeBatch(outsiderDb);
+  joinBatch.set(doc(outsiderDb, 'teams', 'team_alpha', 'joinRequests', 'late_joiner'), {
+    uid: 'late_joiner',
+    teamId: 'team_alpha',
+    name: 'متأخر',
+    jersey: 19,
+    primaryPos: 'مهاجم',
+    inviteCode: 'MT-ALPH-1111',
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  joinBatch.update(doc(outsiderDb, 'inviteCodes', 'MT-ALPH-1111'), {
+    usedCount: 1,
+    active: true,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(joinBatch.commit());
+});
+
+// ==================== RELEASE-HARDENING #40: Expired & Exhausted Invite Codes Rejected ====================
+test('Release-Hardening #40: expired and exhausted invite codes are strictly rejected', async () => {
+  await seedMultiTeamPair();
+  const nowMs = Date.now();
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    const now = Timestamp.now();
+    await setDoc(doc(db, 'inviteCodes', 'MT-EXPD-9999'), {
+      code: 'MT-EXPD-9999',
+      active: true,
+      requireApproval: true,
+      isMemberShareCode: false,
+      teamId: 'team_alpha',
+      teamName: 'فريق ألفا',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'multi',
+      maxUses: 10,
+      usedCount: 0,
+      durationDays: 1,
+      createdAtMs: nowMs - 86400000 * 3,
+      expiresAtMs: nowMs - 60000, // expired 1 minute ago
+      status: 'active',
+      updatedAt: now,
+    });
+    await setDoc(doc(db, 'inviteCodes', 'MT-FULL-8888'), {
+      code: 'MT-FULL-8888',
+      active: true,
+      requireApproval: true,
+      isMemberShareCode: false,
+      teamId: 'team_alpha',
+      teamName: 'فريق ألفا',
+      appName: 'ميدان 6v6',
+      primaryColor: '#FACC15',
+      usageType: 'single',
+      maxUses: 1,
+      usedCount: 1, // already exhausted
+      durationDays: 7,
+      createdAtMs: nowMs - 10000,
+      expiresAtMs: nowMs + 86400000,
+      status: 'active',
+      updatedAt: now,
+    });
+  });
+
+  const applicantDb = testEnv.authenticatedContext('exp_tester', { email_verified: true }).firestore();
+
+  const expBatch = writeBatch(applicantDb);
+  expBatch.set(doc(applicantDb, 'teams', 'team_alpha', 'joinRequests', 'exp_tester'), {
+    uid: 'exp_tester',
+    teamId: 'team_alpha',
+    name: 'مختبر انتهاء',
+    jersey: 20,
+    primaryPos: 'مدافع',
+    inviteCode: 'MT-EXPD-9999',
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  expBatch.update(doc(applicantDb, 'inviteCodes', 'MT-EXPD-9999'), {
+    usedCount: 1,
+    active: true,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(expBatch.commit());
+
+  const fullBatch = writeBatch(applicantDb);
+  fullBatch.set(doc(applicantDb, 'teams', 'team_alpha', 'joinRequests', 'exp_tester'), {
+    uid: 'exp_tester',
+    teamId: 'team_alpha',
+    name: 'مختبر امتلاء',
+    jersey: 21,
+    primaryPos: 'مدافع',
+    inviteCode: 'MT-FULL-8888',
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  fullBatch.update(doc(applicantDb, 'inviteCodes', 'MT-FULL-8888'), {
+    usedCount: 2,
+    active: false,
+    status: 'completed',
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(fullBatch.commit());
+});
+
+// ==================== RELEASE-HARDENING #41: Self-Only Account Deletion & migratedFrom Owner Guard ====================
+test('Release-Hardening #41: /users/{uid} allows self-delete only and non-Platform-Owner cannot spoof migratedFrom main', async () => {
+  await seedMultiTeamPair();
+  const memADb = testEnv.authenticatedContext('mem_a', { email_verified: true }).firestore();
+  const orgADb = testEnv.authenticatedContext('org_a', { email_verified: true }).firestore();
+
+  await assertSucceeds(
+    setDoc(doc(memADb, 'users', 'mem_a'), {
+      uid: 'mem_a',
+      displayName: 'عضو ألفا',
+      teamIds: ['team_alpha'],
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Cross-user delete MUST fail; self-delete MUST succeed
+  await assertFails(deleteDoc(doc(orgADb, 'users', 'mem_a')));
+  await assertSucceeds(deleteDoc(doc(memADb, 'users', 'mem_a')));
+
+  // Non-Platform-Owner attempting to bypass caps by forging migratedFrom: 'main' MUST fail
+  const nowMs = Date.now();
+  await assertFails(
+    setDoc(doc(orgADb, 'teams', 'team_spoof_mig'), {
+      id: 'team_spoof_mig',
+      teamName: 'فريق مزور',
+      appName: 'ميدان 6v6',
+      founderUid: 'org_a',
+      organizerUids: [],
+      primaryColor: '#FACC15',
+      secondaryColor: '#070709',
+      joinMode: 'approval',
+      lineupPublishMode: 'all',
+      maxMembersPerTeam: 25,
+      memberCount: 1,
+      inviteCode: 'MT-SPOF-1234',
+      memberShareCode: 'MS-SPOF-1234',
+      lockSkills: false,
+      deletedAt: null,
+      migratedFrom: 'main',
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+// ==================== RELEASE-HARDENING #42: Emulator-Backed Legacy -> Multi-Team Safe Migration ====================
+test('Release-Hardening #42: Legacy main -> Multi-Team batched migration verifies counts, private isolation, resume idempotency, and untouched rollback data', async () => {
+  const nowMs = Date.now();
+  const targetTeamId = 'team_mig_verified';
+
+  // 1. Seed realistic Legacy Single-Team ("main") dataset via admin context
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminFs = ctx.firestore();
+    await setDoc(doc(adminFs, 'admins', 'captain_uid'), {
+      uid: 'captain_uid',
+      role: 'admin',
+      createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(adminFs, 'players', 'captain_uid'), {
+      id: 'captain_uid',
+      ownerUid: 'captain_uid',
+      teamId: 'main',
+      name: 'كابتن الترقية',
+      role: 'admin',
+      jersey: 10,
+      primaryPos: 'لاعب وسط',
+      skills: BASE_SKILLS,
+      availableStatus: 'متاح',
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+    await setDoc(doc(adminFs, 'players', 'p_legacy_2'), {
+      id: 'p_legacy_2',
+      ownerUid: 'p_legacy_2',
+      teamId: 'main',
+      name: 'لاعب الترقية',
+      role: 'player',
+      jersey: 7,
+      primaryPos: 'مهاجم',
+      skills: BASE_SKILLS,
+      availableStatus: 'متاح',
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+    await setDoc(doc(adminFs, 'readiness', 'rd_leg_1'), {
+      playerId: 'p_legacy_2',
+      teamId: 'main',
+      date: '2026-11-26',
+      sleep: 8,
+      fatigue: 3,
+      mood: 9,
+      createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(adminFs, 'injuries', 'inj_leg_1'), {
+      playerId: 'p_legacy_2',
+      teamId: 'main',
+      type: 'شد عضلي',
+      location: 'الفخذ',
+      severity: 'خفيفة',
+      date: '2026-11-25',
+      expectedReturn: '2026-12-01',
+      createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(adminFs, 'attendance', 'att_leg_1'), {
+      date: '2026-11-28',
+      type: 'مباراة',
+      playerId: 'captain_uid',
+      ownerUid: 'captain_uid',
+      playerName: 'كابتن الترقية',
+      status: 'جاي',
+      teamId: 'main',
+      updatedAt: Timestamp.now(),
+    });
+    await setDoc(doc(adminFs, 'attendance', 'att_leg_2'), {
+      date: '2026-11-28',
+      type: 'مباراة',
+      playerId: 'p_legacy_2',
+      ownerUid: 'p_legacy_2',
+      playerName: 'لاعب الترقية',
+      status: 'متأخر',
+      teamId: 'main',
+      updatedAt: Timestamp.now(),
+    });
+    await setDoc(doc(adminFs, 'reports', 'rep_leg_1'), {
+      teamId: 'main',
+      playerId: 'p_legacy_2',
+      ownerUid: 'p_legacy_2',
+      playerName: 'لاعب الترقية',
+      opponent: 'فريق النجوم',
+      goals: 2,
+      assists: 1,
+      minutes: 45,
+      rating: 8,
+      confirmedByUids: ['captain_uid'],
+      verified: true,
+      createdAtMs: nowMs - 60000,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+    await setDoc(doc(adminFs, 'suggestions', 'sug_leg_1'), {
+      teamId: 'main',
+      text: 'ملعب الجمعة الساعة 8',
+      createdAt: Timestamp.now(),
+    });
+  });
+
+  // 2. Run authenticated Platform Owner (captain_uid) batched migration strictly against real Rules!
+  const captainDb = testEnv.authenticatedContext('captain_uid', { email_verified: true }).firestore();
+  const copiedSections = new Set<string>();
+
+  const runMigrationPass = async () => {
+    // Read legacy source collections (includes seedTeamState + added legacy docs)
+    const [playersSnap, readinessSnap, injuriesSnap, attendanceSnap, reportsSnap, suggSnap] = await Promise.all([
+      getDocs(query(collection(captainDb, 'players'), where('teamId', '==', 'main'))),
+      getDocs(query(collection(captainDb, 'readiness'), where('teamId', '==', 'main'))),
+      getDocs(query(collection(captainDb, 'injuries'), where('teamId', '==', 'main'))),
+      getDocs(query(collection(captainDb, 'attendance'), where('teamId', '==', 'main'))),
+      getDocs(query(collection(captainDb, 'reports'), where('teamId', '==', 'main'))),
+      getDocs(query(collection(captainDb, 'suggestions'), where('teamId', '==', 'main'))),
+    ]);
+
+    // Step A: Create target Multi-Team doc (tracked by checkpoint — supports resume!)
+    const teamRef = doc(captainDb, 'teams', targetTeamId);
+    if (!copiedSections.has('team')) {
+      await assertSucceeds(
+        setDoc(teamRef, {
+          id: targetTeamId,
+          teamName: 'فريق الترقية الموثّق',
+          appName: 'ميدان 6v6',
+          founderUid: 'captain_uid',
+          organizerUids: [],
+          primaryColor: '#FACC15',
+          secondaryColor: '#070709',
+          joinMode: 'approval',
+          lineupPublishMode: 'all',
+          maxMembersPerTeam: 25,
+          memberCount: playersSnap.size,
+          inviteCode: 'MT-MIGV-1234',
+          memberShareCode: 'MS-MIGV-1234',
+          lockSkills: false,
+          deletedAt: null,
+          migratedFrom: 'main',
+          createdAtMs: nowMs,
+          updatedAtMs: nowMs,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+      copiedSections.add('team');
+    } else {
+      const existingTeam = await assertSucceeds(getDoc(teamRef));
+      assert.equal(existingTeam.exists(), true);
+    }
+
+    // Step B & C: Batched copy of public members + isolated /private/* records using production splitPlayerPublicAndPrivate()
+    const rdAll = readinessSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const injAll = injuriesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    let totalPrivateExpected = 0;
+
+    const splits = playersSnap.docs.map((pDoc) =>
+      splitPlayerPublicAndPrivate({
+        teamId: targetTeamId,
+        rawPlayer: { id: pDoc.id, ...pDoc.data() },
+        founderUid: 'captain_uid',
+        organizerUids: [],
+        readinessRecords: rdAll,
+        injuryRecords: injAll,
+        nowMs,
+      })
+    );
+    for (const s of splits) totalPrivateExpected += s.privateRecords.length;
+
+    if (!copiedSections.has('members')) {
+      for (const chunk of chunkItemsForBatch(splits, 20)) {
+        const b = writeBatch(captainDb);
+        for (const s of chunk) {
+          b.set(doc(captainDb, 'teams', targetTeamId, 'members', s.publicMember.id), {
+            ...s.publicMember,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          for (const priv of s.privateRecords) {
+            b.set(doc(captainDb, 'teams', targetTeamId, 'members', s.publicMember.id, 'private', priv.id), {
+              ...priv.data,
+              createdAt: serverTimestamp(),
+            });
+          }
+        }
+        await assertSucceeds(b.commit());
+      }
+      copiedSections.add('members');
+    }
+
+    // Step D: Consolidated attendance by matchKey
+    const groupedAtt = groupLegacyAttendanceByMatchKey(
+      attendanceSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      nowMs
+    );
+    for (const attDoc of groupedAtt) {
+      await assertSucceeds(
+        setDoc(doc(captainDb, 'teams', targetTeamId, 'attendance', attDoc.matchKey), {
+          teamId: targetTeamId,
+          matchKey: attDoc.matchKey,
+          date: attDoc.date,
+          type: attDoc.type,
+          responses: attDoc.responses,
+          updatedAtMs: attDoc.updatedAtMs,
+          updatedAt: serverTimestamp(),
+        })
+      );
+    }
+
+    // Step E: Reports & suggestions (skip existing on resume — mirrors src/backend.ts line 5428)
+    for (const repDoc of reportsSnap.docs) {
+      const rep = repDoc.data();
+      const targetRef = doc(captainDb, 'teams', targetTeamId, 'reports', repDoc.id);
+      if (!(await getDoc(targetRef)).exists()) {
+        await assertSucceeds(
+          setDoc(targetRef, {
+            ...rep,
+            teamId: targetTeamId,
+            updatedAt: serverTimestamp(),
+          })
+        );
+      }
+    }
+    for (const sDoc of suggSnap.docs) {
+      const sg = sDoc.data();
+      const targetRef = doc(captainDb, 'teams', targetTeamId, 'suggestions', sDoc.id);
+      if (!(await getDoc(targetRef)).exists()) {
+        await assertSucceeds(
+          setDoc(targetRef, {
+            teamId: targetTeamId,
+            text: String(sg.text),
+            createdAt: serverTimestamp(),
+          })
+        );
+      }
+    }
+
+    return {
+      sourceCounts: {
+        players: playersSnap.size,
+        privateRecords: totalPrivateExpected,
+        attendanceMatches: groupedAtt.length,
+        reports: reportsSnap.size,
+        suggestions: suggSnap.size,
+      },
+    };
+  };
+
+  // Pass 1: Initial migration
+  const { sourceCounts } = await runMigrationPass();
+  // Pass 2: Resume / re-run idempotency (MUST succeed cleanly without duplicating records)
+  await runMigrationPass();
+
+  // 3. Verify target counts match source counts via verifyMigrationCountReport
+  const [targetMembers, targetAtt, targetReports, targetSuggs] = await Promise.all([
+    getDocs(query(collection(captainDb, 'teams', targetTeamId, 'members'), where('teamId', '==', targetTeamId))),
+    getDocs(query(collection(captainDb, 'teams', targetTeamId, 'attendance'), where('teamId', '==', targetTeamId))),
+    getDocs(query(collection(captainDb, 'teams', targetTeamId, 'reports'), where('teamId', '==', targetTeamId))),
+    getDocs(query(collection(captainDb, 'teams', targetTeamId, 'suggestions'), where('teamId', '==', targetTeamId))),
+  ]);
+  let actualPrivateCount = 0;
+  for (const mDoc of targetMembers.docs) {
+    const pSnap = await getDocs(collection(captainDb, 'teams', targetTeamId, 'members', mDoc.id, 'private'));
+    actualPrivateCount += pSnap.size;
+  }
+
+  const report = verifyMigrationCountReport(sourceCounts, {
+    players: targetMembers.size,
+    privateRecords: actualPrivateCount,
+    attendanceMatches: targetAtt.size,
+    reports: targetReports.size,
+    suggestions: targetSuggs.size,
+  });
+  assert.equal(report.ok, true, `Migration count mismatch: ${JSON.stringify(report.mismatches)}`);
+
+  // 4. Verify rollback safety: original Legacy "main" records remain 100% intact
+  const legacyPlayerStillThere = await assertSucceeds(getDoc(doc(captainDb, 'players', 'p_legacy_2')));
+  const legacyReadinessStillThere = await assertSucceeds(getDoc(doc(captainDb, 'readiness', 'rd_leg_1')));
+  assert.equal(legacyPlayerStillThere.exists(), true);
+  assert.equal(legacyReadinessStillThere.exists(), true);
+});
+
+
 
 
