@@ -68,12 +68,15 @@ import {
   clampProZoomPct,
   isDrawingTool,
   isSingleClickStampTool,
+  shouldBoardOverlayInterceptPointer,
   defaultColorForTool,
   createHistoryState,
   pushHistorySnapshot,
   applyHistoryUndo,
   applyHistoryRedo,
   hitTestProAnnotation,
+  buildProAnnotationsDefsSvg,
+  renderProAnnotationsSvgContent,
   type ProAnnotation,
   type ProAnnotationKind,
   type ProBoardSnapshot,
@@ -152,6 +155,7 @@ interface CinematicBallRefs {
 interface CinematicDomCache {
   signature: string;
   bgLayer: SVGGElement;
+  annotationsLayer: SVGGElement;
   actorsLayer: SVGGElement;
   overlayLayer: SVGGElement;
   ourFigs: CinematicFigRefs[];
@@ -1102,6 +1106,7 @@ class TacticsStudioController {
   private proLibraryOpen = false;
   private proDrawStartPortrait: { x: number; y: number } | null = null;
   private proDragSnapshotTaken = false;
+  private activeBoardOverlaySvg: SVGSVGElement | null = null;
   private nativeViewportAnchors = new Map<string, { parent: HTMLElement; nextSibling: Node | null }>();
 
   constructor() {
@@ -1235,6 +1240,27 @@ class TacticsStudioController {
         }
       }
     });
+    const pitchStage = document.getElementById('tacPitchStage');
+    if (pitchStage) {
+      pitchStage.style.transform = '';
+      delete pitchStage.dataset.tool;
+    }
+    (['tacPosterField', 'tacFifaField'] as const).forEach((fid) => {
+      const fel = document.getElementById(fid);
+      if (fel) {
+        fel.style.transform = '';
+        delete fel.dataset.tool;
+      }
+    });
+    (['tacPosterOverlaySvg', 'tacFifaOverlaySvg'] as const).forEach((oid) => {
+      const oel = document.getElementById(oid);
+      if (oel) {
+        oel.classList.add('hidden');
+        oel.classList.remove('is-interactive', 'is-passive');
+        oel.innerHTML = '';
+      }
+    });
+    this.activeBoardOverlaySvg = null;
     const host = document.getElementById('tacProNativeHost');
     if (host) host.classList.add('hidden');
     const wrap = document.getElementById('tacProPitchCanvasWrap');
@@ -1906,14 +1932,29 @@ class TacticsStudioController {
   }
 
   private handlePointerDown = (e: PointerEvent): void => {
+    const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
+    if (!svg) return;
+
+    // In Full-Screen Cinematic mode, honor all drawing / stamp / erase tools directly on #tacPitchSvg
+    if (
+      this.isProFullscreen &&
+      this.viewMode === 'cinematic' &&
+      shouldBoardOverlayInterceptPointer(this.isProFullscreen, this.proTool)
+    ) {
+      if (
+        this.handleProOverlayToolPointerDown(svg, e, () => {
+          this.renderCinematicPitch();
+        })
+      ) {
+        return;
+      }
+    }
+
     const target = (e.target as Element | null)?.closest('[data-drag-kind]') as HTMLElement | SVGElement | null;
     if (!target) return;
     const kind = target.getAttribute('data-drag-kind') as 'our' | 'opp' | 'ball' | null;
     const idx = Number(target.getAttribute('data-drag-idx') || '0');
     if (!kind) return;
-
-    const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
-    if (!svg) return;
 
     this.pause();
     this.ballLift = 0;
@@ -1939,6 +1980,24 @@ class TacticsStudioController {
   };
 
   private handlePointerMove = (e: PointerEvent): void => {
+    const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
+    if (
+      this.proDraftAnnotation &&
+      this.proDrawStartPortrait &&
+      this.isProFullscreen &&
+      this.viewMode === 'cinematic' &&
+      svg
+    ) {
+      const pt = projectProClientToPortraitPct(e.clientX, e.clientY, svg.getBoundingClientRect());
+      this.proDraftAnnotation = {
+        ...this.proDraftAnnotation,
+        x2: pt.x,
+        y2: pt.y,
+      };
+      this.renderCinematicPitch();
+      return;
+    }
+
     if (!this.dragTarget) return;
     const dist = Math.hypot(e.clientX - this.dragStartClient.x, e.clientY - this.dragStartClient.y);
     if (dist > 6) this.dragMoved = true;
@@ -1948,7 +2007,6 @@ class TacticsStudioController {
       this.proDragSnapshotTaken = true;
     }
 
-    const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
     if (!svg) return;
     const pt = this.getSvgPointFromEvent(svg, e);
 
@@ -1963,13 +2021,41 @@ class TacticsStudioController {
   };
 
   private handlePointerUp = (e: PointerEvent): void => {
+    const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
+    if (
+      this.proDraftAnnotation &&
+      this.isProFullscreen &&
+      this.viewMode === 'cinematic'
+    ) {
+      if (svg) {
+        try {
+          svg.releasePointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
+      }
+      const fin = this.proDraftAnnotation;
+      this.proDraftAnnotation = null;
+      this.proDrawStartPortrait = null;
+      this.activeBoardOverlaySvg = null;
+      if (Math.hypot(fin.x2 - fin.x1, fin.y2 - fin.y1) >= 2.2) {
+        this.pushCurrentBoardHistory();
+        this.proAnnotations.push({
+          ...fin,
+          id: 'ann_' + Date.now() + '_' + Math.floor(Math.random() * 999),
+        });
+      }
+      this.renderCinematicPitch();
+      this.renderProControlsState();
+      return;
+    }
+
     if (!this.dragTarget) return;
     const released = this.dragTarget;
     const wasDrag = this.dragMoved;
     this.dragTarget = null;
     this.dragMoved = false;
 
-    const svg = document.getElementById('tacPitchSvg') as unknown as SVGSVGElement | null;
     if (svg) {
       try {
         svg.releasePointerCapture(e.pointerId);
@@ -1985,7 +2071,7 @@ class TacticsStudioController {
     this.renderSvgPitch();
 
     // Short tap on one of our players opens Role Spotlight!
-    if (!wasDrag && released.kind === 'our') {
+    if (!wasDrag && released.kind === 'our' && (!this.isProFullscreen || this.proTool === 'pointer')) {
       this.enterRoleSpotlight(released.idx);
     }
   };
@@ -2965,16 +3051,19 @@ class TacticsStudioController {
       <marker id="arrCover" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.2" markerHeight="6.2" orient="auto-start-reverse">
         <path d="M 0 1 L 10 5 L 0 9 z" fill="#4ade80"/>
       </marker>
+      ${buildProAnnotationsDefsSvg('cinAnn')}
     </defs>
     ${turfBg}
     ${floodlightCones}
     <text x="${canvasW / 2}" y="${canvasH / 2 + (isLandscape ? 8 : 5)}" text-anchor="middle" fill="#FEF08A" fill-opacity="0.06" font-size="${isLandscape ? 32 : 22}" font-weight="900" letter-spacing="${isLandscape ? 10 : 6}" pointer-events="none">MIDAN</text>
     ${pitchMarkings}
     <g id="cinDynamicBgLayer"></g>
+    <g id="cinProAnnotationsLayer"></g>
     <g id="cinActorsLayer"></g>
     <g id="cinOverlayLayer" pointer-events="none"></g>`;
 
     const bgLayer = svg.querySelector('#cinDynamicBgLayer') as SVGGElement;
+    const annotationsLayer = svg.querySelector('#cinProAnnotationsLayer') as SVGGElement;
     const actorsLayer = svg.querySelector('#cinActorsLayer') as SVGGElement;
     const overlayLayer = svg.querySelector('#cinOverlayLayer') as SVGGElement;
 
@@ -2993,7 +3082,7 @@ class TacticsStudioController {
     const ball = createCinematicBallNode();
     actorsLayer.appendChild(ball.root);
 
-    this.cinCache = { signature, bgLayer, actorsLayer, overlayLayer, ourFigs, oppFigs, ball };
+    this.cinCache = { signature, bgLayer, annotationsLayer, actorsLayer, overlayLayer, ourFigs, oppFigs, ball };
     return this.cinCache;
   }
 
@@ -3040,9 +3129,10 @@ class TacticsStudioController {
     const allTokenObstacles = [...ourSvgPts, ...oppSvgPts, ballSvg];
 
     // 1) Dynamic pitch tactical overlay layer (offside, zones, passing triangles, curved arrows, ball comet trail)
+    const showTactical = !isLandscape || this.proShowTacticalLines;
     const bgParts: string[] = [];
 
-    if (this.sequence.offsideEnabled && displayOpp.length >= 3) {
+    if (showTactical && this.sequence.offsideEnabled && displayOpp.length >= 3) {
       const sortedY = displayOpp.map((o) => o.y).sort((a, b) => a - b);
       if (isLandscape) {
         const offsideX = mapPt({ x: 50, y: sortedY[1] }).x;
@@ -3064,9 +3154,10 @@ class TacticsStudioController {
       }
     }
 
-    const heatZone =
-      this.spotlightInfo?.zone ||
-      (focusedUserIdx !== null ? getRoleSpotlightSequence(this.prefs.size, form.id, focusedUserIdx).zone : null);
+    const heatZone = showTactical
+      ? this.spotlightInfo?.zone ||
+        (focusedUserIdx !== null ? getRoleSpotlightSequence(this.prefs.size, form.id, focusedUserIdx).zone : null)
+      : null;
     if (heatZone) {
       const hz = mapPt({ x: heatZone.x, y: heatZone.y });
       const rx = isLandscape ? heatZone.ry * 6.2 : heatZone.rx * 3.1;
@@ -3074,7 +3165,7 @@ class TacticsStudioController {
       bgParts.push(`<ellipse cx="${hz.x.toFixed(1)}" cy="${hz.y.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="url(#heatZoneGrad)" stroke="rgba(250,204,21,0.48)" stroke-dasharray="5 4" stroke-width="1.4"/>`);
     }
 
-    if (frame?.zones?.length) {
+    if (showTactical && frame?.zones?.length) {
       const zoneColors: Record<string, { fill: string; stroke: string; txt: string }> = {
         gold: { fill: 'rgba(250,204,21,0.14)', stroke: 'rgba(250,204,21,0.62)', txt: '#fef08a' },
         cyan: { fill: 'rgba(56,189,248,0.14)', stroke: 'rgba(56,189,248,0.62)', txt: '#bae6fd' },
@@ -3099,7 +3190,7 @@ class TacticsStudioController {
       });
     }
 
-    if (this.showTriangles) {
+    if (showTactical && this.showTriangles) {
       const tris = frame?.triangles || (form.slots.length >= 5 ? [[1, 2, 3]] : []);
       tris.forEach(([a, b, c]) => {
         const pA = ourSvgPts[a];
@@ -3111,7 +3202,7 @@ class TacticsStudioController {
       });
     }
 
-    if (frame?.arrows?.length) {
+    if (showTactical && frame?.arrows?.length) {
       const reveal = reduced ? 1 : this.arrowRevealT;
       frame.arrows.forEach((arr) => {
         const p1 = mapPt({ x: arr.from[0], y: arr.from[1] });
@@ -3151,6 +3242,9 @@ class TacticsStudioController {
     }
 
     cache.bgLayer.innerHTML = bgParts.join('');
+    cache.annotationsLayer.innerHTML = isLandscape
+      ? renderProAnnotationsSvgContent(this.proAnnotations, this.proDraftAnnotation, 'cinAnn', { includeDefs: false })
+      : '';
 
     // 2) Update Articulated Metallic Gold & Silver Figurines IN-PLACE (zero DOM recreation per frame)
     const baseScale = isLandscape
@@ -3233,9 +3327,9 @@ class TacticsStudioController {
         opacity: isDimmed ? 0.26 : 1,
         selected: showSelRing,
         alert: false,
-        jerseyLabel: jerseyLabel.slice(0, 3),
+        jerseyLabel: isLandscape && !this.proShowNumbers ? '' : jerseyLabel.slice(0, 3),
         tagLabel,
-        showTag: Boolean(tagLabel),
+        showTag: Boolean(tagLabel) && (!isLandscape || this.proShowNames),
       });
       depthList.push({ y: pt.y, node: fig.root });
     });
@@ -3304,7 +3398,7 @@ class TacticsStudioController {
         opacity,
         selected: isGrabbed,
         alert: isAlert,
-        jerseyLabel: i === 0 ? 'GK' : String(i + 1),
+        jerseyLabel: isLandscape && !this.proShowNumbers ? '' : i === 0 ? 'GK' : String(i + 1),
         tagLabel: '',
         showTag: false,
       });
@@ -4160,6 +4254,23 @@ class TacticsStudioController {
 
   // ==================== VIEW MODE 2: OFFICIAL LINEUP POSTER ====================
 
+  private renderBoardAnnotationsOverlay(svgId: string, defsPrefix: string): void {
+    const svg = document.getElementById(svgId) as unknown as SVGSVGElement | null;
+    if (!svg) return;
+    if (!this.isProFullscreen) {
+      svg.classList.add('hidden');
+      svg.classList.remove('is-interactive', 'is-passive');
+      svg.innerHTML = '';
+      return;
+    }
+    svg.classList.remove('hidden');
+    const intercept = shouldBoardOverlayInterceptPointer(this.isProFullscreen, this.proTool);
+    svg.classList.toggle('is-interactive', intercept);
+    svg.classList.toggle('is-passive', !intercept);
+    svg.dataset.tool = this.proTool;
+    svg.innerHTML = renderProAnnotationsSvgContent(this.proAnnotations, this.proDraftAnnotation, defsPrefix);
+  }
+
   private renderOfficialPosterView(): void {
     const container = document.getElementById('tacPosterBoard');
     if (!container || !this.ctx) return;
@@ -4167,6 +4278,8 @@ class TacticsStudioController {
     const assigned = this.getAssignedPlayersForCurrentFormation();
     const chem = computeTeamChemistry(form, assigned);
     const settings = this.ctx.getTeamSettings();
+    const showNames = !this.isProFullscreen || this.proShowNames;
+    const showNums = !this.isProFullscreen || this.proShowNumbers;
 
     const headerEl = document.getElementById('tacPosterHeaderMeta');
     if (headerEl) {
@@ -4185,20 +4298,23 @@ class TacticsStudioController {
         if (pl && this.prefs.setPieces.freeKickId === pl.id) badges.push('🎯');
 
         const pos = mapSlotToBoardPct(s, this.isProFullscreen);
+        const fallbackAvatar = pl ? (showNums ? '#' + escapeHtml(String(pl.jersey || '★')) : '★') : '+';
         return `<button type="button" data-assign-slot="${idx}" class="poster-node ${this.prefs.size === '11v11' ? 'compact' : ''}" style="left:${pos.x}%;top:${pos.y}%;">
           <div class="poster-avatar ${pl ? 'filled' : ''}">
             ${
               photo
                 ? `<img src="${photo}" alt="${escapeHtml(pl?.name || '')}" />`
-                : `<span>${pl ? '#' + escapeHtml(String(pl.jersey || '★')) : '+'}</span>`
+                : `<span>${fallbackAvatar}</span>`
             }
-            ${pl ? `<span class="poster-num">${escapeHtml(String(pl.jersey || '★'))}</span>` : ''}
+            ${pl && showNums ? `<span class="poster-num">${escapeHtml(String(pl.jersey || '★'))}</span>` : ''}
             ${badges.length ? `<span class="poster-badge">${badges.join('')}</span>` : ''}
           </div>
-          <div class="poster-name">${pl ? escapeHtml(firstWord(pl.name)) : escapeHtml(s.short)}</div>
+          ${showNames ? `<div class="poster-name">${pl ? escapeHtml(firstWord(pl.name)) : escapeHtml(s.short)}</div>` : ''}
         </button>`;
       })
       .join('');
+
+    this.renderBoardAnnotationsOverlay('tacPosterOverlaySvg', 'posterAnn');
   }
 
   // ==================== VIEW MODE 3: MINI FIFA CARDS + CHEMISTRY ====================
@@ -4211,6 +4327,9 @@ class TacticsStudioController {
     const form = this.getCurrentFormation();
     const assigned = this.getAssignedPlayersForCurrentFormation();
     const chem = computeTeamChemistry(form, assigned);
+    const showNames = !this.isProFullscreen || this.proShowNames;
+    const showNums = !this.isProFullscreen || this.proShowNumbers;
+    const showLines = !this.isProFullscreen || this.proShowTacticalLines;
 
     const kpiChem = document.getElementById('tacKpiChem');
     if (kpiChem) kpiChem.textContent = `${chem.totalPct} / 100`;
@@ -4222,23 +4341,25 @@ class TacticsStudioController {
       kpiAssigned.textContent = `${count} / ${form.slots.length}`;
     }
 
-    // Draw SVG Chemistry lines
-    const lines = chem.linkResults
-      .map((lk) => {
-        const a = form.slots[lk.a];
-        const b = form.slots[lk.b];
-        if (!a || !b) return '';
-        const posA = mapSlotToBoardPct(a, this.isProFullscreen);
-        const posB = mapSlotToBoardPct(b, this.isProFullscreen);
-        const cls =
-          lk.level === 'gold'
-            ? 'chem-line-gold'
-            : lk.level === 'green'
-            ? 'chem-line-green'
-            : 'chem-line-dashed';
-        return `<line x1="${posA.x}%" y1="${posA.y}%" x2="${posB.x}%" y2="${posB.y}%" class="${cls}" />`;
-      })
-      .join('');
+    // Draw SVG Chemistry lines (gated by showLines in Full-Screen)
+    const lines = showLines
+      ? chem.linkResults
+          .map((lk) => {
+            const a = form.slots[lk.a];
+            const b = form.slots[lk.b];
+            if (!a || !b) return '';
+            const posA = mapSlotToBoardPct(a, this.isProFullscreen);
+            const posB = mapSlotToBoardPct(b, this.isProFullscreen);
+            const cls =
+              lk.level === 'gold'
+                ? 'chem-line-gold'
+                : lk.level === 'green'
+                ? 'chem-line-green'
+                : 'chem-line-dashed';
+            return `<line x1="${posA.x}%" y1="${posA.y}%" x2="${posB.x}%" y2="${posB.y}%" class="${cls}" />`;
+          })
+          .join('')
+      : '';
     svg.innerHTML = lines;
 
     // Render Mini Maydan Cards positioned on pitch (using real card OVR when available)
@@ -4252,15 +4373,16 @@ class TacticsStudioController {
         const photo = pl ? sanitizeImageDataUrl(pl.photo || '', 250000) : '';
         const tierCls = ovr >= 84 ? 'mini-diamond' : ovr >= 74 ? 'mini-gold' : pl ? 'mini-emerald' : 'mini-empty';
         const pos = mapSlotToBoardPct(s, this.isProFullscreen);
+        const fallbackAvatar = pl ? (showNums ? '#' + escapeHtml(String(pl.jersey || '★')) : '★') : '👤';
         return `<button type="button" data-assign-slot="${idx}" class="mini-fifa-card ${tierCls} ${this.prefs.size === '11v11' ? 'compact' : ''}" style="left:${pos.x}%;top:${pos.y}%;">
           <div class="mini-fifa-top">
-            <span class="mini-fifa-ovr">${pl ? ovr : '+'}</span>
+            ${showNums ? `<span class="mini-fifa-ovr">${pl ? ovr : '+'}</span>` : '<span class="mini-fifa-ovr">•</span>'}
             <span class="mini-fifa-pos">${escapeHtml(s.short)}</span>
           </div>
           <div class="mini-fifa-pic">
-            ${photo ? `<img src="${photo}" alt="" />` : `<span>${pl ? '#' + escapeHtml(String(pl.jersey || '★')) : '👤'}</span>`}
+            ${photo ? `<img src="${photo}" alt="" />` : `<span>${fallbackAvatar}</span>`}
           </div>
-          <div class="mini-fifa-name">${pl ? escapeHtml(firstWord(pl.name)) : escapeHtml(s.label.split(' ')[0])}</div>
+          ${showNames ? `<div class="mini-fifa-name">${pl ? escapeHtml(firstWord(pl.name)) : escapeHtml(s.label.split(' ')[0])}</div>` : ''}
         </button>`;
       })
       .join('');
@@ -4268,6 +4390,8 @@ class TacticsStudioController {
     if (kpiOvr && realOvrs.length) {
       kpiOvr.textContent = String(Math.round(realOvrs.reduce((a, b) => a + b, 0) / realOvrs.length));
     }
+
+    this.renderBoardAnnotationsOverlay('tacFifaOverlaySvg', 'fifaAnn');
   }
 
   // ==================== 10 ANIMATED SCENARIOS ====================
@@ -4812,7 +4936,7 @@ class TacticsStudioController {
     this.currentOpp = snap.opp.map((p) => ({ x: p.x, y: p.y }));
     this.currentBall = { x: snap.ball.x, y: snap.ball.y };
     this.proAnnotations = snap.annotations.map((a) => ({ ...a }));
-    this.renderSvgPitch();
+    this.renderActiveViewBody();
     if (this.isProFullscreen) this.renderProControlsState();
   }
 
@@ -4988,12 +5112,50 @@ class TacticsStudioController {
       btn.setAttribute('aria-pressed', isAct ? 'true' : 'false');
     });
 
-    // Cursor class on pitch canvas
+    // Cursor class & Zoom on whichever pitch canvas is currently active in Full-Screen
+    const scaleStr = `scale(${(this.proZoomPct / 100).toFixed(2)})`;
     const stage = document.getElementById('tacProPitchCanvasWrap');
     if (stage) {
       stage.dataset.tool = this.proTool;
-      stage.style.transform = `scale(${(this.proZoomPct / 100).toFixed(2)})`;
+      stage.style.transform = scaleStr;
     }
+    const nativePitchStage = document.getElementById('tacPitchStage');
+    if (nativePitchStage) {
+      if (this.isProFullscreen && this.viewMode === 'cinematic') {
+        nativePitchStage.dataset.tool = this.proTool;
+        nativePitchStage.style.transform = scaleStr;
+      } else {
+        nativePitchStage.style.transform = '';
+        delete nativePitchStage.dataset.tool;
+      }
+    }
+    const posterField = document.getElementById('tacPosterField');
+    if (posterField) {
+      posterField.style.transform = this.isProFullscreen && this.viewMode === 'poster' ? scaleStr : '';
+      if (this.isProFullscreen && this.viewMode === 'poster') {
+        posterField.dataset.tool = this.proTool;
+      } else {
+        delete posterField.dataset.tool;
+      }
+    }
+    const fifaField = document.getElementById('tacFifaField');
+    if (fifaField) {
+      fifaField.style.transform = this.isProFullscreen && this.viewMode === 'fifa' ? scaleStr : '';
+      if (this.isProFullscreen && this.viewMode === 'fifa') {
+        fifaField.dataset.tool = this.proTool;
+      } else {
+        delete fifaField.dataset.tool;
+      }
+    }
+    (['tacPosterOverlaySvg', 'tacFifaOverlaySvg'] as const).forEach((oid) => {
+      const oel = document.getElementById(oid);
+      if (oel && this.isProFullscreen) {
+        const intercept = shouldBoardOverlayInterceptPointer(this.isProFullscreen, this.proTool);
+        oel.classList.toggle('is-interactive', intercept);
+        oel.classList.toggle('is-passive', !intercept);
+        oel.dataset.tool = this.proTool;
+      }
+    });
 
     // Display switches
     const chkNames = document.getElementById('chkProShowNames') as HTMLInputElement | null;
@@ -5260,11 +5422,11 @@ class TacticsStudioController {
     this.renderProLibraryModal();
   }
 
-  private handleProPointerDown = (e: PointerEvent): void => {
-    const svg = document.getElementById('tacProPitchSvg') as unknown as SVGSVGElement | null;
-    if (!svg) return;
-
-    // Close open mobile drawer when interacting with pitch
+  private handleProOverlayToolPointerDown(
+    svg: SVGSVGElement,
+    e: PointerEvent,
+    reRender: () => void
+  ): boolean {
     if (this.proMobileDrawer !== 'none') {
       this.proMobileDrawer = 'none';
       this.renderProControlsState();
@@ -5285,13 +5447,13 @@ class TacticsStudioController {
       if (hitId) {
         this.pushCurrentBoardHistory();
         this.proAnnotations = this.proAnnotations.filter((a) => a.id !== hitId);
-        this.renderSvgPitch();
+        reRender();
         this.renderProControlsState();
       } else {
         this.ctx?.toast('اضغط على سهم أو شكل أو مخروط لحذفه');
       }
       e.preventDefault();
-      return;
+      return true;
     }
 
     // 2. Single-click stamp tools (cone, flag, extra ball)
@@ -5306,16 +5468,17 @@ class TacticsStudioController {
         y2: pt.y,
         color: defaultColorForTool(this.proTool),
       });
-      this.renderSvgPitch();
+      reRender();
       this.renderProControlsState();
       e.preventDefault();
-      return;
+      return true;
     }
 
     // 3. Drag-to-draw vector tools (arrow, path, circle, rect, triangle, zone)
     if (isDrawingTool(this.proTool)) {
       this.pause();
       this.proDrawStartPortrait = pt;
+      this.activeBoardOverlaySvg = svg;
       this.proDraftAnnotation = {
         id: 'draft',
         kind: this.proTool as ProAnnotationKind,
@@ -5330,8 +5493,24 @@ class TacticsStudioController {
       } catch {
         // ignore
       }
-      this.renderProPitchOnly();
+      reRender();
       e.preventDefault();
+      return true;
+    }
+
+    return false;
+  }
+
+  private handleProPointerDown = (e: PointerEvent): void => {
+    const svg = document.getElementById('tacProPitchSvg') as unknown as SVGSVGElement | null;
+    if (!svg) return;
+
+    if (
+      this.handleProOverlayToolPointerDown(svg, e, () => {
+        if (this.proDraftAnnotation) this.renderProPitchOnly();
+        else this.renderSvgPitch();
+      })
+    ) {
       return;
     }
 
@@ -5634,18 +5813,22 @@ class TacticsStudioController {
       });
     });
 
-    // Display options checkboxes
+    // Display options checkboxes (applied across all 4 Full-Screen display modes)
+    const refreshDisplayForActiveMode = () => {
+      if (this.viewMode === 'studio') this.renderProPitchOnly();
+      else this.renderActiveViewBody();
+    };
     document.getElementById('chkProShowNames')?.addEventListener('change', (e) => {
       this.proShowNames = (e.target as HTMLInputElement).checked;
-      this.renderProPitchOnly();
+      refreshDisplayForActiveMode();
     });
     document.getElementById('chkProShowNumbers')?.addEventListener('change', (e) => {
       this.proShowNumbers = (e.target as HTMLInputElement).checked;
-      this.renderProPitchOnly();
+      refreshDisplayForActiveMode();
     });
     document.getElementById('chkProShowLines')?.addEventListener('change', (e) => {
       this.proShowTacticalLines = (e.target as HTMLInputElement).checked;
-      this.renderProPitchOnly();
+      refreshDisplayForActiveMode();
     });
 
     // Live caption comparison toggle delegation
@@ -5753,6 +5936,55 @@ class TacticsStudioController {
       proSvg.addEventListener('pointerup', this.handleProPointerUp);
       proSvg.addEventListener('pointercancel', this.handleProPointerUp);
     }
+
+    // Poster & Midan Cards Full-Screen Annotation Overlay SVGs
+    const bindBoardOverlaySvg = (svgId: string, defsPrefix: string) => {
+      const overlaySvg = document.getElementById(svgId) as unknown as SVGSVGElement | null;
+      if (!overlaySvg) return;
+      overlaySvg.addEventListener('pointerdown', (e) => {
+        if (!shouldBoardOverlayInterceptPointer(this.isProFullscreen, this.proTool)) return;
+        this.handleProOverlayToolPointerDown(overlaySvg, e, () => {
+          this.renderBoardAnnotationsOverlay(svgId, defsPrefix);
+        });
+      });
+      overlaySvg.addEventListener('pointermove', (e) => {
+        if (!this.proDraftAnnotation || !this.proDrawStartPortrait || this.activeBoardOverlaySvg !== overlaySvg) {
+          return;
+        }
+        const pt = projectProClientToPortraitPct(e.clientX, e.clientY, overlaySvg.getBoundingClientRect());
+        this.proDraftAnnotation = {
+          ...this.proDraftAnnotation,
+          x2: pt.x,
+          y2: pt.y,
+        };
+        this.renderBoardAnnotationsOverlay(svgId, defsPrefix);
+      });
+      const finishOverlayStroke = (e: PointerEvent) => {
+        if (!this.proDraftAnnotation || this.activeBoardOverlaySvg !== overlaySvg) return;
+        try {
+          overlaySvg.releasePointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
+        const fin = this.proDraftAnnotation;
+        this.proDraftAnnotation = null;
+        this.proDrawStartPortrait = null;
+        this.activeBoardOverlaySvg = null;
+        if (Math.hypot(fin.x2 - fin.x1, fin.y2 - fin.y1) >= 2.2) {
+          this.pushCurrentBoardHistory();
+          this.proAnnotations.push({
+            ...fin,
+            id: 'ann_' + Date.now() + '_' + Math.floor(Math.random() * 999),
+          });
+        }
+        this.renderBoardAnnotationsOverlay(svgId, defsPrefix);
+        this.renderProControlsState();
+      };
+      overlaySvg.addEventListener('pointerup', finishOverlayStroke);
+      overlaySvg.addEventListener('pointercancel', finishOverlayStroke);
+    };
+    bindBoardOverlaySvg('tacPosterOverlaySvg', 'posterAnn');
+    bindBoardOverlaySvg('tacFifaOverlaySvg', 'fifaAnn');
   }
 }
 

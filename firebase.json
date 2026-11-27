@@ -1,5 +1,6 @@
 {
   "firestore": {
+    "database": "ai-studio-maydan6v6-1ffadd67-9231-48e6-8c5b-bf975f936810",
     "rules": "firestore.rules"
   },
   "hosting": {
@@ -17,6 +18,14 @@
       }
     ],
     "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" },
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        ]
+      },
       {
         "source": "/index.html",
         "headers": [

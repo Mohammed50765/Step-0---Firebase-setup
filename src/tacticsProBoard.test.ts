@@ -15,6 +15,8 @@ import {
   renderFormationMiniPitchSvg,
   buildProLandscapePitchSvg,
   mapSlotToBoardPct,
+  renderProAnnotationsSvgContent,
+  shouldBoardOverlayInterceptPointer,
   type ProAnnotation,
   type ProBoardSnapshot,
 } from './tacticsProBoard';
@@ -201,5 +203,34 @@ test('mapSlotToBoardPct keeps portrait coordinates untouched and maps landscape 
   assert.equal(stLand.y, 50);
   // Wide winger stays comfortably inside vertical bounds
   assert.ok(lwLand.y >= 15 && lwLand.y <= 35, `Expected wide winger inside upper lane, got y=${lwLand.y}`);
+});
+
+test('renderProAnnotationsSvgContent namespaces defs IDs cleanly and shouldBoardOverlayInterceptPointer gates tools', () => {
+  const anns: ProAnnotation[] = [
+    { id: 'ar1', kind: 'arrow', x1: 20, y1: 80, x2: 70, y2: 30, color: '#FFFFFF' },
+    { id: 'ba1', kind: 'ball', x1: 45, y1: 50, x2: 45, y2: 50, color: '#FACC15' },
+  ];
+  const draft: ProAnnotation = { id: 'draft', kind: 'path', x1: 30, y1: 70, x2: 60, y2: 40, color: '#FACC15' };
+
+  const fifaHtml = renderProAnnotationsSvgContent(anns, draft, 'fifaAnn');
+  assert.ok(fifaHtml.includes('id="fifaAnnArrWhite"'));
+  assert.ok(fifaHtml.includes('id="fifaAnnArrGold"'));
+  assert.ok(fifaHtml.includes('id="fifaAnnFootballGrad"'));
+  assert.ok(fifaHtml.includes('url(#fifaAnnArrWhite)'));
+  assert.ok(fifaHtml.includes('url(#fifaAnnArrGold)'));
+  assert.ok(fifaHtml.includes('url(#fifaAnnFootballGrad)'));
+  assert.ok(fifaHtml.includes('data-pro-ann-id="ar1"'));
+  assert.ok(fifaHtml.includes('tac-pro-draft'));
+
+  const cinBodyOnly = renderProAnnotationsSvgContent(anns, null, 'cinAnn', { includeDefs: false });
+  assert.ok(!cinBodyOnly.includes('<defs>'));
+  assert.ok(cinBodyOnly.includes('url(#cinAnnArrWhite)'));
+
+  assert.equal(shouldBoardOverlayInterceptPointer(false, 'arrow'), false);
+  assert.equal(shouldBoardOverlayInterceptPointer(true, 'pointer'), false);
+  assert.equal(shouldBoardOverlayInterceptPointer(true, 'move'), false);
+  assert.equal(shouldBoardOverlayInterceptPointer(true, 'arrow'), true);
+  assert.equal(shouldBoardOverlayInterceptPointer(true, 'erase'), true);
+  assert.equal(shouldBoardOverlayInterceptPointer(true, 'cone'), true);
 });
 

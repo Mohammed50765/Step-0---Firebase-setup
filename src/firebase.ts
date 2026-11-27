@@ -168,10 +168,14 @@ function initOptionalAppCheck(): void {
     appCheckState = 'unconfigured';
     return;
   }
-  const rawKey =
+  const envKey =
     typeof import.meta !== 'undefined' && import.meta.env
       ? String(import.meta.env.VITE_RECAPTCHA_SITE_KEY || '').trim()
       : '';
+  const configKey = String(
+    (firebaseConfig as { recaptchaSiteKey?: string }).recaptchaSiteKey || ''
+  ).trim();
+  const rawKey = envKey || configKey;
   if (!isValidRecaptchaSiteKey(rawKey)) {
     appCheckState = 'unconfigured';
     appCheckInstance = null;

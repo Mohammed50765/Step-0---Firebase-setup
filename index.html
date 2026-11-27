@@ -4235,6 +4235,51 @@
         padding: 1px 5px;
       }
     }
+    .tac-board-nodes-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+    }
+    .tac-pro-board-overlay-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 6;
+      touch-action: none;
+    }
+    .tac-pro-board-overlay-svg.hidden {
+      display: none !important;
+    }
+    .tac-pro-board-overlay-svg.is-passive {
+      pointer-events: none;
+    }
+    .tac-pro-board-overlay-svg.is-interactive {
+      pointer-events: auto;
+      cursor: crosshair;
+    }
+    .tac-pro-board-overlay-svg.is-interactive[data-tool="erase"] {
+      cursor: not-allowed;
+    }
+    .tac-pro-native-host .tac-pitch-stage,
+    .tac-pro-native-host .tac-board-field {
+      transform-origin: center center;
+      transition: transform 0.18s ease;
+    }
+    .tac-pro-native-host .tac-pitch-stage[data-tool="arrow"],
+    .tac-pro-native-host .tac-pitch-stage[data-tool="path"],
+    .tac-pro-native-host .tac-pitch-stage[data-tool="circle"],
+    .tac-pro-native-host .tac-pitch-stage[data-tool="rect"],
+    .tac-pro-native-host .tac-pitch-stage[data-tool="triangle"],
+    .tac-pro-native-host .tac-pitch-stage[data-tool="zone"],
+    .tac-pro-native-host .tac-pitch-stage[data-tool="cone"],
+    .tac-pro-native-host .tac-pitch-stage[data-tool="flag"],
+    .tac-pro-native-host .tac-pitch-stage[data-tool="ball"] {
+      cursor: crosshair;
+    }
+    .tac-pro-native-host .tac-pitch-stage[data-tool="erase"] {
+      cursor: not-allowed;
+    }
     .tac-pro-pitch-wrap.hidden {
       display: none !important;
     }
@@ -4834,6 +4879,7 @@
         backdrop-filter: blur(2px);
       }
       .tac-pro-bottombar {
+        justify-content: flex-start;
         padding: 5px 6px;
         gap: 6px;
       }
@@ -5997,7 +6043,10 @@
                 <span id="tacPosterHeaderMeta" class="badge">التشكيلة الرسمية</span>
                 <span class="muted" style="font-size:0.74rem;">اضغط أي لاعب لتبديل المركز</span>
               </div>
-              <div id="tacPosterBoard" class="tac-board-field"></div>
+              <div id="tacPosterField" class="tac-board-field">
+                <div id="tacPosterBoard" class="tac-board-nodes-layer"></div>
+                <svg id="tacPosterOverlaySvg" class="tac-pro-board-overlay-svg hidden" viewBox="0 0 860 520" xmlns="http://www.w3.org/2000/svg"></svg>
+              </div>
               <button type="button" id="btnExportPosterPng" class="btn-emerald" style="width:100%;margin-bottom:8px;">📸 تصدير بوستر التشكيلة الرسمية PNG (2x Retina)</button>
             </div>
 
@@ -6017,9 +6066,10 @@
                   <div id="tacKpiAssigned" dir="ltr" style="font-weight:900;color:#f8fafc;font-size:1.05rem;">0 / 6</div>
                 </div>
               </div>
-              <div class="tac-board-field">
+              <div id="tacFifaField" class="tac-board-field">
                 <svg id="tacFifaLinksSvg" class="chem-svg" aria-hidden="true"></svg>
                 <div id="tacFifaBoard"></div>
+                <svg id="tacFifaOverlaySvg" class="tac-pro-board-overlay-svg hidden" viewBox="0 0 860 520" xmlns="http://www.w3.org/2000/svg"></svg>
               </div>
               <div class="tac-legend-bar">
                 <span class="tac-legend-item"><span class="tac-dot-swatch" style="background:#FACC15;"></span> تناغم ذهبي متوهّج</span>

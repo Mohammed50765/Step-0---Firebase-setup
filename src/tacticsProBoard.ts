@@ -177,6 +177,10 @@ export function isSingleClickStampTool(tool: ProBoardTool): boolean {
   return tool === 'cone' || tool === 'flag' || tool === 'ball';
 }
 
+export function shouldBoardOverlayInterceptPointer(isProFullscreen: boolean, tool: ProBoardTool): boolean {
+  return isProFullscreen && tool !== 'pointer' && tool !== 'move';
+}
+
 export function defaultColorForTool(tool: ProBoardTool): string {
   switch (tool) {
     case 'path':
@@ -349,7 +353,23 @@ function buildCurvedPathD(x1: number, y1: number, x2: number, y2: number, bendSi
   return `M ${x1.toFixed(1)} ${y1.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
 }
 
-function renderSingleAnnotationSvg(a: ProAnnotation, isDraft: boolean): string {
+export function buildProAnnotationsDefsSvg(defsPrefix = 'pro'): string {
+  const safePrefix = escapeHtml(defsPrefix || 'pro');
+  return `<radialGradient id="${safePrefix}FootballGrad" cx="34%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="66%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#94a3b8"/>
+    </radialGradient>
+    <marker id="${safePrefix}ArrGold" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.2" markerHeight="6.2" orient="auto-start-reverse">
+      <path d="M 0 0.8 L 10 5 L 0 9.2 L 2.2 5 Z" fill="#FACC15"/>
+    </marker>
+    <marker id="${safePrefix}ArrWhite" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 1 1.4 L 9.2 5 L 1 8.6" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>`;
+}
+
+export function renderSingleAnnotationSvg(a: ProAnnotation, isDraft: boolean, defsPrefix = 'pro'): string {
+  const safePrefix = escapeHtml(defsPrefix || 'pro');
   const p1 = portraitPctToProSvg({ x: a.x1, y: a.y1 });
   const p2 = portraitPctToProSvg({ x: a.x2, y: a.y2 });
   const op = isDraft ? '0.78' : '0.96';
@@ -359,14 +379,14 @@ function renderSingleAnnotationSvg(a: ProAnnotation, isDraft: boolean): string {
     case 'arrow':
       if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 8) return '';
       return `<g ${idAttr} opacity="${op}">
-        <line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${a.color}" stroke-width="3.2" stroke-dasharray="10 7" stroke-linecap="round" marker-end="url(#proArrWhite)"/>
+        <line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${a.color}" stroke-width="3.2" stroke-dasharray="10 7" stroke-linecap="round" marker-end="url(#${safePrefix}ArrWhite)"/>
       </g>`;
     case 'path': {
       if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 10) return '';
       const d = buildCurvedPathD(p1.x, p1.y, p2.x, p2.y, p1.y < PRO_SVG_H / 2 ? -1 : 1);
       return `<g ${idAttr} opacity="${op}">
         <path d="${d}" fill="none" stroke="rgba(250,204,21,0.34)" stroke-width="11" stroke-linecap="round" pointer-events="none"/>
-        <path d="${d}" fill="none" stroke="#FACC15" stroke-width="5" stroke-linecap="round" marker-end="url(#proArrGold)"/>
+        <path d="${d}" fill="none" stroke="#FACC15" stroke-width="5" stroke-linecap="round" marker-end="url(#${safePrefix}ArrGold)"/>
       </g>`;
     }
     case 'circle': {
@@ -414,10 +434,35 @@ function renderSingleAnnotationSvg(a: ProAnnotation, isDraft: boolean): string {
     case 'ball':
       return `<g ${idAttr} transform="translate(${p1.x.toFixed(1)}, ${p1.y.toFixed(1)})" opacity="${op}">
         <ellipse cx="0" cy="7.5" rx="9" ry="4" fill="rgba(0,0,0,0.45)"/>
-        <circle cx="0" cy="0" r="9.5" fill="url(#proFootballGrad)" stroke="#0f172a" stroke-width="1.4"/>
+        <circle cx="0" cy="0" r="9.5" fill="url(#${safePrefix}FootballGrad)" stroke="#0f172a" stroke-width="1.4"/>
         <polygon points="0,-4 3.8,-1.2 2.4,3.3 -2.4,3.3 -3.8,-1.2" fill="#0f172a"/>
       </g>`;
   }
+}
+
+export function renderProAnnotationsSvgContent(
+  annotations: ProAnnotation[],
+  draftAnnotation: ProAnnotation | null,
+  defsPrefix = 'pro',
+  options?: { includeDefs?: boolean }
+): string {
+  const parts: string[] = [];
+  if (options?.includeDefs !== false && (annotations.length > 0 || draftAnnotation)) {
+    parts.push(`<defs>${buildProAnnotationsDefsSvg(defsPrefix)}</defs>`);
+  }
+  if (annotations.length > 0) {
+    parts.push(`<g class="tac-pro-annotations">`);
+    annotations.forEach((ann) => {
+      parts.push(renderSingleAnnotationSvg(ann, false, defsPrefix));
+    });
+    parts.push(`</g>`);
+  }
+  if (draftAnnotation) {
+    parts.push(
+      `<g class="tac-pro-draft" pointer-events="none">${renderSingleAnnotationSvg(draftAnnotation, true, defsPrefix)}</g>`
+    );
+  }
+  return parts.join('');
 }
 
 /**
