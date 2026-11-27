@@ -8767,7 +8767,7 @@
         if (admQuotaCard) admQuotaCard.classList.toggle('hidden', !allowAdmin);
         const capFatigue = document.getElementById('captainFatigueRadar');
         if (capFatigue && !allowAdmin) capFatigue.classList.add('hidden');
-        const canPitch = allowAdmin || canCurrentUserPublishLineup();
+        const canPitch = allowAdmin || isCurrentUserTeamCreatorOrOrganizer();
         const capPay = document.getElementById('captainPitchPayList');
         if (capPay && !canPitch) capPay.classList.add('hidden');
         const pitchForm = document.getElementById('pitchSessionForm');
@@ -10812,7 +10812,7 @@
           getState: () => db,
           getCurrentUser: () => user,
           isCaptain: () => isVerifiedCaptain(),
-          canManagePitch: () => canCurrentUserPublishLineup(),
+          canManagePitch: () => isCurrentUserTeamCreatorOrOrganizer(),
           isFirebaseMode: () => Boolean(isFirebaseMode),
           persistAction: (action, payload) => persistAction(action, payload),
           saveLocal: () => saveLocal(db),
@@ -11189,27 +11189,35 @@
         }));
 
         // Players & Roles Management (NO PINs ever stored or displayed)
-        document.getElementById('admPlayersList').innerHTML = db.players.map(p => `
+        const isMultiRoleMode = Boolean(isFirebaseMode && window.MaydanBackend && typeof window.MaydanBackend.isMultiMode === 'function' && window.MaydanBackend.isMultiMode());
+        const roleLabelAr = (r) => r === 'founder' ? 'مؤسس' : r === 'organizer' ? 'منظّم' : r === 'admin' ? 'كابتن' : 'لاعب';
+        document.getElementById('admPlayersList').innerHTML = db.players.map(p => {
+          const isPriv = p.role === 'admin' || p.role === 'organizer';
+          const isFounderRole = p.role === 'founder';
+          const toggleLabel = isPriv ? 'تعيين لاعب' : (isMultiRoleMode ? 'ترقية منظّم' : 'ترقية كابتن');
+          return `
           <div class="item-box row between">
             <div>
               <strong>${esc(p.name)}</strong>
-              <span class="badge">${p.role === 'admin' ? 'كابتن' : 'لاعب'}</span>
+              <span class="badge">${roleLabelAr(p.role)}</span>
               <span class="muted">${esc(p.primaryPos)} • #${esc(p.jersey || '')}</span>
               ${p.referredBy ? `<span class="badge" style="font-size:0.68rem;">🤝 دعاه: ${esc(p.referredBy)}</span>` : ''}
             </div>
             <div class="row" style="gap:5px;">
-              ${p.id !== user.id ? `<button type="button" data-toggle-role="${esc(p.id)}" class="icon-btn">${p.role === 'admin' ? 'تعيين لاعب' : 'ترقية كابتن'}</button>` : '<span class="muted">حسابك</span>'}
+              ${p.id !== user.id && !isFounderRole ? `<button type="button" data-toggle-role="${esc(p.id)}" class="icon-btn">${toggleLabel}</button>` : `<span class="muted">${p.id === user.id ? 'حسابك' : 'مؤسس'}</span>`}
             </div>
           </div>
-        `).join('');
+        `;
+        }).join('');
 
         document.querySelectorAll('[data-toggle-role]').forEach(b => b.addEventListener('click', async () => {
           if (!isVerifiedCaptain()) { toast('هذا الإجراء متاح للكابتن فقط', true); return; }
           const target = db.players.find(p => p.id === b.dataset.toggleRole);
-          if (!target) return;
+          if (!target || target.role === 'founder') return;
           takeSnapshot();
           const prevRole = target.role;
-          target.role = target.role === 'admin' ? 'player' : 'admin';
+          const isPriv = target.role === 'admin' || target.role === 'organizer';
+          target.role = isPriv ? (isMultiRoleMode ? 'member' : 'player') : (isMultiRoleMode ? 'organizer' : 'admin');
           const res = await persistActionChecked('updateRole', { id: target.id, ownerUid: target.ownerUid || '', role: target.role });
           if (!res.ok) { target.role = prevRole; return; }
           renderAdmin();

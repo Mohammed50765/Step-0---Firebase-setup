@@ -51,11 +51,14 @@ import {
 } from './firebase';
 import {
   classifyAccountCleanupError,
+  collectAccountDeletionTeamCandidates,
+  planTeamAccountCleanup,
   purgePersistentTeamSnapshots,
   resolveSnapshotCacheTarget,
   scrubAllAccountLocalCaches,
   shouldAllowAuthAccountDeletion,
   type AccountCleanupFailure,
+  type AccountDeletionTeamSnapshot,
   type AppCheckStatus,
   type AuthPersistenceMode,
 } from './localCachePrivacy';
@@ -127,6 +130,7 @@ import {
   MAX_JOINED_TEAMS,
   MAX_OWNED_TEAMS,
   MIGRATION_BATCH_WRITE_LIMIT,
+  normalizeAppAvailableStatus,
   normalizePublicAvailableStatus,
   PRIVACY_NOTICE_VERSION,
   sanitizeJoinMode,
@@ -1593,9 +1597,11 @@ class MaydanBackendService {
     try {
       const snap = await getDocs(collection(db, 'teams', tid, 'members'));
       quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
-      targetState.players = snap.docs.map((d) =>
-        stripForbiddenHealthFields({ id: d.id, ...d.data() })
-      );
+      targetState.players = snap.docs.map((d) => {
+        const clean: Record<string, unknown> = stripForbiddenHealthFields({ id: d.id, ...d.data() });
+        clean.availableStatus = normalizeAppAvailableStatus(clean.availableStatus);
+        return clean;
+      });
       this.saveTeamSnapshotCache(targetState);
       if (this.activeOnUpdate) this.activeOnUpdate();
     } catch (err) {
@@ -5124,16 +5130,6 @@ class MaydanBackendService {
       throw new Error('يرجى تسجيل الدخول أولاً لحذف الحساب.');
     }
 
-    // 1. Guard: if founder of any active multi-member team, require explicit transfer/soft-delete first
-    const ownedActive = this.activeTeams.filter((t) => t.founderUid === uid && !t.deletedAt);
-    const blockingOwned = ownedActive.filter((t) => Number(t.memberCount || 1) > 1);
-    if (blockingOwned.length > 0) {
-      const names = blockingOwned.map((t) => t.teamName).join('، ');
-      throw new Error(
-        `أنت مؤسس الفريق (${names}) وبه أعضاء آخرون. يرجى نقل القيادة لعضو آخر أو حذف الفريق من لوحة المؤسس قبل حذف حسابك.`
-      );
-    }
-
     let teamsLeft = 0;
     let privateRecordsDeleted = 0;
     const failedSteps: AccountCleanupFailure[] = [];
@@ -5150,26 +5146,83 @@ class MaydanBackendService {
       });
     };
 
-    // 2. Soft-delete any solo-owned teams (memberCount <= 1) and clean own private records
-    for (const soloTeam of ownedActive) {
-      const tid = soloTeam.id;
-      try {
-        privateRecordsDeleted += await this.deleteMyPrivateTeamData(tid);
-      } catch (err: unknown) {
-        recordError('delete_solo_team_private', `teams/${tid}/members/${uid}/private`, err, true);
+    // 1. Discover ALL candidate Multi-Teams from both in-memory cache and fresh /users/{uid}
+    //    (covers active, solo-owned, soft-deleted, and pending join-request teams).
+    let freshUserDoc: Record<string, unknown> | null = null;
+    try {
+      const uSnap = await getDoc(doc(db, 'users', uid));
+      if (uSnap.exists()) {
+        freshUserDoc = uSnap.data() as Record<string, unknown>;
       }
-      try {
-        await this.softDeleteMultiTeam(tid);
-        teamsLeft++;
-      } catch (err: unknown) {
-        recordError('soft_delete_solo_team', `teams/${tid}`, err, false);
+    } catch (err: unknown) {
+      const classified = classifyAccountCleanupError(err);
+      if (!classified.ignorableForOptionalDoc) {
+        recordError('read_user_registry', `users/${uid}`, err, false);
       }
     }
 
-    // 3. Leave all non-founder Multi-Teams & delete own private docs / joinRequests / votes
-    const memberTeams = this.activeTeams.filter((t) => t.founderUid !== uid && !t.deletedAt);
-    for (const team of memberTeams) {
-      const tid = team.id;
+    const candidateTeamIds = collectAccountDeletionTeamCandidates({
+      activeTeamIds: this.activeTeams.map((t) => t.id),
+      userRegistryDoc: freshUserDoc as {
+        teamIds?: unknown;
+        ownedTeamIds?: unknown;
+        pendingJoinTeamId?: unknown;
+        activeTeamId?: unknown;
+      } | null,
+    });
+
+    const teamPlans: Array<{
+      tid: string;
+      snapshot: AccountDeletionTeamSnapshot | null;
+      action: ReturnType<typeof planTeamAccountCleanup>;
+    }> = [];
+
+    for (const tid of candidateTeamIds) {
+      let snapshot: AccountDeletionTeamSnapshot | null = null;
+      const cachedTeam = this.activeTeams.find((t) => t.id === tid);
+      try {
+        const tSnap = await getDoc(doc(db, 'teams', tid));
+        if (tSnap.exists()) {
+          const td = tSnap.data() as Record<string, unknown>;
+          snapshot = {
+            id: tid,
+            teamName: String(td.teamName || cachedTeam?.teamName || tid),
+            founderUid: String(td.founderUid || ''),
+            memberCount: Number(td.memberCount ?? 1),
+            deletedAt: td.deletedAt ?? null,
+          };
+        }
+      } catch (err: unknown) {
+        const classified = classifyAccountCleanupError(err);
+        if (classified.kind === 'network') {
+          recordError('read_team_meta', `teams/${tid}`, err, false);
+        } else if (cachedTeam) {
+          snapshot = {
+            id: tid,
+            teamName: cachedTeam.teamName,
+            founderUid: cachedTeam.founderUid,
+            memberCount: cachedTeam.memberCount,
+            deletedAt: cachedTeam.deletedAt,
+          };
+        }
+      }
+      teamPlans.push({
+        tid,
+        snapshot,
+        action: planTeamAccountCleanup(snapshot, uid),
+      });
+    }
+
+    // 2. Guard: if founder of any active multi-member team, require explicit transfer/soft-delete first
+    const blockingOwned = teamPlans.filter((p) => p.action === 'block_active_founder_with_members');
+    if (blockingOwned.length > 0) {
+      const names = blockingOwned.map((p) => p.snapshot?.teamName || p.tid).join('، ');
+      throw new Error(
+        `أنت مؤسس الفريق (${names}) وبه أعضاء آخرون. يرجى نقل القيادة لعضو آخر أو حذف الفريق من لوحة المؤسس قبل حذف حسابك.`
+      );
+    }
+
+    const cleanTeamPersonalSubdocs = async (tid: string) => {
       try {
         const privSnap = await getDocs(collection(db, 'teams', tid, 'members', uid, 'private'));
         for (const chunk of chunkItemsForBatch(privSnap.docs, 400)) {
@@ -5184,12 +5237,12 @@ class MaydanBackendService {
         recordError('delete_team_private', `teams/${tid}/members/${uid}/private`, err, true);
       }
 
-      await this.deleteDocIfExistsStrict(
-        doc(db, 'teams', tid, 'lineupVotes', uid),
-        'delete_team_lineup_vote',
-        `teams/${tid}/lineupVotes/${uid}`,
-        failedSteps
-      );
+      // lineupVotes/{uid} allows direct self-delete even for non-members/pending users
+      try {
+        await deleteDoc(doc(db, 'teams', tid, 'lineupVotes', uid));
+      } catch (err: unknown) {
+        recordError('delete_team_lineup_vote', `teams/${tid}/lineupVotes/${uid}`, err, true);
+      }
 
       await this.deleteDocIfExistsStrict(
         doc(db, 'teams', tid, 'joinRequests', uid),
@@ -5197,27 +5250,66 @@ class MaydanBackendService {
         `teams/${tid}/joinRequests/${uid}`,
         failedSteps
       );
+    };
 
-      try {
-        const memberRef = doc(db, 'teams', tid, 'members', uid);
-        const memberSnap = await getDoc(memberRef);
-        if (memberSnap.exists()) {
-          const leaveBatch = writeBatch(db);
-          leaveBatch.delete(memberRef);
-          leaveBatch.update(doc(db, 'teams', tid), {
-            memberCount: increment(-1),
-            organizerUids: arrayRemove(uid),
-            updatedAt: serverTimestamp(),
-          });
-          await leaveBatch.commit();
+    // 3. Execute rules-safe cleanup across solo-owned, active member, soft-deleted, and pending teams
+    for (const plan of teamPlans) {
+      const { tid, action } = plan;
+
+      if (action === 'soft_delete_solo_owned') {
+        await cleanTeamPersonalSubdocs(tid);
+        try {
+          await this.softDeleteMultiTeam(tid);
           teamsLeft++;
+        } catch (err: unknown) {
+          recordError('soft_delete_solo_team', `teams/${tid}`, err, false);
         }
-      } catch (err: unknown) {
-        recordError('leave_team_member', `teams/${tid}/members/${uid}`, err, true);
+        continue;
       }
+
+      if (action === 'leave_active_member') {
+        await cleanTeamPersonalSubdocs(tid);
+        try {
+          const memberRef = doc(db, 'teams', tid, 'members', uid);
+          const memberSnap = await getDoc(memberRef);
+          if (memberSnap.exists()) {
+            const leaveBatch = writeBatch(db);
+            leaveBatch.delete(memberRef);
+            leaveBatch.update(doc(db, 'teams', tid), {
+              memberCount: increment(-1),
+              organizerUids: arrayRemove(uid),
+              updatedAt: serverTimestamp(),
+            });
+            await leaveBatch.commit();
+            teamsLeft++;
+          }
+        } catch (err: unknown) {
+          recordError('leave_team_member', `teams/${tid}/members/${uid}`, err, true);
+        }
+        continue;
+      }
+
+      if (action === 'cleanup_soft_deleted_member') {
+        await cleanTeamPersonalSubdocs(tid);
+        try {
+          const memberRef = doc(db, 'teams', tid, 'members', uid);
+          const memberSnap = await getDoc(memberRef);
+          if (memberSnap.exists()) {
+            // Soft-deleted teams lock updates on teams/{tid}; delete own member doc directly.
+            await deleteDoc(memberRef);
+            teamsLeft++;
+          }
+        } catch (err: unknown) {
+          recordError('delete_soft_deleted_member', `teams/${tid}/members/${uid}`, err, true);
+        }
+        continue;
+      }
+
+      // 'cleanup_soft_deleted_founder' | 'cleanup_orphan_refs'
+      await cleanTeamPersonalSubdocs(tid);
     }
 
-    // 4. Clean legacy single-team personal records (only if user has a legacy player doc or joinRequest)
+    // 4. Clean legacy single-team personal records (including orphaned legacy joinRequests)
     if (!this.isPlatformOwner) {
       let hasLegacyPlayer = false;
       try {
@@ -5262,6 +5354,13 @@ class MaydanBackendService {
             failedSteps
           );
         }
+      } else {
+        await this.deleteDocIfExistsStrict(
+          doc(db, 'joinRequests', uid),
+          'delete_legacy_joinRequests',
+          `joinRequests/${uid}`,
+          failedSteps
+        );
       }
     }
 

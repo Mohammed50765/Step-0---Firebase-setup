@@ -598,7 +598,7 @@ class MaydanInjuryLibraryUI {
     if (listEl && user) {
       const uid = String(user.id || '');
       const ownerUid = String(user.ownerUid || uid);
-      const isUnavailable = user.availableStatus === 'unavailable';
+      const isUnavailable = user.availableStatus === 'unavailable' || user.availableStatus === 'غير متاح';
       const statusBannerHtml = `
         <div class="item-box row between" style="margin-bottom:8px;border-color:${isUnavailable ? 'rgba(239,68,68,0.45)' : 'rgba(34,197,94,0.38)'};background:${isUnavailable ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.07)'};gap:8px;">
           <div>

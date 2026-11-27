@@ -481,3 +481,84 @@ export function classifyConnectionError(err: unknown): ConnectionDiagnosticResul
     message,
   };
 }
+
+export interface AccountDeletionTeamSnapshot {
+  id: string;
+  teamName?: string;
+  founderUid?: string;
+  memberCount?: number;
+  deletedAt?: unknown;
+}
+
+export type TeamAccountCleanupAction =
+  | 'block_active_founder_with_members'
+  | 'soft_delete_solo_owned'
+  | 'leave_active_member'
+  | 'cleanup_soft_deleted_member'
+  | 'cleanup_soft_deleted_founder'
+  | 'cleanup_orphan_refs';
+
+/**
+ * Deduplicates and collects every candidate Multi-Team ID associated with a user from both
+ * the in-memory session cache and the fresh `/users/{uid}` Firestore registry (including
+ * soft-deleted teams and pending join requests) so account deletion leaves zero orphan PII.
+ */
+export function collectAccountDeletionTeamCandidates(input: {
+  activeTeamIds?: Array<string | null | undefined>;
+  userRegistryDoc?: {
+    teamIds?: unknown;
+    ownedTeamIds?: unknown;
+    pendingJoinTeamId?: unknown;
+    activeTeamId?: unknown;
+  } | null;
+}): string[] {
+  const seen = new Set<string>();
+  const addId = (raw: unknown) => {
+    const id = String(raw ?? '').trim();
+    if (!id || id === 'main') return;
+    if (!/^[a-zA-Z0-9_-]{2,64}$/.test(id)) return;
+    seen.add(id);
+  };
+
+  if (Array.isArray(input.activeTeamIds)) {
+    input.activeTeamIds.forEach(addId);
+  }
+  const uDoc = input.userRegistryDoc;
+  if (uDoc && typeof uDoc === 'object') {
+    if (Array.isArray(uDoc.teamIds)) uDoc.teamIds.forEach(addId);
+    if (Array.isArray(uDoc.ownedTeamIds)) uDoc.ownedTeamIds.forEach(addId);
+    addId(uDoc.pendingJoinTeamId);
+    addId(uDoc.activeTeamId);
+  }
+  return Array.from(seen);
+}
+
+/**
+ * Determines the exact Firestore-rules-compliant cleanup strategy for a single team during
+ * account deletion:
+ * - Active founder with >1 members => blocks deletion until leadership transfer or team deletion.
+ * - Active solo founder (<=1 member) => clean private/vote/joinRequest docs + soft-delete team.
+ * - Active non-founder member => clean private/vote/joinRequest docs + atomic leave batch.
+ * - Soft-deleted team (deletedAt != null) => NEVER update locked teams/{tid} doc; clean
+ *   private/vote/joinRequest docs and (for non-founders) delete members/{uid} directly.
+ * - Missing/deleted team doc => clean residual private/vote/joinRequest docs safely.
+ */
+export function planTeamAccountCleanup(
+  team: AccountDeletionTeamSnapshot | null | undefined,
+  uid: string
+): TeamAccountCleanupAction {
+  if (!team || !team.id) return 'cleanup_orphan_refs';
+  const isFounder = Boolean(uid && team.founderUid === uid);
+  const isSoftDeleted = team.deletedAt !== null && team.deletedAt !== undefined;
+
+  if (isSoftDeleted) {
+    return isFounder ? 'cleanup_soft_deleted_founder' : 'cleanup_soft_deleted_member';
+  }
+  if (isFounder) {
+    return Number(team.memberCount ?? 1) > 1
+      ? 'block_active_founder_with_members'
+      : 'soft_delete_solo_owned';
+  }
+  return 'leave_active_member';
+}
+

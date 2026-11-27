@@ -5,10 +5,12 @@ import {
   TRUSTED_DEVICE_CACHE_PREF_KEY,
   classifyAccountCleanupError,
   classifyConnectionError,
+  collectAccountDeletionTeamCandidates,
   collectSensitiveStorageKeys,
   isTrustedDeviceAuthEnabled,
   isTrustedDeviceCacheEnabled,
   isValidRecaptchaSiteKey,
+  planTeamAccountCleanup,
   purgePersistentTeamSnapshots,
   resolveAuthPersistenceMode,
   resolveFirestoreCacheMode,
@@ -205,4 +207,49 @@ test('classifyConnectionError accurately distinguishes reachable permission-deni
   const internal = classifyConnectionError({ code: 'internal', message: 'Unexpected server failure.' });
   assert.equal(internal.reachable, false);
   assert.equal(internal.status, 'internal_error');
+});
+
+test('collectAccountDeletionTeamCandidates unions active teams with fresh user registry, owned, and pending teams while skipping legacy main', () => {
+  const candidates = collectAccountDeletionTeamCandidates({
+    activeTeamIds: ['team_active1', 'main', ''],
+    userRegistryDoc: {
+      teamIds: ['team_active1', 'team_soft_deleted', 'team_member2'],
+      ownedTeamIds: ['team_solo_owned', 'team_deleted_owned'],
+      pendingJoinTeamId: 'team_pending_join',
+      activeTeamId: 'team_active1',
+    },
+  });
+
+  assert.deepEqual(candidates, [
+    'team_active1',
+    'team_soft_deleted',
+    'team_member2',
+    'team_solo_owned',
+    'team_deleted_owned',
+    'team_pending_join',
+  ]);
+});
+
+test('planTeamAccountCleanup selects Firestore-rules-safe cleanup path for active, solo, soft-deleted, and missing teams', () => {
+  assert.equal(
+    planTeamAccountCleanup({ id: 't1', founderUid: 'u1', memberCount: 4, deletedAt: null }, 'u1'),
+    'block_active_founder_with_members'
+  );
+  assert.equal(
+    planTeamAccountCleanup({ id: 't2', founderUid: 'u1', memberCount: 1, deletedAt: null }, 'u1'),
+    'soft_delete_solo_owned'
+  );
+  assert.equal(
+    planTeamAccountCleanup({ id: 't3', founderUid: 'u_other', memberCount: 8, deletedAt: null }, 'u1'),
+    'leave_active_member'
+  );
+  assert.equal(
+    planTeamAccountCleanup({ id: 't4', founderUid: 'u_other', memberCount: 8, deletedAt: 1700000000 }, 'u1'),
+    'cleanup_soft_deleted_member'
+  );
+  assert.equal(
+    planTeamAccountCleanup({ id: 't5', founderUid: 'u1', memberCount: 1, deletedAt: 1700000000 }, 'u1'),
+    'cleanup_soft_deleted_founder'
+  );
+  assert.equal(planTeamAccountCleanup(null, 'u1'), 'cleanup_orphan_refs');
 });

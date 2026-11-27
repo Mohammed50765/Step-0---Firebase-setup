@@ -2936,6 +2936,156 @@ test('Release-Hardening #42: Legacy main -> Multi-Team batched migration verifie
   assert.equal(legacyReadinessStillThere.exists(), true);
 });
 
+test('Multi-Team Private Records: blocks cross-tenant outsider writes & writes on soft-deleted teams while preserving self-deletion', async () => {
+  const activeTid = 'team_priv_active';
+  const deletedTid = 'team_priv_deleted';
+  const nowMs = Date.now();
+
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    await setDoc(doc(adminDb, 'teams', activeTid), {
+      id: activeTid,
+      teamName: 'فريق نشط',
+      appName: 'ميدان 6v6',
+      founderUid: 'founder_u',
+      organizerUids: [],
+      primaryColor: '#FACC15',
+      secondaryColor: '#070709',
+      joinMode: 'approval',
+      lineupPublishMode: 'all',
+      maxMembersPerTeam: 25,
+      memberCount: 2,
+      inviteCode: 'MT-PRV1-1111',
+      memberShareCode: 'MS-PRV1-1111',
+      lockSkills: false,
+      deletedAt: null,
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    });
+    await setDoc(doc(adminDb, 'teams', activeTid, 'members', 'member_u'), {
+      id: 'member_u',
+      uid: 'member_u',
+      ownerUid: 'member_u',
+      teamId: activeTid,
+      name: 'عضو نشط',
+      role: 'member',
+      isOrganizer: false,
+      jersey: 7,
+      age: 22,
+      height: 175,
+      weight: 70,
+      foot: 'يمين',
+      primaryPos: 'وسط',
+      secondaryPos: 'دفاع',
+      availableStatus: 'متاح',
+      joinedAtMs: nowMs,
+      updatedAtMs: nowMs,
+    });
+    await setDoc(doc(adminDb, 'teams', deletedTid), {
+      id: deletedTid,
+      teamName: 'فريق محذوف',
+      appName: 'ميدان 6v6',
+      founderUid: 'founder_u',
+      organizerUids: [],
+      primaryColor: '#FACC15',
+      secondaryColor: '#070709',
+      joinMode: 'approval',
+      lineupPublishMode: 'all',
+      maxMembersPerTeam: 25,
+      memberCount: 2,
+      inviteCode: 'MT-PRV2-2222',
+      memberShareCode: 'MS-PRV2-2222',
+      lockSkills: false,
+      deletedAt: serverTimestamp(),
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    });
+    await setDoc(doc(adminDb, 'teams', deletedTid, 'members', 'member_u'), {
+      id: 'member_u',
+      uid: 'member_u',
+      ownerUid: 'member_u',
+      teamId: deletedTid,
+      name: 'عضو سابق',
+      role: 'member',
+      isOrganizer: false,
+      jersey: 7,
+      age: 22,
+      height: 175,
+      weight: 70,
+      foot: 'يمين',
+      primaryPos: 'وسط',
+      secondaryPos: 'دفاع',
+      availableStatus: 'متاح',
+      joinedAtMs: nowMs,
+      updatedAtMs: nowMs,
+    });
+    await setDoc(doc(adminDb, 'teams', deletedTid, 'members', 'member_u', 'private', 'rd_old_1'), {
+      kind: 'readiness',
+      uid: 'member_u',
+      teamId: deletedTid,
+      date: '2026-11-20',
+      sleep: 7,
+      fatigue: 6,
+      mood: 8,
+      updatedAtMs: nowMs,
+    });
+  });
+
+  const outsiderDb = testEnv.authenticatedContext('outsider_u', { email_verified: true }).firestore();
+  const memberDb = testEnv.authenticatedContext('member_u', { email_verified: true }).firestore();
+
+  // 1. Outsider (non-member) MUST be denied creating private records under another team
+  await assertFails(
+    setDoc(doc(outsiderDb, 'teams', activeTid, 'members', 'outsider_u', 'private', 'rd_spoof'), {
+      kind: 'readiness',
+      uid: 'outsider_u',
+      teamId: activeTid,
+      date: '2026-11-27',
+      sleep: 8,
+      fatigue: 8,
+      mood: 8,
+      updatedAtMs: nowMs,
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // 2. Active member CAN create and self-delete their own private record on an active team
+  await assertSucceeds(
+    setDoc(doc(memberDb, 'teams', activeTid, 'members', 'member_u', 'private', 'rd_valid_1'), {
+      kind: 'readiness',
+      uid: 'member_u',
+      teamId: activeTid,
+      date: '2026-11-27',
+      sleep: 8,
+      fatigue: 7,
+      mood: 9,
+      updatedAtMs: nowMs,
+      createdAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(deleteDoc(doc(memberDb, 'teams', activeTid, 'members', 'member_u', 'private', 'rd_valid_1')));
+
+  // 3. Member CANNOT create new private records inside a soft-deleted team
+  await assertFails(
+    setDoc(doc(memberDb, 'teams', deletedTid, 'members', 'member_u', 'private', 'rd_after_delete'), {
+      kind: 'readiness',
+      uid: 'member_u',
+      teamId: deletedTid,
+      date: '2026-11-27',
+      sleep: 8,
+      fatigue: 7,
+      mood: 9,
+      updatedAtMs: nowMs,
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // 4. Member CAN still read and delete existing private records on a soft-deleted team (account deletion flow)
+  await assertSucceeds(getDoc(doc(memberDb, 'teams', deletedTid, 'members', 'member_u', 'private', 'rd_old_1')));
+  await assertSucceeds(deleteDoc(doc(memberDb, 'teams', deletedTid, 'members', 'member_u', 'private', 'rd_old_1')));
+});
+
+
 
 
 

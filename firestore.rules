@@ -1916,8 +1916,9 @@ service cloud.firestore {
           allow list: if isVerifiedUser() && (memberId == request.auth.uid || isMultiFounder(teamId));
           allow create: if isVerifiedUser() &&
             isValidId(docId) &&
+            isMultiTeamActive(teamId) &&
             isValidMultiPrivateRecord(incoming(), memberId, teamId) &&
-            (memberId == request.auth.uid || isMultiFounder(teamId));
+            (isMultiFounder(teamId) || (memberId == request.auth.uid && isMultiMember(teamId)));
           allow update: if false;
           allow delete: if isVerifiedUser() && isValidId(docId) && (memberId == request.auth.uid || isMultiFounder(teamId));
         }

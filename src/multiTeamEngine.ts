@@ -28,6 +28,7 @@ export const PRIVACY_NOTICE_ACCEPTED_STORAGE_PREFIX = 'maydan_privacy_ok_';
 export type TeamJoinMode = 'approval' | 'instant';
 export type TeamLineupPublishMode = 'organizers' | 'all';
 export type PublicAvailableStatus = 'متاح' | 'غير متاح';
+export type AppAvailableStatus = 'available' | 'unavailable';
 
 export const FORBIDDEN_PUBLIC_MEMBER_FIELDS = [
   'sleep',
@@ -207,6 +208,12 @@ export function normalizePublicAvailableStatus(raw: unknown): PublicAvailableSta
   const s = String(raw ?? '').trim();
   if (s === 'غير متاح' || s === 'unavailable') return 'غير متاح';
   return 'متاح';
+}
+
+export function normalizeAppAvailableStatus(raw: unknown): AppAvailableStatus {
+  const s = String(raw ?? '').trim();
+  if (s === 'unavailable' || s === 'غير متاح') return 'unavailable';
+  return 'available';
 }
 
 export function sanitizeTeamLogo50Kb(raw: unknown): {
@@ -704,6 +711,7 @@ declare global {
       sanitizeJoinMode: typeof sanitizeJoinMode;
       sanitizeLineupPublishMode: typeof sanitizeLineupPublishMode;
       normalizePublicAvailableStatus: typeof normalizePublicAvailableStatus;
+      normalizeAppAvailableStatus: typeof normalizeAppAvailableStatus;
       sanitizeTeamLogo50Kb: typeof sanitizeTeamLogo50Kb;
       checkTeamQuotaEligibility: typeof checkTeamQuotaEligibility;
       findForbiddenPublicHealthFields: typeof findForbiddenPublicHealthFields;
@@ -738,6 +746,7 @@ if (typeof window !== 'undefined') {
     sanitizeJoinMode,
     sanitizeLineupPublishMode,
     normalizePublicAvailableStatus,
+    normalizeAppAvailableStatus,
     sanitizeTeamLogo50Kb,
     checkTeamQuotaEligibility,
     findForbiddenPublicHealthFields,

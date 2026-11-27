@@ -8,6 +8,8 @@ import {
   flattenConsolidatedAttendanceDocs,
   groupLegacyAttendanceByMatchKey,
   MAX_TEAM_LOGO_CHARS,
+  normalizeAppAvailableStatus,
+  normalizePublicAvailableStatus,
   sanitizeJoinMode,
   sanitizeTeamLogo50Kb,
   sortActiveTeamsList,
@@ -174,4 +176,19 @@ test('Migration helpers enforce <=400 batch chunking, count verification, and so
     sorted.map((t) => t.id),
     ['t_b', 't_a']
   );
+});
+
+test('availableStatus normalization round-trips cleanly between Firestore Arabic and UI English tokens', () => {
+  assert.equal(normalizePublicAvailableStatus('unavailable'), 'غير متاح');
+  assert.equal(normalizePublicAvailableStatus('غير متاح'), 'غير متاح');
+  assert.equal(normalizePublicAvailableStatus('available'), 'متاح');
+  assert.equal(normalizePublicAvailableStatus('متاح'), 'متاح');
+  assert.equal(normalizePublicAvailableStatus(undefined), 'متاح');
+
+  assert.equal(normalizeAppAvailableStatus('غير متاح'), 'unavailable');
+  assert.equal(normalizeAppAvailableStatus('unavailable'), 'unavailable');
+  assert.equal(normalizeAppAvailableStatus('متاح'), 'available');
+  assert.equal(normalizeAppAvailableStatus('available'), 'available');
+  assert.equal(normalizeAppAvailableStatus(''), 'available');
+  assert.equal(normalizeAppAvailableStatus(null), 'available');
 });
