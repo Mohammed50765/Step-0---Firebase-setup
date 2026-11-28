@@ -1,0 +1,37 @@
+name: Pro Security Scan (Semgrep + Trivy)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: فحص الكود والثغرات (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: تشغيل فحص Semgrep
+        run: semgrep scan --config auto --severity ERROR --error
+
+  trivy:
+    name: فحص المكتبات والأسرار والإعدادات (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: تشغيل فحص Trivy الشامل
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          scanners: 'vuln,secret,misconfig'
+          severity: 'CRITICAL,HIGH'
+          format: 'table'
+          exit-code: '1'
