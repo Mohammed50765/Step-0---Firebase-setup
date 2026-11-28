@@ -84,6 +84,17 @@ import {
   type ProHistoryState,
   type ProSectionTab,
 } from './tacticsProBoard';
+import { computeDominanceXRay, type TacticalEvaluation } from './engine/dominanceXRay';
+import { tacticalFramesToGhostPlay, analyzeGhostPassIntercept } from './engine/ghostPlay';
+import { buildXRayHudHtml, clearXRayCanvas, renderXRayCanvas } from './lab/xrayRenderer';
+import {
+  buildShareableGhostLink,
+  exportGhostPlayLocalMedia,
+  openGhostGuestViewer,
+} from './lab/ghostPlayUI';
+import { openTacticalLabModal, type TacticalLabTab } from './lab/tacticalLabUI';
+import { openBlackBoxModal } from './lab/blackBoxUI';
+import { PitWallRotationController } from './lab/pitWallUI';
 
 const STUDIO_STORAGE_KEY = 'maydan_tactics_studio_v1';
 const SVG_W = 360;
@@ -1109,6 +1120,11 @@ class TacticsStudioController {
   private activeBoardOverlaySvg: SVGSVGElement | null = null;
   private nativeViewportAnchors = new Map<string, { parent: HTMLElement; nextSibling: Node | null }>();
 
+  // Tactical Intelligence Lab state (100% browser-local, zero Firestore)
+  private xrayEnabled = false;
+  private xrayBaseline: TacticalEvaluation | null = null;
+  private pitWallCtrl: PitWallRotationController | null = null;
+
   constructor() {
     this.sequence = getFormationPhaseSequence('6v6', '2-2-1', 'attack');
     this.setActiveSequence(this.sequence);
@@ -1173,6 +1189,7 @@ class TacticsStudioController {
         }
       }
     }
+    this.pitWallCtrl?.syncRoster();
     this.renderAll();
   }
 
@@ -1965,6 +1982,16 @@ class TacticsStudioController {
     this.dragStartClient = { x: e.clientX, y: e.clientY };
     this.dragMoved = false;
     this.proDragSnapshotTaken = false;
+
+    // Capture baseline evaluation before drag so Dominance X-Ray emits true comparative move badges
+    if (this.xrayEnabled && this.currentOur.length >= 2) {
+      this.xrayBaseline = computeDominanceXRay({
+        size: this.prefs.size,
+        our: this.currentOur,
+        opp: this.currentOpp,
+        ball: this.currentBall,
+      }).evaluation;
+    }
 
     // Synchronously flatten 2.5D perspective to flat 2D BEFORE any getBoundingClientRect() projection
     this.dragFlattened = true;
@@ -2789,6 +2816,27 @@ class TacticsStudioController {
       btnCmp.classList.toggle('active', cmpActive);
       btnCmp.setAttribute('aria-pressed', String(cmpActive));
     }
+
+    const btnXray = document.getElementById('btnTacXray');
+    if (btnXray) {
+      btnXray.classList.toggle('active', this.xrayEnabled);
+      btnXray.setAttribute('aria-pressed', String(this.xrayEnabled));
+    }
+    const btnProXray = document.getElementById('btnTacProXray');
+    if (btnProXray) {
+      btnProXray.classList.toggle('active', this.xrayEnabled);
+      btnProXray.setAttribute('aria-pressed', String(this.xrayEnabled));
+    }
+    const btnDockXray = document.querySelector<HTMLButtonElement>('[data-lab-quick="xray"]');
+    if (btnDockXray) {
+      btnDockXray.classList.toggle('active', this.xrayEnabled);
+      btnDockXray.setAttribute('aria-pressed', String(this.xrayEnabled));
+    }
+    const btnAccXray = document.getElementById('btnOpenXrayFromLab');
+    if (btnAccXray) {
+      btnAccXray.style.borderColor = this.xrayEnabled ? 'rgba(250, 204, 21, 0.9)' : '';
+      btnAccXray.setAttribute('aria-pressed', String(this.xrayEnabled));
+    }
   }
 
   private renderPitchShellClasses(): void {
@@ -3481,6 +3529,7 @@ class TacticsStudioController {
       canvasW,
       canvasH
     );
+    this.renderXRayOverlay();
   }
 
   private renderSvgPitch(): void {
@@ -3967,6 +4016,92 @@ class TacticsStudioController {
 
     svg.innerHTML = parts.join('');
     this.renderInPitchCallout(frame, anchorIdx >= 0 ? form.slots[anchorIdx]?.label : undefined, calloutBox);
+    this.renderXRayOverlay();
+  }
+
+  private renderXRayOverlay(): void {
+    const portraitCanvas = document.getElementById('tacXrayCanvas') as HTMLCanvasElement | null;
+    const proCanvas = document.getElementById('tacProXrayCanvas') as HTMLCanvasElement | null;
+    const hud = document.getElementById('tacXrayHud');
+
+    if (!this.xrayEnabled || !this.isInteractivePitchMode() || this.currentOur.length < 2) {
+      if (portraitCanvas) {
+        portraitCanvas.classList.add('hidden');
+        clearXRayCanvas(portraitCanvas);
+      }
+      if (proCanvas) {
+        proCanvas.classList.add('hidden');
+        clearXRayCanvas(proCanvas);
+      }
+      if (hud) hud.classList.add('hidden');
+      return;
+    }
+
+    const snap = computeDominanceXRay(
+      {
+        size: this.prefs.size,
+        our: this.currentOur,
+        opp: this.currentOpp,
+        ball: this.currentBall,
+      },
+      { baseline: this.xrayBaseline || undefined }
+    );
+
+    const syncCanvasToSvg = (
+      canvas: HTMLCanvasElement,
+      svgEl: Element | null,
+      vbW: number,
+      vbH: number
+    ) => {
+      const parent = canvas.parentElement;
+      if (!svgEl || !parent) return;
+      const pRect = parent.getBoundingClientRect();
+      const sRect = svgEl.getBoundingClientRect();
+      if (sRect.width > 10 && sRect.height > 10) {
+        // Compute exact rendered viewBox area inside SVG preserveAspectRatio="xMidYMid meet"
+        const scale = Math.min(sRect.width / vbW, sRect.height / vbH);
+        const renderW = vbW * scale;
+        const renderH = vbH * scale;
+        const offsetX = (sRect.width - renderW) / 2;
+        const offsetY = (sRect.height - renderH) / 2;
+        canvas.style.left = `${(sRect.left - pRect.left + offsetX).toFixed(1)}px`;
+        canvas.style.top = `${(sRect.top - pRect.top + offsetY).toFixed(1)}px`;
+        canvas.style.width = `${renderW.toFixed(1)}px`;
+        canvas.style.height = `${renderH.toFixed(1)}px`;
+        canvas.style.right = 'auto';
+        canvas.style.bottom = 'auto';
+      }
+    };
+
+    if (portraitCanvas) {
+      portraitCanvas.classList.remove('hidden');
+      syncCanvasToSvg(portraitCanvas, document.getElementById('tacPitchSvg'), SVG_W, SVG_H);
+      renderXRayCanvas(portraitCanvas, snap, 'portrait');
+    }
+    if (proCanvas && this.isProFullscreen && this.viewMode === 'studio') {
+      proCanvas.classList.remove('hidden');
+      syncCanvasToSvg(proCanvas, document.getElementById('tacProPitchSvg'), PRO_SVG_W, PRO_SVG_H);
+      renderXRayCanvas(proCanvas, snap, 'landscape');
+    } else if (proCanvas) {
+      proCanvas.classList.add('hidden');
+      clearXRayCanvas(proCanvas);
+    }
+    if (hud) {
+      hud.classList.remove('hidden');
+      hud.innerHTML = buildXRayHudHtml(snap);
+    }
+  }
+
+  private getActiveGhostPlayDraft(): ReturnType<typeof tacticalFramesToGhostPlay> {
+    const form = this.getCurrentFormation();
+    const nameInput = (document.getElementById('tacRecName') as HTMLInputElement | null)?.value?.trim();
+    const frames =
+      this.recordedFrames.length >= 2 ? this.recordedFrames : this.sequence.frames;
+    return tacticalFramesToGhostPlay(frames, {
+      size: this.prefs.size,
+      formationId: form.id,
+      title: nameInput || this.sequence.title || `خطة ${form.id}`,
+    });
   }
 
   private renderInPitchCallout(
@@ -4230,6 +4365,17 @@ class TacticsStudioController {
 
     const countEl = document.getElementById('tacRecCount');
     if (countEl) countEl.textContent = `${this.recordedFrames.length} لقطات مسجّلة`;
+
+    const ghostInfo = document.getElementById('tacGhostInterceptInfo');
+    if (ghostInfo) {
+      const draft = this.getActiveGhostPlayDraft();
+      if (draft && draft.frames.length >= 2) {
+        const res = analyzeGhostPassIntercept(draft.frames[0], draft.frames[1], draft.size);
+        ghostInfo.textContent = `⏱️ ${res.summaryAr}`;
+      } else {
+        ghostInfo.textContent = 'سجّل لقطتين على الأقل أو استخدم الخطة الحالية لإنشاء رابط شبح وتحدّي الإيقاف.';
+      }
+    }
 
     const savedList = document.getElementById('tacSavedCustomPlans');
     if (savedList) {
@@ -4573,59 +4719,108 @@ class TacticsStudioController {
       return;
     }
 
-    // Rotation plan + optional timer
-    const plan = buildRotationPlan(players, PITCH_SIZE_META[this.prefs.size].count, this.prefs.rotationInterval);
-    body.innerHTML = `
-      <div class="item-box" style="border-color:rgba(250,204,21,0.4);">
-        <div class="row between" style="margin-bottom:8px;">
-          <div>
-            <div style="font-weight:800;color:var(--primary);">⏱️ منبّه التبديل العادل</div>
-            <div class="muted">ينبّهك بصوت لطيف وإشعار عند انتهاء الوقت</div>
-          </div>
-          <div id="tacTimerDisplay" style="font-size:1.5rem;font-weight:900;color:var(--primary);font-variant-numeric:tabular-nums;">${this.formatClock(this.timerSecondsLeft)}</div>
-        </div>
-        <div class="row" style="gap:6px;margin-bottom:8px;">
-          ${[12, 14, 15]
-            .map(
-              (m) => `<button type="button" data-rot-min="${m}" class="tac-pill ${this.prefs.rotationInterval === m ? 'active' : ''}">كل ${m} د</button>`
-            )
-            .join('')}
-        </div>
-        <div class="grid-2" style="gap:8px;">
-          <button type="button" id="btnTacTimerToggle" class="btn-primary">${this.timerRunning ? '⏸ إيقاف المنبّه' : '▶ تشغيل المنبّه'}</button>
-          <button type="button" id="btnTacTimerReset">↻ تصفير العدّاد</button>
-        </div>
-      </div>
-      <div class="item-box" style="margin-top:8px;">
-        <div style="font-weight:800;margin-bottom:6px;">🔄 جدول التبديلات المقترح (${plan.bench.length ? `${plan.bench.length} احتياط` : 'لا يوجد احتياط متاح'})</div>
-        ${
-          plan.schedule.length
-            ? plan.schedule
-                .map(
-                  (row) => `<div style="font-size:0.8rem;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;">
-                    <span style="color:var(--primary);font-weight:800;">الدقيقة ${row.minute}</span>
-                    <span>🟢 ${escapeHtml(row.subIn)} ⇄ 🔴 ${escapeHtml(row.subOut)}</span>
-                  </div>`
-                )
-                .join('')
-            : '<p class="muted">عند توفر لاعبين احتياطيين (أكثر من عدد التشكيلة الأساسية)، يُبنى جدول تبديل عادل تلقائياً.</p>'
-        }
-      </div>
-    `;
+    // Feature 05: Pit-Wall Rotation Room (upgraded rotate tab using real team roster & availability)
+    this.getOrCreatePitWallController().render(body);
+  }
 
-    document.querySelectorAll<HTMLButtonElement>('[data-rot-min]').forEach((b) => {
-      b.addEventListener('click', () => {
-        this.prefs.rotationInterval = Number(b.dataset.rotMin);
-        savePrefs(this.prefs);
-        this.resetRotationTimer();
-        this.renderCaptainTools();
+  private getOrCreatePitWallController(): PitWallRotationController {
+    if (!this.pitWallCtrl) {
+      this.pitWallCtrl = new PitWallRotationController({
+        getPlayers: () => this.ctx?.getPlayers() || [],
+        getReadiness: () => (this.ctx?.getReadiness ? this.ctx.getReadiness() : []),
+        getStartersCount: () => PITCH_SIZE_META[this.prefs.size].count,
+        toast: (msg, isErr) => this.ctx?.toast(msg, isErr),
       });
+    }
+    return this.pitWallCtrl;
+  }
+
+  private toggleXRayMode(): void {
+    this.xrayEnabled = !this.xrayEnabled;
+    if (!this.xrayEnabled) this.xrayBaseline = null;
+    this.renderToolbarState();
+    this.renderXRayOverlay();
+    if (this.xrayEnabled && !this.isInteractivePitchMode()) {
+      this.viewMode = 'studio';
+      this.renderAll();
+    }
+    if (this.isProFullscreen && this.proSection === 'lab') {
+      this.renderProLeftPanel();
+    }
+  }
+
+  private copyActiveGhostLink(): void {
+    const draft = this.getActiveGhostPlayDraft();
+    if (!draft) {
+      this.ctx?.toast('سجّل لقطتين على الأقل لإنشاء رابط الشبح', true);
+      return;
+    }
+    const res = buildShareableGhostLink(draft);
+    if (res.ok && res.url) {
+      if (navigator.clipboard) {
+        navigator.clipboard
+          .writeText(res.url)
+          .then(() =>
+            this.ctx?.toast('تم نسخ رابط الشبح (Ghost Link) — يفتح بدون تسجيل دخول ✓')
+          )
+          .catch(() => this.ctx?.toast(`رابط الشبح جاهز (${res.hash?.slice(0, 24)}...)`));
+      } else {
+        this.ctx?.toast('رابط الشبح جاهز للمشاركة ✓');
+      }
+    } else if (res.fallbackJson && navigator.clipboard) {
+      navigator.clipboard
+        .writeText(res.fallbackJson)
+        .then(() => this.ctx?.toast('الخطة طويلة للرابط المختصر — تم نسخ بيانات JSON المحلية كبديل ✓'))
+        .catch(() => this.ctx?.toast(res.reasonAr || 'تعذّر إنشاء الرابط', true));
+    } else {
+      this.ctx?.toast(res.reasonAr || 'تعذّر إنشاء رابط الشبح', true);
+    }
+  }
+
+  private openActiveGhostTheater(): void {
+    const draft = this.getActiveGhostPlayDraft();
+    if (!draft) {
+      this.ctx?.toast('اختر خطة أو سجّل لقطتين أولاً لفتح تحدّي إيقاف الخطة', true);
+      return;
+    }
+    openGhostGuestViewer(draft, { toast: (m, err) => this.ctx?.toast(m, err) });
+  }
+
+  private async exportActiveGhostWebm(): Promise<void> {
+    const draft = this.getActiveGhostPlayDraft();
+    if (!draft) {
+      this.ctx?.toast('سجّل لقطتين على الأقل لتصدير فيديو الخطة', true);
+      return;
+    }
+    const res = await exportGhostPlayLocalMedia(draft, {
+      withXRay: this.xrayEnabled,
+      onStatus: (msg) => this.ctx?.toast(msg),
     });
-    document.getElementById('btnTacTimerToggle')?.addEventListener('click', () => {
-      if (this.timerRunning) this.pauseRotationTimer();
-      else this.startRotationTimer();
+    this.ctx?.toast(res.messageAr);
+  }
+
+  private openUnifiedLab(tab: TacticalLabTab): void {
+    openTacticalLabModal(tab, {
+      toast: (m, err) => this.ctx?.toast(m, err),
+      isXrayEnabled: () => this.xrayEnabled,
+      onToggleXray: () => this.toggleXRayMode(),
+      onOpenGhostTheater: () => this.openActiveGhostTheater(),
+      onCopyGhostLink: () => this.copyActiveGhostLink(),
+      onExportGhostWebm: () => {
+        void this.exportActiveGhostWebm();
+      },
+      getGhostSummary: () => {
+        const draft = this.getActiveGhostPlayDraft();
+        if (!draft) return null;
+        const durationSec = Math.max(2, draft.frames.length * 1.4);
+        return {
+          title: draft.title,
+          framesCount: draft.frames.length,
+          durationSec,
+        };
+      },
+      pitWallController: this.getOrCreatePitWallController(),
     });
-    document.getElementById('btnTacTimerReset')?.addEventListener('click', () => this.resetRotationTimer());
   }
 
   // ==================== STATIC EVENT BINDING ====================
@@ -4774,6 +4969,61 @@ class TacticsStudioController {
       this.isRecordingMode = !this.isRecordingMode;
       this.renderToolbarState();
       this.renderRecorderPanel();
+    });
+
+    // Feature 01: Dominance X-Ray Toggle (Normal + Fullscreen Pro + Lab Dock + Lab Accordion)
+    document.getElementById('btnTacXray')?.addEventListener('click', () => this.toggleXRayMode());
+    document.getElementById('btnTacProXray')?.addEventListener('click', () => this.toggleXRayMode());
+    document.getElementById('btnOpenXrayFromLab')?.addEventListener('click', () => this.toggleXRayMode());
+
+    // Prominent Tactical Intelligence Lab Dock (Black Box + 5 existing systems)
+    document.querySelectorAll<HTMLButtonElement>('[data-lab-quick]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.labQuick;
+        if (key === 'blackbox') {
+          this.pause();
+          this.stopSpeech();
+          openBlackBoxModal({ toast: (m, e) => this.ctx?.toast(m, e) });
+        } else if (key === 'xray') {
+          this.toggleXRayMode();
+        } else if (key === 'radar') {
+          this.openUnifiedLab('radar');
+        } else if (key === 'ghost') {
+          this.openUnifiedLab('ghost');
+        } else if (key === 'duel') {
+          this.openUnifiedLab('duel');
+        } else if (key === 'pitwall') {
+          this.openUnifiedLab('pitwall');
+        }
+      });
+    });
+
+    // Sidebar Accordion Lab Triggers (Black Box + all 5 systems)
+    document.getElementById('btnOpenBlackBox')?.addEventListener('click', () => {
+      this.pause();
+      this.stopSpeech();
+      openBlackBoxModal({ toast: (m, e) => this.ctx?.toast(m, e) });
+    });
+    document.getElementById('btnOpenBlindSideRadar')?.addEventListener('click', () => {
+      this.openUnifiedLab('radar');
+    });
+    document.getElementById('btnOpenGtoDuel')?.addEventListener('click', () => {
+      this.openUnifiedLab('duel');
+    });
+    document.getElementById('btnOpenGhostTheater')?.addEventListener('click', () => {
+      this.openUnifiedLab('ghost');
+    });
+    document.getElementById('btnOpenPitWallQuick')?.addEventListener('click', () => {
+      this.captainTab = 'rotate';
+      this.renderCaptainTools();
+      this.openUnifiedLab('pitwall');
+    });
+
+    // Feature 03: Ghost Play Recorder Panel Actions
+    document.getElementById('btnTacGhostLink')?.addEventListener('click', () => this.copyActiveGhostLink());
+    document.getElementById('btnTacGhostChallenge')?.addEventListener('click', () => this.openActiveGhostTheater());
+    document.getElementById('btnTacGhostWebm')?.addEventListener('click', () => {
+      void this.exportActiveGhostWebm();
     });
 
     // Timeline controls
@@ -5089,6 +5339,7 @@ class TacticsStudioController {
         narrEl.classList.add('hidden');
       }
     }
+    this.renderXRayOverlay();
   }
 
   private renderProControlsState(): void {
@@ -5296,6 +5547,11 @@ class TacticsStudioController {
             <button type="button" data-pro-rec="pop" class="tac-pro-mini-btn">↩ حذف أخيرة</button>
             <button type="button" data-pro-rec="save" class="tac-pro-mini-btn">💾 حفظ</button>
           </div>
+          <div class="tac-pro-move-btns" style="margin-top:6px;">
+            <button type="button" data-pro-lab="ghost-theater" class="tac-pro-mini-btn is-gold">👻 مسرح الشبح</button>
+            <button type="button" data-pro-lab="ghost-link" class="tac-pro-mini-btn">🔗 رابط الشبح</button>
+            <button type="button" data-pro-lab="ghost-webm" class="tac-pro-mini-btn">🎬 WebM</button>
+          </div>
         </div>
       `;
       return;
@@ -5311,6 +5567,48 @@ class TacticsStudioController {
               <span>${escapeHtml(sc.category)} • ${sc.frames.length} مراحل</span>
             </button>`
           ).join('')}
+        </div>
+      `;
+      return;
+    }
+
+    if (this.proSection === 'lab') {
+      body.innerHTML = `
+        <div class="tac-pro-panel-head">🧠 مختبر الذكاء التكتيكي (5 منظومات)</div>
+        <div class="tac-pro-stack">
+          <div class="tac-pro-move-card">
+            <div class="tac-pro-move-row">
+              <strong>1. 🔬 أشعة X للسيطرة</strong>
+              <span class="tac-pro-badge">${this.xrayEnabled ? 'مفعّلة الآن' : 'جاهزة'}</span>
+            </div>
+            <p class="tac-pro-hint">تحليل السيطرة على المساحات وظلال التغطية وخطوط التمرير مباشرة فوق الملعب.</p>
+            <button type="button" data-pro-lab="xray" class="tac-pro-mini-btn ${this.xrayEnabled ? 'is-gold' : ''}" style="width:100%;">
+              ${this.xrayEnabled ? '✓ إيقاف أشعة X' : '🔬 تشغيل أشعة X فوق الملعب'}
+            </button>
+          </div>
+          <div class="tac-pro-move-card">
+            <strong>2. 👁️ رادار الزاوية العمياء (Blind-Side)</strong>
+            <p class="tac-pro-hint">تمرين مسح بصري سريع واتخاذ القرار الصحيح تحت الضغط مع توجيه صوتي مكاني.</p>
+            <button type="button" data-pro-lab="radar" class="tac-pro-mini-btn is-gold" style="width:100%;">فتح رادار الزاوية العمياء</button>
+          </div>
+          <div class="tac-pro-move-card">
+            <strong>3. 👻 خطط الشبح والتحدّي (Ghost Play)</strong>
+            <p class="tac-pro-hint">مسرح تفاعلي لتحدّي إيقاف الخطة + رابط فوري بدون دخول + تصدير WebM.</p>
+            <div class="tac-pro-move-btns">
+              <button type="button" data-pro-lab="ghost-theater" class="tac-pro-mini-btn is-gold">🎬 مسرح الشبح</button>
+              <button type="button" data-pro-lab="ghost-link" class="tac-pro-mini-btn">🔗 رابط الشبح</button>
+            </div>
+          </div>
+          <div class="tac-pro-move-card">
+            <strong>4. ⚔️ مواجهة 1 ضد 1 الذكية (GTO Duel)</strong>
+            <p class="tac-pro-hint">مدافع متكيّف يكتشف تكرار مراوغاتك ويدرّبك على التنويع الذكي.</p>
+            <button type="button" data-pro-lab="duel" class="tac-pro-mini-btn is-gold" style="width:100%;">فتح مواجهة 1 ضد 1</button>
+          </div>
+          <div class="tac-pro-move-card">
+            <strong>5. ⏱️ غرفة الدكة (Pit-Wall Rotation)</strong>
+            <p class="tac-pro-hint">خطة تبديلات عادلة + منحنى إجهاد + مؤقّت أوفلاين بالاهتزاز وتثبيت الشاشة.</p>
+            <button type="button" data-pro-lab="pitwall" class="tac-pro-mini-btn is-gold" style="width:100%;">فتح غرفة الدكة (Pit-Wall)</button>
+          </div>
         </div>
       `;
       return;
@@ -5337,9 +5635,11 @@ class TacticsStudioController {
           <button type="button" data-pro-cap-act="copy-split" class="tac-pro-mini-btn" style="width:100%;">نسخ التقسيمة لواتساب</button>
         </div>
         <div class="tac-pro-move-card">
-          <strong>منبّه التبديلات (<span dir="ltr">${this.formatClock(this.timerSecondsLeft)}</span>)</strong>
+          <strong>غرفة الدكة والتبديلات (Pit-Wall)</strong>
+          <p class="tac-pro-hint">المؤقّت السريع (<span dir="ltr">${this.formatClock(this.timerSecondsLeft)}</span>) + جدول تبديلات عادل ومنحنى إجهاد</p>
           <div class="tac-pro-move-btns" style="margin-top:6px;">
-            <button type="button" data-pro-cap-act="timer-toggle" class="tac-pro-mini-btn is-gold">${this.timerRunning ? 'إيقاف' : 'تشغيل'}</button>
+            <button type="button" data-pro-lab="pitwall" class="tac-pro-mini-btn is-gold">⏱️ فتح Pit-Wall</button>
+            <button type="button" data-pro-cap-act="timer-toggle" class="tac-pro-mini-btn">${this.timerRunning ? 'إيقاف' : 'تشغيل'}</button>
             <button type="button" data-pro-cap-act="timer-reset" class="tac-pro-mini-btn">تصفير</button>
           </div>
         </div>
@@ -5764,6 +6064,18 @@ class TacticsStudioController {
         this.loadScenario(scBtn.dataset.proScenario);
         if (window.innerWidth < 1024) this.proMobileDrawer = 'none';
         this.renderProFullscreenOverlay();
+        return;
+      }
+      const labBtn = target.closest<HTMLButtonElement>('[data-pro-lab]');
+      if (labBtn?.dataset.proLab) {
+        const key = labBtn.dataset.proLab;
+        if (key === 'xray') this.toggleXRayMode();
+        else if (key === 'radar') this.openUnifiedLab('radar');
+        else if (key === 'duel') this.openUnifiedLab('duel');
+        else if (key === 'pitwall') this.openUnifiedLab('pitwall');
+        else if (key === 'ghost-theater') this.openActiveGhostTheater();
+        else if (key === 'ghost-link') this.copyActiveGhostLink();
+        else if (key === 'ghost-webm') void this.exportActiveGhostWebm();
         return;
       }
       const capBtn = target.closest<HTMLButtonElement>('[data-pro-cap-act]');

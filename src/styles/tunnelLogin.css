@@ -1,0 +1,1370 @@
+/* ==========================================================================
+   MAYDAN 6V6 — OBSIDIAN & CHAMPAGNE GOLD SIGNATURE LOGIN SYSTEM
+   Rule 85 / 10 / 5 Hierarchy • Poster-Centered Tunnel Aperture -> Pitch Portal
+   Live Gyro-Sheen • Chrono-Sweep • Invite Hex Seal • 350ms GPU Pitch Dive
+   Zero external libraries • 60fps GPU-composited transform & opacity only
+   ========================================================================== */
+
+/* Base Login Canvas: Deep Stadium Obsidian with Controlled Overhead Floodlight */
+#loginScreen.login-wrap {
+  --sheen-x: 50%;
+  --sheen-y: 36%;
+  --sheen-dx: 0px;
+  --sheen-dy: 0px;
+  background:
+    radial-gradient(ellipse 68% 40% at 50% 6%, rgba(212, 175, 55, 0.11) 0%, rgba(212, 175, 55, 0.028) 48%, transparent 74%),
+    radial-gradient(ellipse 88% 54% at 50% 100%, rgba(13, 15, 19, 0.96) 0%, transparent 74%),
+    #07080A;
+  padding: calc(10px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-y: auto;
+  justify-content: flex-start;
+  transition: opacity 350ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (min-height: 780px) {
+  #loginScreen.login-wrap {
+    justify-content: center;
+  }
+}
+
+/* ==========================================================================
+   SEAMLESS PITCH DEPTH-DIVE EXIT (350ms GPU-only forward dive into AppShell)
+   ========================================================================== */
+#loginScreen[data-tunnel-exit="diving"] {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 90 !important;
+  pointer-events: none !important;
+  opacity: 0;
+}
+
+#loginScreen[data-tunnel-exit="diving"] .login-box {
+  transform: scale(1.06) translate3d(0, -10px, 0);
+  opacity: 0;
+  transition:
+    transform 350ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#loginScreen[data-tunnel-exit="diving"] .tunnel-hero-portal {
+  transform: scale(1.12) translate3d(0, -4px, 0);
+  transition: transform 350ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ==========================================================================
+   ATMOSPHERIC BACKDROP: FLOODLIGHTS, CHRONO-SWEEP & <3H MATCH GLOW
+   ========================================================================== */
+.tunnel-stage {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.tunnel-ambient-beam {
+  position: absolute;
+  top: -14%;
+  left: 50%;
+  width: min(740px, 136vw);
+  height: 52vh;
+  transform: translate3d(-50%, 0, 0) scale(0.9);
+  opacity: 0.44;
+  background: radial-gradient(
+    ellipse 54% 62% at 50% 24%,
+    rgba(230, 199, 104, 0.16) 0%,
+    rgba(212, 175, 55, 0.045) 46%,
+    transparent 74%
+  );
+  will-change: transform, opacity;
+  transition: transform 1050ms cubic-bezier(0.22, 1, 0.36, 1), opacity 950ms ease;
+}
+
+#loginScreen[data-tunnel-stage="opening"] .tunnel-ambient-beam {
+  opacity: 0.78;
+  transform: translate3d(-50%, 0, 0) scale(1.04);
+}
+
+#loginScreen[data-tunnel-stage="pitch"] .tunnel-ambient-beam,
+#loginScreen[data-tunnel-stage="settled"] .tunnel-ambient-beam {
+  opacity: 0.52;
+  transform: translate3d(-50%, 0, 0) scale(1);
+}
+
+/* Imminent Match (<3h local state) Subtle Dual Stadium Corner Floodlights */
+.tunnel-corner-floodlight {
+  position: absolute;
+  top: -10%;
+  width: min(360px, 60vw);
+  height: 36vh;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 900ms ease;
+}
+
+.tunnel-corner-floodlight--left {
+  left: -8%;
+  background: radial-gradient(ellipse 68% 64% at 18% 14%, rgba(230, 199, 104, 0.17) 0%, rgba(212, 175, 55, 0.04) 52%, transparent 76%);
+}
+
+.tunnel-corner-floodlight--right {
+  right: -8%;
+  background: radial-gradient(ellipse 68% 64% at 82% 14%, rgba(230, 199, 104, 0.17) 0%, rgba(212, 175, 55, 0.04) 52%, transparent 76%);
+}
+
+#loginScreen[data-match-imminent="true"] .tunnel-corner-floodlight {
+  opacity: 1;
+}
+
+/* Same-Session Return: 380ms Non-Blocking 1px Gold Chrono-Sweep Calibration Line */
+.tunnel-chrono-sweep {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 6;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(212, 175, 55, 0.25) 18%,
+    rgba(242, 214, 117, 0.92) 50%,
+    rgba(212, 175, 55, 0.25) 82%,
+    transparent 100%
+  );
+  box-shadow: 0 0 12px rgba(230, 199, 104, 0.45);
+  transform: translate3d(0, -10px, 0);
+}
+
+@keyframes maydanChronoSweep {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0vh, 0);
+  }
+  14% {
+    opacity: 0.95;
+  }
+  85% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 100vh, 0);
+  }
+}
+
+#loginScreen[data-tunnel-sweep="active"] .tunnel-chrono-sweep {
+  animation: maydanChronoSweep 380ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+#loginScreen[data-tunnel-sweep="active"] .login-box {
+  animation: maydanMicroSettle 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes maydanMicroSettle {
+  0% {
+    transform: translate3d(0, 6px, 0) scale(0.994);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.tunnel-bg-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.tunnel-bg-pitch {
+  opacity: 0;
+  transition: opacity 1100ms ease;
+}
+
+#loginScreen[data-tunnel-stage="pitch"] .tunnel-bg-pitch,
+#loginScreen[data-tunnel-stage="settled"] .tunnel-bg-pitch {
+  opacity: 1;
+}
+
+.tunnel-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 86% 78% at 50% 38%,
+    transparent 34%,
+    rgba(7, 8, 10, 0.74) 78%,
+    rgba(7, 8, 10, 0.97) 100%
+  );
+}
+
+/* ==========================================================================
+   SHELL & CALM TOPBAR (85/10/5 — Zero Yellow Competition Against Google CTA)
+   ========================================================================== */
+#loginScreen .login-shell {
+  width: 100%;
+  max-width: 444px;
+  gap: 10px;
+  z-index: 2;
+}
+
+@media (min-width: 960px) {
+  #loginScreen .login-shell {
+    max-width: 980px;
+    gap: 16px;
+  }
+}
+
+#loginScreen .login-topbar {
+  padding: 2px;
+  flex-wrap: nowrap;
+}
+
+.login-topbar-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+#loginScreen .login-brand-tag {
+  color: #D8C07A;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+#loginScreen .login-brand-diamond {
+  background: linear-gradient(135deg, #E6C768, #C69E2E);
+}
+
+/* Active-Only Skip Entrance Control */
+.tunnel-util-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: rgba(13, 15, 19, 0.88);
+  border: 1px solid rgba(230, 199, 104, 0.34);
+  color: #E6C768;
+  font-size: 0.73rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background-color 160ms ease, transform 140ms ease;
+}
+
+.tunnel-util-btn:hover,
+.tunnel-util-btn:focus-visible {
+  color: #FFF4CE;
+  border-color: rgba(230, 199, 104, 0.6);
+  background: rgba(212, 175, 55, 0.12);
+}
+
+.tunnel-util-btn:active {
+  transform: scale(0.97);
+}
+
+.tunnel-util-btn:focus-visible {
+  outline: 2px solid #E6C768;
+  outline-offset: 2px;
+}
+
+.tunnel-skip-btn.hidden {
+  display: none !important;
+}
+
+/* Calm Obsidian-Glass AR / EN Capsule — Hairline Gold Border on Active Only */
+#loginScreen .login-lang-switch {
+  background: rgba(13, 15, 19, 0.88);
+  border: 1px solid rgba(243, 244, 246, 0.1);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+#loginScreen .login-lang-btn {
+  min-width: 36px;
+  min-height: 28px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #848D9E;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: color 160ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+#loginScreen .login-lang-btn:hover:not(.active) {
+  color: #D5DCE6;
+}
+
+#loginScreen .login-lang-btn:focus-visible {
+  outline: 2px solid #E6C768;
+  outline-offset: 1px;
+}
+
+#loginScreen .login-lang-btn.active {
+  background: rgba(212, 175, 55, 0.11);
+  border-color: rgba(230, 199, 104, 0.56);
+  color: #EAD080;
+  font-weight: 800;
+  box-shadow: inset 0 1px 0 rgba(255, 245, 210, 0.14);
+}
+
+/* ==========================================================================
+   MAIN LOGIN CARD — REFINED OBSIDIAN GLASS SURFACE
+   ========================================================================== */
+#loginScreen .login-box {
+  background: linear-gradient(180deg, rgba(16, 18, 24, 0.92) 0%, rgba(10, 12, 16, 0.97) 100%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  border-top-color: rgba(230, 199, 104, 0.36);
+  border-radius: 22px;
+  padding: 18px 18px 14px;
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, 0.8),
+    inset 0 1px 0 rgba(230, 199, 104, 0.15);
+  will-change: transform, opacity;
+}
+
+#loginScreen .login-box::before {
+  background: linear-gradient(90deg, transparent, rgba(230, 199, 104, 0.58), transparent);
+}
+
+.login-stage-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-items: center;
+}
+
+@media (min-width: 960px) {
+  #loginScreen .login-box {
+    padding: 30px 32px 26px;
+    border-radius: 24px;
+  }
+
+  .login-stage-grid {
+    grid-template-columns: 1.04fr 1fr;
+    gap: 32px;
+    align-items: stretch;
+  }
+}
+
+/* ==========================================================================
+   POSTER-CENTERED TUNNEL APERTURE -> FOOTBALL PITCH PORTAL (100% PRESERVED)
+   Enhanced with Live Floodlight Gyro-Sheen (--sheen-x, --sheen-y, <=4px depth)
+   ========================================================================== */
+.login-hero-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+}
+
+@media (min-width: 960px) {
+  .login-hero-stage {
+    padding: 24px 20px;
+    border-radius: 18px;
+    background:
+      radial-gradient(ellipse 84% 64% at 50% 38%, rgba(212, 175, 55, 0.08) 0%, transparent 74%),
+      rgba(7, 8, 11, 0.72);
+    border: 1px solid rgba(212, 175, 55, 0.14);
+  }
+}
+
+.tunnel-hero-portal {
+  position: relative;
+  width: 100%;
+  max-width: 390px;
+  height: 174px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 64% 66% at 50% 50%, rgba(212, 175, 55, 0.12) 0%, rgba(12, 14, 19, 0.8) 62%, rgba(7, 8, 11, 0.95) 100%);
+  border: 1px solid rgba(212, 175, 55, 0.18);
+  box-shadow: inset 0 0 36px rgba(0, 0, 0, 0.65);
+  will-change: transform;
+}
+
+/* Live Floodlight Gyro-Sheen Reflection across Portal & Tactical Frame */
+.tunnel-hero-portal::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  background: radial-gradient(
+    circle 170px at var(--sheen-x, 50%) var(--sheen-y, 36%),
+    rgba(230, 199, 104, 0.16) 0%,
+    rgba(212, 175, 55, 0.05) 45%,
+    transparent 76%
+  );
+  mix-blend-mode: screen;
+}
+
+@media (min-width: 960px) {
+  .tunnel-hero-portal {
+    max-width: 420px;
+    height: 248px;
+    border-radius: 18px;
+  }
+}
+
+.tunnel-portal-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: block;
+  transform: translate3d(calc(var(--sheen-dx, 0px) * -0.5), calc(var(--sheen-dy, 0px) * -0.5), 0);
+}
+
+/* Floodlight behind poster */
+.portal-floodlight {
+  transform-box: view-box;
+  transform-origin: 210px 114px;
+  opacity: 0.55;
+  transform: scale(0.86);
+  transition: transform 980ms cubic-bezier(0.22, 1, 0.36, 1), opacity 900ms ease;
+}
+
+/* Concentric Stadium Players' Tunnel Ribs (Centered at 210,114) */
+.portal-rib {
+  fill: none;
+  transform-box: view-box;
+  transform-origin: 210px 114px;
+  opacity: 0;
+  transform: scale(0.76);
+  transition:
+    transform 1020ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 840ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.portal-rib--1 {
+  stroke: rgba(242, 214, 117, 0.72);
+  stroke-width: 1.5;
+}
+.portal-rib--2 {
+  stroke: rgba(212, 175, 55, 0.56);
+  stroke-width: 1.35;
+}
+.portal-rib--3 {
+  stroke: rgba(212, 175, 55, 0.4);
+  stroke-width: 1.2;
+}
+.portal-rib--4 {
+  stroke: rgba(212, 175, 55, 0.28);
+  stroke-width: 1.1;
+}
+
+.portal-rays {
+  fill: none;
+  stroke-width: 1.2;
+  transform-box: view-box;
+  transform-origin: 210px 114px;
+  opacity: 0;
+  transform: scale(0.84);
+  transition:
+    transform 1080ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 880ms ease;
+}
+
+.portal-pitch-group {
+  transform-box: view-box;
+  transform-origin: 210px 114px;
+  opacity: 0;
+  transform: scale(0.88);
+  transition:
+    transform 1020ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 940ms ease;
+}
+
+.portal-pitch-outline {
+  fill: none;
+  stroke: rgba(212, 175, 55, 0.34);
+  stroke-width: 1.25;
+}
+
+.portal-pitch-detail {
+  fill: none;
+  stroke: rgba(212, 175, 55, 0.32);
+  stroke-width: 1.15;
+}
+
+.portal-pitch-halfway {
+  stroke-width: 1.4;
+}
+
+.portal-pitch-circle {
+  fill: none;
+  stroke: rgba(242, 214, 117, 0.52);
+  stroke-width: 1.45;
+}
+
+.portal-pitch-circle-outer {
+  fill: none;
+  stroke: rgba(212, 175, 55, 0.24);
+  stroke-width: 1;
+  stroke-dasharray: 4 7;
+}
+
+/* --------------------------------------------------------------------------
+   4-STAGE TUNNEL APERTURE STATE MACHINE (data-tunnel-stage) — PRESERVED
+   -------------------------------------------------------------------------- */
+#loginScreen[data-tunnel-stage="identity"] .portal-floodlight {
+  opacity: 0.68;
+  transform: scale(0.88);
+}
+#loginScreen[data-tunnel-stage="identity"] .portal-rib--1 {
+  opacity: 0.98;
+  transform: scale(0.86);
+}
+#loginScreen[data-tunnel-stage="identity"] .portal-rib--2 {
+  opacity: 0.8;
+  transform: scale(0.8);
+}
+#loginScreen[data-tunnel-stage="identity"] .portal-rib--3 {
+  opacity: 0.56;
+  transform: scale(0.75);
+}
+#loginScreen[data-tunnel-stage="identity"] .portal-rib--4 {
+  opacity: 0.34;
+  transform: scale(0.7);
+}
+#loginScreen[data-tunnel-stage="identity"] .portal-rays {
+  opacity: 0.82;
+  transform: scale(0.88);
+}
+#loginScreen[data-tunnel-stage="identity"] .portal-pitch-group {
+  opacity: 0;
+  transform: scale(0.82);
+}
+
+#loginScreen[data-tunnel-stage="opening"] .portal-floodlight {
+  opacity: 1;
+  transform: scale(1.18);
+}
+#loginScreen[data-tunnel-stage="opening"] .portal-rib--1 {
+  opacity: 1;
+  transform: scale(1.12);
+}
+#loginScreen[data-tunnel-stage="opening"] .portal-rib--2 {
+  opacity: 0.92;
+  transform: scale(1.18);
+  transition-delay: 75ms;
+}
+#loginScreen[data-tunnel-stage="opening"] .portal-rib--3 {
+  opacity: 0.78;
+  transform: scale(1.24);
+  transition-delay: 145ms;
+}
+#loginScreen[data-tunnel-stage="opening"] .portal-rib--4 {
+  opacity: 0.62;
+  transform: scale(1.3);
+  transition-delay: 210ms;
+}
+#loginScreen[data-tunnel-stage="opening"] .portal-rays {
+  opacity: 1;
+  transform: scale(1.12);
+}
+#loginScreen[data-tunnel-stage="opening"] .portal-pitch-group {
+  opacity: 0.28;
+  transform: scale(0.92);
+}
+
+#loginScreen[data-tunnel-stage="pitch"] .portal-floodlight,
+#loginScreen[data-tunnel-stage="settled"] .portal-floodlight {
+  opacity: 0.84;
+  transform: scale(1);
+}
+#loginScreen[data-tunnel-stage="pitch"] .portal-rib--1,
+#loginScreen[data-tunnel-stage="settled"] .portal-rib--1 {
+  opacity: 0.18;
+  transform: scale(1.28);
+}
+#loginScreen[data-tunnel-stage="pitch"] .portal-rib--2,
+#loginScreen[data-tunnel-stage="settled"] .portal-rib--2 {
+  opacity: 0.12;
+  transform: scale(1.36);
+}
+#loginScreen[data-tunnel-stage="pitch"] .portal-rib--3,
+#loginScreen[data-tunnel-stage="settled"] .portal-rib--3,
+#loginScreen[data-tunnel-stage="pitch"] .portal-rib--4,
+#loginScreen[data-tunnel-stage="settled"] .portal-rib--4 {
+  opacity: 0.06;
+  transform: scale(1.44);
+}
+#loginScreen[data-tunnel-stage="pitch"] .portal-rays,
+#loginScreen[data-tunnel-stage="settled"] .portal-rays {
+  opacity: 0.2;
+  transform: scale(1.22);
+}
+#loginScreen[data-tunnel-stage="pitch"] .portal-pitch-group,
+#loginScreen[data-tunnel-stage="settled"] .portal-pitch-group {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Original Maydan Golden Poster — Preserved Proportions, Subtle <=4px Gyro Parallax */
+#loginScreen .login-emblem {
+  position: relative;
+  z-index: 2;
+  width: 120px;
+  height: 120px;
+  margin: 0;
+  border-radius: 24px;
+  padding: 3px;
+  background: linear-gradient(155deg, rgba(242, 214, 117, 0.85) 0%, rgba(212, 175, 55, 0.36) 52%, rgba(212, 175, 55, 0.72) 100%);
+  border: 1px solid rgba(242, 214, 117, 0.52);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.86),
+    0 0 28px rgba(212, 175, 55, 0.22);
+  transform: translate3d(var(--sheen-dx, 0px), var(--sheen-dy, 0px), 0);
+  transition: transform 900ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 900ms ease;
+}
+
+#loginScreen[data-tunnel-stage="identity"] .login-emblem {
+  transform: scale(0.92);
+}
+
+#loginScreen[data-tunnel-stage="opening"] .login-emblem {
+  transform: scale(1.04);
+  box-shadow:
+    0 24px 52px rgba(0, 0, 0, 0.9),
+    0 0 46px rgba(242, 214, 117, 0.36);
+}
+
+#loginScreen[data-tunnel-stage="pitch"] .login-emblem,
+#loginScreen[data-tunnel-stage="settled"] .login-emblem {
+  transform: translate3d(var(--sheen-dx, 0px), var(--sheen-dy, 0px), 0) scale(1);
+}
+
+#loginScreen .login-emblem::after,
+#loginScreen .login-emblem img,
+#loginScreen .login-emblem img.login-crest-img {
+  border-radius: 21px;
+  object-fit: contain;
+}
+
+@media (min-width: 960px) {
+  #loginScreen .login-emblem {
+    width: 186px;
+    height: 186px;
+    border-radius: 28px;
+  }
+  #loginScreen .login-emblem::after,
+  #loginScreen .login-emblem img,
+  #loginScreen .login-emblem img.login-crest-img {
+    border-radius: 25px;
+  }
+}
+
+/* Hero Copy Separation & Arabic Typography Hierarchy */
+.login-hero-copy {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#loginScreen .login-kicker {
+  color: #D4AF37;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.015em;
+  margin-bottom: 4px;
+}
+
+#loginScreen .login-title {
+  color: #F6F7F9;
+  font-size: 1.46rem;
+  font-weight: 900;
+  line-height: 1.26;
+  text-wrap: balance;
+}
+
+@media (min-width: 960px) {
+  .login-hero-copy {
+    margin-top: 18px;
+  }
+
+  #loginScreen .login-title {
+    font-size: 1.72rem;
+  }
+}
+
+#loginScreen .login-sub {
+  color: #A4ACBA;
+  font-size: 0.82rem;
+  line-height: 1.62;
+  max-width: 36ch;
+  margin: 6px auto 0;
+}
+
+.login-hero-meta {
+  margin-top: 14px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #9AA2B1;
+}
+
+@media (min-width: 960px) {
+  .login-hero-meta {
+    display: inline-flex;
+  }
+}
+
+/* ==========================================================================
+   INVITE HEX CONTRACT SEAL (Visible ONLY for Invite/Referral URLs)
+   ========================================================================== */
+.invite-hex-seal {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  margin-bottom: 11px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.11) 0%, rgba(13, 15, 19, 0.92) 70%);
+  border: 1px solid rgba(230, 199, 104, 0.34);
+  text-align: start;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: border-color 180ms ease, background-color 180ms ease, transform 150ms ease, box-shadow 220ms ease;
+}
+
+.invite-hex-seal.hidden {
+  display: none !important;
+}
+
+.invite-hex-seal:hover {
+  border-color: rgba(230, 199, 104, 0.56);
+}
+
+.invite-hex-seal[data-seal-holding="true"] {
+  transform: scale(0.985);
+  border-color: rgba(242, 214, 117, 0.76);
+  box-shadow: 0 0 18px rgba(212, 175, 55, 0.24);
+}
+
+.invite-hex-seal[data-seal-armed="true"] {
+  border-color: rgba(242, 214, 117, 0.8);
+  background: linear-gradient(135deg, rgba(230, 199, 104, 0.18) 0%, rgba(13, 15, 19, 0.94) 75%);
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.22);
+}
+
+.invite-hex-seal-emblem {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hex-seal-edge {
+  stroke: rgba(230, 199, 104, 0.22);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  transition: stroke 160ms ease, filter 160ms ease;
+}
+
+.invite-hex-seal[data-seal-progress="1"] .hex-seal-edge[data-hex-edge="0"],
+.invite-hex-seal[data-seal-progress="2"] .hex-seal-edge[data-hex-edge="0"],
+.invite-hex-seal[data-seal-progress="2"] .hex-seal-edge[data-hex-edge="1"],
+.invite-hex-seal[data-seal-progress="3"] .hex-seal-edge[data-hex-edge="0"],
+.invite-hex-seal[data-seal-progress="3"] .hex-seal-edge[data-hex-edge="1"],
+.invite-hex-seal[data-seal-progress="3"] .hex-seal-edge[data-hex-edge="2"],
+.invite-hex-seal[data-seal-progress="4"] .hex-seal-edge[data-hex-edge="0"],
+.invite-hex-seal[data-seal-progress="4"] .hex-seal-edge[data-hex-edge="1"],
+.invite-hex-seal[data-seal-progress="4"] .hex-seal-edge[data-hex-edge="2"],
+.invite-hex-seal[data-seal-progress="4"] .hex-seal-edge[data-hex-edge="3"],
+.invite-hex-seal[data-seal-progress="5"] .hex-seal-edge[data-hex-edge="0"],
+.invite-hex-seal[data-seal-progress="5"] .hex-seal-edge[data-hex-edge="1"],
+.invite-hex-seal[data-seal-progress="5"] .hex-seal-edge[data-hex-edge="2"],
+.invite-hex-seal[data-seal-progress="5"] .hex-seal-edge[data-hex-edge="3"],
+.invite-hex-seal[data-seal-progress="5"] .hex-seal-edge[data-hex-edge="4"],
+.invite-hex-seal[data-seal-progress="6"] .hex-seal-edge {
+  stroke: #E6C768;
+}
+
+.invite-hex-seal[data-seal-armed="true"] .hex-seal-edge {
+  stroke: #FFF0B3;
+}
+
+.invite-hex-seal-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.invite-hex-seal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #F2DF9B;
+}
+
+.invite-hex-seal-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #E6C768;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(212, 175, 55, 0.14);
+  border: 1px solid rgba(230, 199, 104, 0.28);
+}
+
+.invite-hex-seal-hint {
+  font-size: 0.68rem;
+  color: #9DA5B4;
+  line-height: 1.4;
+}
+
+/* ==========================================================================
+   AUTH PANEL — SECTION (أ) SURGICAL LUXURY POLISH (85 / 10 / 5 RULE)
+   ========================================================================== */
+.login-auth-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+
+/* 2. Recessed Segmented Control with Fluid Sliding Gold Indicator */
+#loginScreen .login-seg-tabs {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 0;
+  margin-bottom: 12px;
+  background: #0D0F13;
+  border: 1px solid rgba(243, 244, 246, 0.09);
+  border-radius: 12px;
+  padding: 4px;
+  gap: 0;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.68),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.login-seg-indicator {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  inset-inline-start: 4px;
+  width: calc(50% - 4px);
+  border-radius: 9px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(230, 199, 104, 0.2) 0%, rgba(180, 142, 46, 0.1) 100%);
+  border: 1px solid rgba(230, 199, 104, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 246, 212, 0.22),
+    inset 0 -1.5px 0 rgba(230, 199, 104, 0.64),
+    0 4px 12px rgba(0, 0, 0, 0.4);
+  transform: translate3d(0, 0, 0);
+  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* RTL: tab 1 (signin) sits on the right, tab 2 (signup) slides -100% left */
+#loginScreen[dir="rtl"] .login-seg-tabs[data-active-tab="signup"] .login-seg-indicator {
+  transform: translate3d(-100%, 0, 0);
+}
+
+/* LTR: tab 1 (signin) sits on the left, tab 2 (signup) slides +100% right */
+#loginScreen[dir="ltr"] .login-seg-tabs[data-active-tab="signup"] .login-seg-indicator {
+  transform: translate3d(100%, 0, 0);
+}
+
+#loginScreen .login-seg-tab {
+  position: relative;
+  z-index: 1;
+  min-height: 42px;
+  border-radius: 9px;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #848E9F;
+  font-size: 0.85rem;
+  font-weight: 700;
+  transition: color 180ms ease;
+}
+
+#loginScreen .login-seg-tab:hover:not(.active) {
+  color: #D9DFE9;
+}
+
+#loginScreen .login-seg-tab:focus-visible {
+  outline: 2px solid #E6C768;
+  outline-offset: -2px;
+}
+
+#loginScreen .login-seg-tab.active {
+  color: #FAF0CB;
+  font-weight: 900;
+}
+
+#loginScreen .login-signup-guide {
+  background: rgba(15, 18, 24, 0.88);
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+
+#loginScreen .login-guide-num {
+  background: rgba(212, 175, 55, 0.15);
+  border-color: rgba(212, 175, 55, 0.36);
+  color: #E6C768;
+}
+
+#loginScreen .login-invite-box {
+  border-color: rgba(230, 199, 104, 0.42);
+  background: rgba(212, 175, 55, 0.09);
+  color: #F3DF9A;
+  border-radius: 12px;
+}
+
+#loginScreen .login-status-box {
+  border-color: rgba(243, 244, 246, 0.14);
+  background: #151820;
+  color: #F3F4F6;
+  border-radius: 12px;
+}
+
+#loginScreen .login-actions {
+  gap: 10px;
+}
+
+/* 1. Primary CTA: Obsidian & Champagne Gold Metallic Material + Passing Sheen */
+#loginScreen .btn-google-royal {
+  position: relative;
+  overflow: hidden;
+  min-height: 56px;
+  padding: 9px 15px;
+  gap: 12px;
+  border-radius: 13px;
+  background:
+    radial-gradient(circle 140px at var(--sheen-x, 50%) var(--sheen-y, 30%), rgba(255, 248, 220, 0.24) 0%, transparent 70%),
+    linear-gradient(180deg, #E6C768 0%, #D4AF37 64%, #BD9729 100%);
+  border: 1px solid rgba(238, 212, 134, 0.58);
+  color: #090B0E;
+  text-align: start;
+  box-shadow:
+    0 12px 26px rgba(0, 0, 0, 0.54),
+    0 2px 6px rgba(212, 175, 55, 0.18),
+    inset 0 1px 0 rgba(255, 250, 232, 0.56);
+  transition:
+    transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    filter 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+/* Passing Metallic Sheen Sweep on Hover / Touch */
+#loginScreen .btn-google-royal::after {
+  content: "";
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    112deg,
+    transparent 24%,
+    rgba(255, 252, 238, 0.42) 48%,
+    rgba(255, 252, 238, 0.12) 56%,
+    transparent 74%
+  );
+  transform: translate3d(-125%, 0, 0);
+  transition: transform 540ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#loginScreen .btn-google-royal:hover:not(:disabled)::after,
+#loginScreen .btn-google-royal:active:not(:disabled)::after {
+  transform: translate3d(125%, 0, 0);
+}
+
+/* Integrated Obsidian Dark-Glass Emblem Badge for Google Mark (Not Harsh White Circle) */
+#loginScreen .btn-google-royal .google-g-chip {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #161920 0%, #0B0D12 100%);
+  border: 1px solid rgba(255, 246, 212, 0.24);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 3px 8px rgba(0, 0, 0, 0.38);
+  flex-shrink: 0;
+}
+
+#loginScreen .btn-google-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+#loginScreen .btn-google-primary {
+  font-size: 0.92rem;
+  font-weight: 900;
+  color: #090B0E;
+  letter-spacing: -0.005em;
+}
+
+#loginScreen .btn-google-sub {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(9, 11, 14, 0.74);
+  margin-top: 2px;
+}
+
+#loginScreen .btn-google-royal:hover:not(:disabled) {
+  filter: brightness(1.03);
+  border-color: rgba(246, 224, 152, 0.78);
+  transform: translateY(-1px);
+  box-shadow:
+    0 15px 30px rgba(0, 0, 0, 0.58),
+    0 0 22px rgba(212, 175, 55, 0.24),
+    inset 0 1px 0 rgba(255, 252, 236, 0.64);
+}
+
+#loginScreen .btn-google-royal:active:not(:disabled) {
+  transform: scale(0.985);
+  filter: brightness(0.97);
+}
+
+#loginScreen .btn-google-royal:focus-visible {
+  outline: 2px solid #F2D675;
+  outline-offset: 2px;
+}
+
+.cta-seal-spotlight {
+  box-shadow:
+    0 0 0 2px rgba(242, 214, 117, 0.85),
+    0 0 28px rgba(212, 175, 55, 0.42) !important;
+}
+
+/* 3. Hardware Mechanical Toggle Switch for #chkRememberDevice (Unchecked Default Preserved) */
+#loginScreen .auth-remember-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: rgba(11, 13, 18, 0.54);
+  border: 1px solid rgba(243, 244, 246, 0.07);
+  border-radius: 12px;
+  padding: 9px 12px;
+  margin-top: 0;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+#loginScreen .auth-remember-row:hover {
+  border-color: rgba(230, 199, 104, 0.26);
+  background: rgba(14, 17, 23, 0.74);
+}
+
+.auth-remember-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.auth-remember-title {
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.38;
+  color: #DFE5EE;
+}
+
+#loginScreen .auth-remember-row .auth-remember-desc {
+  display: block;
+  color: #8892A4;
+  font-size: 0.68rem !important;
+  line-height: 1.44;
+  margin-top: 2px;
+}
+
+/* Pure Native Checkbox Styled as Swiss Obsidian/Gold Mechanical Toggle Switch */
+#loginScreen .auth-remember-row input[type="checkbox"].mech-toggle-input {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  min-width: 42px;
+  margin: 0;
+  border-radius: 999px;
+  background: #0B0D12;
+  border: 1px solid rgba(243, 244, 246, 0.16);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.72);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 220ms cubic-bezier(0.16, 1, 0.3, 1), border-color 220ms ease, box-shadow 220ms ease;
+}
+
+#loginScreen .auth-remember-row input[type="checkbox"].mech-toggle-input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  margin: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #98A1B2 0%, #687182 100%);
+  box-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transform: translate3d(0, 0, 0);
+  transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), background 220ms ease;
+}
+
+#loginScreen .auth-remember-row input[type="checkbox"].mech-toggle-input:checked {
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.32) 0%, rgba(164, 128, 36, 0.24) 100%);
+  border-color: rgba(230, 199, 104, 0.74);
+  box-shadow:
+    inset 0 1px 4px rgba(0, 0, 0, 0.42),
+    0 0 12px rgba(212, 175, 55, 0.18);
+}
+
+#loginScreen .auth-remember-row input[type="checkbox"].mech-toggle-input:checked::after {
+  transform: translate3d(18px, 0, 0);
+  background: linear-gradient(180deg, #F2DA89 0%, #D4AF37 100%);
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 252, 236, 0.62);
+}
+
+#loginScreen .auth-remember-row input[type="checkbox"].mech-toggle-input:focus-visible {
+  outline: 2px solid #E6C768;
+  outline-offset: 2px;
+}
+
+/* 4. Hairline Divider & Carbon Ghost Demo Button (Zero Visual Weight) */
+#loginScreen .login-divider {
+  margin: 13px 0 9px;
+  color: #848E9F;
+  font-size: 0.72rem;
+}
+
+#loginScreen .login-divider::before,
+#loginScreen .login-divider::after {
+  background: linear-gradient(90deg, transparent, rgba(243, 244, 246, 0.11), transparent);
+}
+
+#loginScreen .btn-demo-royal {
+  min-height: 46px;
+  padding: 9px 14px;
+  gap: 9px;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid rgba(243, 244, 246, 0.13);
+  color: #CDD4E0;
+  font-size: 0.83rem;
+  font-weight: 700;
+  box-shadow: none;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 140ms ease;
+}
+
+#loginScreen .btn-demo-royal:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(230, 199, 104, 0.34);
+  color: #F2F5FA;
+}
+
+#loginScreen .btn-demo-royal:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+#loginScreen .btn-demo-royal:focus-visible {
+  outline: 2px solid #E6C768;
+  outline-offset: 2px;
+}
+
+.login-demo-note {
+  font-size: 0.72rem;
+  color: #858E9F;
+  margin-top: 7px;
+  text-align: center;
+  line-height: 1.45;
+}
+
+#loginScreen .login-foot-note {
+  margin-top: 10px;
+  font-size: 0.71rem;
+  color: #70798A;
+}
+
+/* Minimal Footer Text Link (Box & Border Removed, Comfortable 44px Touch Target) */
+.login-legal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 6px 12px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  border-radius: 8px;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #8E97A8;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 160ms ease, opacity 160ms ease;
+}
+
+.login-legal-btn:hover,
+.login-legal-btn:focus-visible {
+  color: #E6C768;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.login-legal-btn:focus-visible {
+  outline: 2px solid #E6C768;
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   COMPACT MOBILE ONE-HANDED THUMB ZONE TUNING (360px / 390px)
+   ========================================================================== */
+@media (max-width: 400px) {
+  #loginScreen.login-wrap {
+    padding: calc(8px + env(safe-area-inset-top)) 12px calc(14px + env(safe-area-inset-bottom));
+  }
+
+  #loginScreen .login-box {
+    padding: 15px 14px 10px;
+    border-radius: 18px;
+  }
+
+  .tunnel-hero-portal {
+    height: 158px;
+    border-radius: 14px;
+  }
+
+  #loginScreen .login-emblem {
+    width: 108px;
+    height: 108px;
+    border-radius: 22px;
+  }
+
+  #loginScreen .login-emblem::after,
+  #loginScreen .login-emblem img,
+  #loginScreen .login-emblem img.login-crest-img {
+    border-radius: 19px;
+  }
+
+  .login-hero-copy {
+    margin-top: 10px;
+  }
+
+  #loginScreen .login-title {
+    font-size: 1.32rem;
+  }
+
+  #loginScreen .login-sub {
+    font-size: 0.77rem;
+    margin-top: 5px;
+    line-height: 1.54;
+  }
+
+  #loginScreen .login-seg-tabs {
+    margin-bottom: 10px;
+  }
+
+  #loginScreen .btn-google-royal {
+    min-height: 54px;
+    padding: 8px 13px;
+  }
+
+  #loginScreen .btn-google-primary {
+    font-size: 0.88rem;
+  }
+
+  #loginScreen .btn-google-sub {
+    font-size: 0.69rem;
+  }
+}
+
+/* ==========================================================================
+   SIMPLIFIED, DATA-SAVER & PREFERS-REDUCED-MOTION MODES
+   ========================================================================== */
+#loginScreen[data-tunnel-profile="simplified"] .portal-rib--3,
+#loginScreen[data-tunnel-profile="simplified"] .portal-rib--4 {
+  display: none;
+}
+
+body.data-saver #loginScreen .tunnel-ambient-beam,
+body.data-saver #loginScreen .tunnel-bg-pitch,
+body.data-saver #loginScreen .tunnel-chrono-sweep,
+body.data-saver #loginScreen .portal-floodlight,
+body.data-saver #loginScreen .portal-rib,
+body.data-saver #loginScreen .portal-rays,
+body.data-saver #loginScreen .portal-pitch-group,
+body.data-saver #loginScreen .login-seg-indicator {
+  transition: none !important;
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #loginScreen.login-wrap,
+  #loginScreen .login-box,
+  #loginScreen .tunnel-hero-portal,
+  #loginScreen .tunnel-ambient-beam,
+  #loginScreen .tunnel-bg-pitch,
+  #loginScreen .tunnel-chrono-sweep,
+  #loginScreen .tunnel-corner-floodlight,
+  #loginScreen .portal-floodlight,
+  #loginScreen .portal-rib,
+  #loginScreen .portal-rays,
+  #loginScreen .portal-pitch-group,
+  #loginScreen .login-emblem,
+  #loginScreen .login-seg-indicator,
+  #loginScreen .btn-google-royal,
+  #loginScreen .btn-google-royal::after,
+  #loginScreen .btn-demo-royal,
+  #loginScreen .auth-remember-row input[type="checkbox"].mech-toggle-input,
+  #loginScreen .auth-remember-row input[type="checkbox"].mech-toggle-input::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

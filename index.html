@@ -3694,8 +3694,8 @@
     /* 2) 5 LUXURY SECTION TABS BAR */
     .tac-pro-secbar {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
       padding: 6px 10px;
       border-radius: 16px;
       background: linear-gradient(180deg, rgba(20, 19, 22, 0.92), rgba(9, 10, 13, 0.95));
@@ -4905,6 +4905,334 @@
         max-width: 64vw;
       }
     }
+    /* ==================== TACTICAL INTELLIGENCE LAB (ROYAL BLACK & GOLD) ==================== */
+    .tac-pitch-inner,
+    .tac-pro-pitch-wrap {
+      position: relative;
+    }
+    .xray-overlay-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 4;
+      border-radius: 14px;
+    }
+    .tac-xray-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      min-height: 36px;
+      padding: 6px 11px;
+      border-radius: 10px;
+      border: 1px solid rgba(250, 204, 21, 0.32);
+      background: rgba(15, 17, 24, 0.88);
+      color: #fde047;
+      font-weight: 800;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.18s ease;
+    }
+    .tac-xray-btn.active {
+      background: linear-gradient(135deg, #facc15, #ca8a04);
+      color: #070709;
+      border-color: #fef08a;
+      box-shadow: 0 0 14px rgba(250, 204, 21, 0.35);
+    }
+    .xray-hud-panel {
+      margin-top: 8px;
+      margin-bottom: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: linear-gradient(160deg, rgba(12, 13, 18, 0.96), rgba(18, 20, 28, 0.96));
+      border: 1px solid rgba(250, 204, 21, 0.38);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+    .xray-hud-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+    .xray-hud-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 0.82rem;
+    }
+    .xray-cmp-tag {
+      font-size: 0.7rem;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 6px;
+      border: 1px solid rgba(250, 204, 21, 0.4);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .xray-score-box {
+      font-size: 1.05rem;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 2px 8px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .xray-control-bar-wrap {
+      margin-bottom: 7px;
+    }
+    .xray-control-labels {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+    }
+    .xray-control-track {
+      height: 7px;
+      border-radius: 99px;
+      background: #1e293b;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .xray-control-fill-our {
+      height: 100%;
+      background: linear-gradient(90deg, #eab308, #fde047);
+      transition: width 0.2s ease;
+    }
+    .xray-reasons {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 0.74rem;
+      color: #e4e4e7;
+      margin-bottom: 6px;
+    }
+    .xray-legend-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 0.69rem;
+      color: #a1a1aa;
+      margin-bottom: 4px;
+    }
+    .xray-legend-row i {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 3px;
+      vertical-align: middle;
+      margin-left: 3px;
+    }
+    .xray-disclaimer {
+      font-size: 0.67rem;
+      color: #71717a;
+      line-height: 1.4;
+    }
+    .tac-lab-entry-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+    .tac-lab-launch-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+      padding: 9px 10px;
+      border-radius: 11px;
+      border: 1px solid rgba(250, 204, 21, 0.28);
+      background: rgba(18, 20, 27, 0.92);
+      color: #f8fafc;
+      text-align: right;
+      cursor: pointer;
+      transition: border-color 0.18s ease, transform 0.15s ease;
+    }
+    .tac-lab-launch-btn:hover {
+      border-color: rgba(250, 204, 21, 0.68);
+      transform: translateY(-1px);
+    }
+    .tac-lab-launch-btn strong {
+      font-size: 0.8rem;
+      color: #fde047;
+    }
+    .tac-lab-launch-btn span {
+      font-size: 0.69rem;
+      color: #a1a1aa;
+      line-height: 1.35;
+    }
+    .tac-lab-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 9990;
+      background: rgba(4, 5, 9, 0.88);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      overflow-y: auto;
+    }
+    .tac-lab-modal-card {
+      width: 100%;
+      max-width: 500px;
+      max-height: 92vh;
+      overflow-y: auto;
+      background: linear-gradient(170deg, #0b0c10, #13151d);
+      border: 1px solid rgba(250, 204, 21, 0.45);
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.72);
+    }
+    .tac-lab-modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(250, 204, 21, 0.18);
+    }
+    .tac-lab-modal-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 11px;
+    }
+    .tac-lab-modal-tab {
+      min-height: 38px;
+      padding: 6px 6px;
+      border-radius: 10px;
+      border: 1px solid rgba(250, 204, 21, 0.24);
+      background: rgba(18, 20, 28, 0.9);
+      color: #d4d4d8;
+      font-size: 0.75rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.16s ease;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tac-lab-modal-tab:hover {
+      border-color: rgba(250, 204, 21, 0.58);
+      color: #fef08a;
+    }
+    .tac-lab-modal-tab.active {
+      background: linear-gradient(135deg, rgba(250, 204, 21, 0.24), rgba(202, 138, 4, 0.22));
+      border-color: rgba(250, 204, 21, 0.85);
+      color: #fef08a;
+      box-shadow: 0 0 14px rgba(250, 204, 21, 0.18);
+    }
+    @media (max-width: 520px) {
+      .tac-lab-modal-tabs {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    /* Prominent Always-Visible 5-System Tactical Intelligence Lab Bar */
+    .tac-lab-dock {
+      margin: 2px 0 8px;
+      padding: 9px 10px;
+      border-radius: 14px;
+      border: 1px solid rgba(250, 204, 21, 0.34);
+      background:
+        radial-gradient(ellipse 70% 80% at 50% 0%, rgba(250, 204, 21, 0.11), transparent 72%),
+        linear-gradient(180deg, rgba(16, 18, 25, 0.94), rgba(10, 11, 16, 0.96));
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.38);
+    }
+    .tac-lab-dock-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+      flex-wrap: wrap;
+    }
+    .tac-lab-dock-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 900;
+      color: #fef08a;
+      letter-spacing: 0.01em;
+    }
+    .tac-lab-dock-pill {
+      font-size: 0.67rem;
+      font-weight: 800;
+      color: #d4d4d8;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(250, 204, 21, 0.25);
+      background: rgba(250, 204, 21, 0.08);
+    }
+    .tac-lab-dock-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .tac-lab-dock-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      min-height: 46px;
+      padding: 6px 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(250, 204, 21, 0.26);
+      background: rgba(20, 22, 31, 0.92);
+      color: #f4f4f5;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.16s ease, background 0.16s ease, transform 0.14s ease, box-shadow 0.16s ease;
+    }
+    .tac-lab-dock-btn:nth-child(1),
+    .tac-lab-dock-btn:nth-child(2),
+    .tac-lab-dock-btn:nth-child(3) {
+      grid-column: span 2;
+    }
+    .tac-lab-dock-btn:nth-child(4),
+    .tac-lab-dock-btn:nth-child(5) {
+      grid-column: span 3;
+    }
+    .tac-lab-dock-btn:hover {
+      border-color: rgba(250, 204, 21, 0.72);
+      background: rgba(34, 30, 18, 0.92);
+      transform: translateY(-1px);
+    }
+    .tac-lab-dock-btn.active {
+      border-color: rgba(250, 204, 21, 0.95);
+      background: linear-gradient(145deg, rgba(250, 204, 21, 0.26), rgba(161, 98, 7, 0.24));
+      box-shadow: 0 0 16px rgba(250, 204, 21, 0.22);
+    }
+    .tac-lab-dock-btn strong {
+      font-size: 0.76rem;
+      font-weight: 900;
+      color: #fde047;
+      line-height: 1.25;
+      white-space: nowrap;
+    }
+    .tac-lab-dock-btn span {
+      font-size: 0.65rem;
+      color: #a1a1aa;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    .tac-lab-dock-btn.active span {
+      color: #fef08a;
+    }
   </style>
 </head>
 <body>
@@ -4934,132 +5262,242 @@
     <button id="btnDismissQuotaBanner" type="button" class="icon-btn" style="padding:4px 8px;min-height:28px;font-size:0.7rem;">إخفاء</button>
   </div>
 
-  <!-- ==================== LOGIN SCREEN ==================== -->
-  <div id="loginScreen" class="login-wrap hidden" dir="rtl">
-    <!-- Liquid Black & Gold Wavy Background -->
-    <div class="login-bg-stage" aria-hidden="true">
-      <div class="login-bg-halo"></div>
-      <svg class="login-bg-waves" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  <!-- ==================== LOGIN SCREEN — TUNNEL APERTURE 3.0 EXPERIENCE ==================== -->
+  <div id="loginScreen" class="login-wrap hidden" dir="rtl" data-tunnel-stage="idle" data-tunnel-playing="false">
+    <!-- Subtle Atmospheric Stadium Backdrop (Deep Obsidian + Restrained Floodlight) -->
+    <div id="tunnelApertureStage" class="tunnel-stage" aria-hidden="true">
+      <div class="tunnel-ambient-beam"></div>
+      <div class="tunnel-corner-floodlight tunnel-corner-floodlight--left"></div>
+      <div class="tunnel-corner-floodlight tunnel-corner-floodlight--right"></div>
+      <div class="tunnel-chrono-sweep"></div>
+      <svg class="tunnel-bg-svg" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <linearGradient id="loginGoldWaveA" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#FACC15" stop-opacity="0"/>
-            <stop offset="32%" stop-color="#FACC15" stop-opacity="0.28"/>
-            <stop offset="68%" stop-color="#FEF08A" stop-opacity="0.42"/>
-            <stop offset="100%" stop-color="#CA8A04" stop-opacity="0"/>
-          </linearGradient>
-          <linearGradient id="loginGoldWaveB" x1="100%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#FACC15" stop-opacity="0"/>
-            <stop offset="50%" stop-color="#EAB308" stop-opacity="0.20"/>
-            <stop offset="100%" stop-color="#FACC15" stop-opacity="0"/>
-          </linearGradient>
-          <linearGradient id="loginSilkFill" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#171822" stop-opacity="0.46"/>
-            <stop offset="100%" stop-color="#070709" stop-opacity="0"/>
-          </linearGradient>
+          <radialGradient id="tunnelBackdropGlow" cx="50%" cy="28%" r="52%">
+            <stop offset="0%" stop-color="#F2D675" stop-opacity="0.14"/>
+            <stop offset="52%" stop-color="#D4AF37" stop-opacity="0.035"/>
+            <stop offset="100%" stop-color="#07080A" stop-opacity="0"/>
+          </radialGradient>
         </defs>
-        <!-- Flowing dark obsidian silk ribbon -->
-        <path d="M-60 240 C 260 110, 560 360, 920 220 C 1180 120, 1340 240, 1500 180 L1500 540 C 1220 440, 920 620, 580 510 C 310 420, 110 540, -60 470 Z" fill="url(#loginSilkFill)"/>
-        <!-- Liquid gold contour waves -->
-        <path d="M-80 185 C 240 65, 580 305, 930 165 C 1190 60, 1340 165, 1520 115" fill="none" stroke="url(#loginGoldWaveA)" stroke-width="2.2"/>
-        <path d="M-80 228 C 250 108, 590 348, 945 205 C 1200 102, 1350 205, 1520 158" fill="none" stroke="url(#loginGoldWaveB)" stroke-width="1.3"/>
-        <path d="M-80 685 C 280 565, 620 795, 980 655 C 1220 562, 1370 675, 1520 620" fill="none" stroke="url(#loginGoldWaveA)" stroke-width="1.8"/>
-        <path d="M-80 738 C 290 618, 635 845, 995 708 C 1235 616, 1380 725, 1520 674" fill="none" stroke="url(#loginGoldWaveB)" stroke-width="1.1"/>
-        <!-- Subtle diagonal architectural gold beams -->
-        <line x1="-120" y1="680" x2="620" y2="-60" stroke="url(#loginGoldWaveB)" stroke-width="1"/>
-        <line x1="840" y1="960" x2="1540" y2="260" stroke="url(#loginGoldWaveB)" stroke-width="1"/>
-        <!-- Minimal subtle pitch center ring geometry -->
-        <circle cx="720" cy="450" r="310" fill="none" stroke="#FACC15" stroke-opacity="0.06" stroke-width="1.2"/>
+        <ellipse cx="720" cy="270" rx="680" ry="380" fill="url(#tunnelBackdropGlow)"/>
+        <!-- Whisper-subtle architectural outer stadium pitch frame -->
+        <g class="tunnel-bg-pitch">
+          <rect x="84" y="64" width="1272" height="772" rx="6" fill="none" stroke="rgba(212,175,55,0.12)" stroke-width="1"/>
+          <line x1="84" y1="450" x2="1356" y2="450" stroke="rgba(212,175,55,0.09)" stroke-width="1"/>
+          <circle cx="720" cy="450" r="196" fill="none" stroke="rgba(212,175,55,0.11)" stroke-width="1"/>
+        </g>
       </svg>
+      <div class="tunnel-vignette"></div>
     </div>
 
     <div class="login-shell">
-      <!-- Top Bar: Royal Emblem Label & AR/EN Language Switcher -->
+      <!-- Clean Top Bar: Brand Identity, Active-Only Skip Control & AR/EN Switcher -->
       <div class="login-topbar">
         <div class="login-brand-tag">
           <span class="login-brand-diamond" aria-hidden="true"></span>
           <span id="loginBrandMarkText">ميدان 6v6</span>
         </div>
-        <div class="login-lang-switch" role="group" aria-label="Language switcher">
-          <button id="btnLoginLangAr" type="button" class="login-lang-btn active" aria-pressed="true">AR</button>
-          <button id="btnLoginLangEn" type="button" class="login-lang-btn" aria-pressed="false">EN</button>
+
+        <div class="login-topbar-controls">
+          <button id="btnSkipTunnel" type="button" class="tunnel-util-btn tunnel-skip-btn hidden" hidden aria-label="تخطي حركة الدخول">
+            <span data-tunnel-skip-label>تخطي</span>
+          </button>
+          <div class="login-lang-switch" role="group" aria-label="Language switcher">
+            <button id="btnLoginLangAr" type="button" class="login-lang-btn active" aria-pressed="true">AR</button>
+            <button id="btnLoginLangEn" type="button" class="login-lang-btn" aria-pressed="false">EN</button>
+          </div>
         </div>
       </div>
 
-      <!-- Dark Glassmorphic Royal Login Card -->
+      <!-- Refined Deep-Obsidian Stadium Entrance Login Card -->
       <div class="card login-box">
-        <div id="loginLogoBox" class="login-emblem">
-          <img src="/assets/midan-crest.webp" alt="شعار ميدان 6v6 — MIDAN" class="login-crest-img" width="128" height="128" onerror="if(!this.dataset.pngTried){this.dataset.pngTried='1';this.src='/assets/midan-crest.png';return;}this.onerror=null;this.src='data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20128%20128%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FEF08A%22%2F%3E%3Cstop%20offset%3D%2255%25%22%20stop-color%3D%22%23FACC15%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23A16207%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Cpath%20d%3D%22M64%206L114%2022V66C114%2096%2088%20114%2064%20122C40%20114%2014%2096%2014%2066V22L64%206Z%22%20fill%3D%22%23090a0e%22%20stroke%3D%22url(%23g)%22%20stroke-width%3D%225%22%2F%3E%3Cpath%20d%3D%22M36%2052L46%2036L64%2048L82%2036L92%2052L86%2070H42L36%2052Z%22%20fill%3D%22url(%23g)%22%2F%3E%3Ctext%20x%3D%2264%22%20y%3D%2298%22%20text-anchor%3D%22middle%22%20fill%3D%22%23FEF08A%22%20font-family%3D%22sans-serif%22%20font-weight%3D%22900%22%20font-size%3D%2220%22%3E6v6%3C%2Ftext%3E%3C%2Fsvg%3E';" />
-        </div>
+        <div class="login-stage-grid">
+          <!-- Stage Hero: Poster-Centered TUNNEL APERTURE -> FOOTBALL PITCH Portal -->
+          <div class="login-hero-stage">
+            <div class="tunnel-hero-portal">
+              <!-- Unified Stadium Players' Tunnel Ribs -> Football Pitch Markings Centered Around Original Poster -->
+              <svg class="tunnel-portal-svg" viewBox="0 0 420 228" preserveAspectRatio="xMidYMid meet" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <radialGradient id="portalFloodlight" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#F2D675" stop-opacity="0.34"/>
+                    <stop offset="44%" stop-color="#D4AF37" stop-opacity="0.11"/>
+                    <stop offset="100%" stop-color="#090A0C" stop-opacity="0"/>
+                  </radialGradient>
+                  <linearGradient id="portalPerspectiveRay" x1="50%" y1="0%" x2="50%" y2="100%">
+                    <stop offset="0%" stop-color="#F2D675" stop-opacity="0.52"/>
+                    <stop offset="50%" stop-color="#D4AF37" stop-opacity="0.28"/>
+                    <stop offset="100%" stop-color="#D4AF37" stop-opacity="0.06"/>
+                  </linearGradient>
+                  <linearGradient id="portalHalfwayGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#D4AF37" stop-opacity="0"/>
+                    <stop offset="16%" stop-color="#D4AF37" stop-opacity="0.48"/>
+                    <stop offset="50%" stop-color="#F2D675" stop-opacity="0.68"/>
+                    <stop offset="84%" stop-color="#D4AF37" stop-opacity="0.48"/>
+                    <stop offset="100%" stop-color="#D4AF37" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
 
-        <div id="loginAppSub" class="login-kicker">ميدان 6v6 • النسخة الملكية</div>
-        <h1 id="loginTeamTitle" class="login-title">فريق السداسي (6 ضد 6)</h1>
-        <p id="loginSubtitle" class="login-sub">سجّل دخولك بحساب Google لإنشاء فريقك أو الانضمام لأصدقائك واللعب الجماعي المباشر مع حفظ سحابي</p>
+                <!-- Controlled Stadium Exit Light behind the Maydan Poster -->
+                <ellipse class="portal-floodlight" cx="210" cy="114" rx="186" ry="96" fill="url(#portalFloodlight)"/>
 
-        <!-- Segmented Auth Mode Tabs -->
-        <div class="login-seg-tabs" role="tablist" aria-label="طريقة الدخول">
-          <button id="loginTabSignIn" type="button" role="tab" aria-selected="true" class="login-seg-tab active">تسجيل الدخول</button>
-          <button id="loginTabSignUp" type="button" role="tab" aria-selected="false" class="login-seg-tab">حساب جديد</button>
-        </div>
+                <!-- Stage 1 & 2: Architectural Players' Tunnel Concentric Ribs (Centered at 210,114) -->
+                <g class="portal-tunnel-group">
+                  <!-- Deep outer tunnel arch rib -->
+                  <polygon class="portal-rib portal-rib--4" points="50,14 370,14 402,46 402,182 370,214 50,214 18,182 18,46"/>
+                  <!-- Mid-outer architectural rib -->
+                  <polygon class="portal-rib portal-rib--3" points="86,32 334,32 360,58 360,170 334,196 86,196 60,170 60,58"/>
+                  <!-- Mid-inner architectural rib -->
+                  <polygon class="portal-rib portal-rib--2" points="120,50 300,50 320,70 320,158 300,178 120,178 100,158 100,70"/>
+                  <!-- Innermost aperture collar around the Maydan emblem -->
+                  <polygon class="portal-rib portal-rib--1" points="150,66 270,66 286,82 286,146 270,162 150,162 134,146 134,82"/>
 
-        <!-- Contextual New Account Guide (visible on 'حساب جديد' tab) -->
-        <div id="loginSignUpGuide" class="login-signup-guide hidden">
-          <div class="login-guide-step">
-            <span class="login-guide-num">1</span>
-            <span id="loginGuideStep1">سجّل الدخول بحساب Google للعب الجماعي مع الأصدقاء والمزامنة السحابية.</span>
-          </div>
-          <div class="login-guide-step">
-            <span class="login-guide-num">2</span>
-            <span id="loginGuideStep2">يمكنك فوراً إنشاء فريق جديد لأصدقائك أو الانضمام بكود دعوة أو مسح QR.</span>
-          </div>
-        </div>
+                  <!-- Converging Tunnel Perspective Guide Lines leading straight to the emblem -->
+                  <g class="portal-rays" stroke="url(#portalPerspectiveRay)">
+                    <line x1="18" y1="14" x2="150" y2="66"/>
+                    <line x1="402" y1="14" x2="270" y2="66"/>
+                    <line x1="18" y1="214" x2="150" y2="162"/>
+                    <line x1="402" y1="214" x2="270" y2="162"/>
+                    <line x1="10" y1="114" x2="134" y2="114"/>
+                    <line x1="410" y1="114" x2="286" y2="114"/>
+                  </g>
+                </g>
 
-        <div id="loginInviteNotice" class="login-invite-box hidden"></div>
-        <div id="authStatusBox" class="login-status-box hidden"></div>
-
-        <div id="authActionGroup" class="login-actions">
-          <button id="btnGoogleSignIn" type="button" class="btn-google-royal">
-            <span class="google-g-chip" aria-hidden="true">
-              <svg width="16" height="16" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.44a5.5 5.5 0 0 1-2.39 3.61v3h3.87c2.26-2.08 3.57-5.15 3.57-8.64z"/>
-                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.87-3c-1.07.72-2.44 1.15-4.06 1.15-3.12 0-5.77-2.11-6.71-4.95H1.29v3.1A12 12 0 0 0 12 24z"/>
-                <path fill="#FBBC05" d="M5.29 14.29A7.2 7.2 0 0 1 4.91 12c0-.79.14-1.56.38-2.29v-3.1H1.29A12 12 0 0 0 0 12c0 1.94.46 3.77 1.29 5.39l4-3.1z"/>
-                <path fill="#EA4335" d="M12 4.76c1.76 0 3.34.61 4.58 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.29 6.61l4 3.1C6.23 6.87 8.88 4.76 12 4.76z"/>
+                <!-- Stage 3: Football Pitch Markings (Seamless Transition Centered on the Poster) -->
+                <g class="portal-pitch-group">
+                  <!-- Outer pitch touchline frame -->
+                  <rect class="portal-pitch-outline" x="22" y="18" width="376" height="192" rx="10"/>
+                  <!-- Corner flag quarter-arcs -->
+                  <path class="portal-pitch-detail" d="M22,32 A14,14 0 0 0 36,18"/>
+                  <path class="portal-pitch-detail" d="M384,18 A14,14 0 0 0 398,32"/>
+                  <path class="portal-pitch-detail" d="M22,196 A14,14 0 0 1 36,210"/>
+                  <path class="portal-pitch-detail" d="M384,210 A14,14 0 0 1 398,196"/>
+                  <!-- Left & right 6v6 penalty boxes + penalty arcs -->
+                  <path class="portal-pitch-detail" d="M22,68 L72,68 L72,160 L22,160"/>
+                  <path class="portal-pitch-detail" d="M72,92 A26,26 0 0 1 72,136"/>
+                  <path class="portal-pitch-detail" d="M398,68 L348,68 L348,160 L398,160"/>
+                  <path class="portal-pitch-detail" d="M348,92 A26,26 0 0 0 348,136"/>
+                  <!-- Halfway line & center axis -->
+                  <line class="portal-pitch-halfway" x1="22" y1="114" x2="398" y2="114" stroke="url(#portalHalfwayGrad)"/>
+                  <line class="portal-pitch-detail" x1="210" y1="18" x2="210" y2="210" stroke-opacity="0.28"/>
+                  <!-- Football pitch center circle cradling the original Maydan golden poster -->
+                  <circle class="portal-pitch-circle" cx="210" cy="114" r="79"/>
+                  <circle class="portal-pitch-circle-outer" cx="210" cy="114" r="95"/>
+                </g>
               </svg>
-            </span>
-            <span id="btnGoogleSignInLabel">الدخول بحساب Google (للعب الجماعي مع الأصدقاء)</span>
-          </button>
-          <label id="authRememberDeviceLabel" for="chkRememberDevice" class="auth-remember-row">
-            <input id="chkRememberDevice" type="checkbox" />
-            <span style="font-size:0.74rem;line-height:1.45;color:#e4e4e7;">
-              <strong>تذكر تسجيلي على هذا الجهاز الشخصي الموثوق</strong>
-              <span class="muted" style="display:block;font-size:0.68rem;margin-top:1px;">الوضع الافتراضي ينهي الجلسة عند إغلاق المتصفح لحماية خصوصيتك على الأجهزة المشتركة.</span>
-            </span>
-          </label>
-          <button id="btnOpenJoinModal" type="button" class="btn-amber hidden" style="width:100%;min-height:48px;">
-            🤝 الانضمام لفريق بكود دعوة
-          </button>
-          <button id="btnSignOutPending" type="button" class="btn-rose hidden" style="width:100%;min-height:46px;">
-            تبديل الحساب / تسجيل الخروج
-          </button>
-        </div>
 
-        <div class="login-divider">
-          <span id="loginDividerText">أو جرّب التطبيق بدون حساب (محلي على جهازك فقط)</span>
-        </div>
+              <!-- Original Maydan Golden Poster — Preserved 100% Intact -->
+              <div id="loginLogoBox" class="login-emblem">
+                <img src="/assets/midan-crest.webp" alt="شعار ميدان 6v6 — MIDAN" class="login-crest-img" width="204" height="204" onerror="if(!this.dataset.pngTried){this.dataset.pngTried='1';this.src='/assets/midan-crest.png';return;}this.onerror=null;this.src='data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20128%20128%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23F2D675%22%2F%3E%3Cstop%20offset%3D%2255%25%22%20stop-color%3D%22%23D4AF37%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%238A6D1C%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Cpath%20d%3D%22M64%206L114%2022V66C114%2096%2088%20114%2064%20122C40%20114%2014%2096%2014%2066V22L64%206Z%22%20fill%3D%22%23090A0C%22%20stroke%3D%22url(%23g)%22%20stroke-width%3D%225%22%2F%3E%3Cpath%20d%3D%22M36%2052L46%2036L64%2048L82%2036L92%2052L86%2070H42L36%2052Z%22%20fill%3D%22url(%23g)%22%2F%3E%3Ctext%20x%3D%2264%22%20y%3D%2298%22%20text-anchor%3D%22middle%22%20fill%3D%22%23F2D675%22%20font-family%3D%22sans-serif%22%20font-weight%3D%22900%22%20font-size%3D%2220%22%3E6v6%3C%2Ftext%3E%3C%2Fsvg%3E';" />
+              </div>
+            </div>
 
-        <button id="btnEnterDemo" type="button" class="btn-demo-royal">
-          <span aria-hidden="true">🎮</span>
-          <span id="btnEnterDemoLabel">الوضع التجريبي المحلي (على جهازك فقط)</span>
-        </button>
-        <div class="muted" style="font-size:0.71rem;margin-top:6px;text-align:center;">
-          ⚠️ الدعوات والفرق الجماعية المباشرة تتطلب تسجيل الدخول بحساب Google
-        </div>
+            <div class="login-hero-copy">
+              <div id="loginAppSub" class="login-kicker">ميدان 6v6 • النسخة الملكية</div>
+              <h1 id="loginTeamTitle" class="login-title">فريق السداسي (6 ضد 6)</h1>
+              <p id="loginSubtitle" class="login-sub">سجّل دخولك بحساب Google لإنشاء فريقك أو الانضمام لأصدقائك واللعب الجماعي المباشر مع حفظ سحابي</p>
+            </div>
 
-        <div id="loginFootNote" class="login-foot-note">مزامنة سحابية محمية • درع ميدان وتكتيك السداسي</div>
-        <div style="margin-top:8px;text-align:center;">
-          <button id="btnLoginOpenLegal" type="button" class="icon-btn" style="min-height:34px;padding:4px 12px;font-size:0.72rem;border-color:rgba(250,204,21,0.22);color:#cbd5e1;">
-            🔒 سياسة الخصوصية والشروط والدعم
-          </button>
+            <div class="login-hero-meta" aria-hidden="true">
+              <span>تشكيلة 6 ضد 6</span>
+              <span>·</span>
+              <span>مختبر التكتيك</span>
+              <span>·</span>
+              <span>مزامنة مباشرة</span>
+            </div>
+          </div>
+
+          <!-- Auth Control Panel (Usable Immediately, Zero Blocking) -->
+          <div class="login-auth-panel">
+            <!-- Non-blocking Invite Hex Contract Seal (visible ONLY on invite/referral links) -->
+            <button id="inviteHexSeal" type="button" class="invite-hex-seal hidden" hidden data-seal-armed="false" data-seal-progress="0" aria-label="ختم دعوة الفريق السداسي">
+              <span class="invite-hex-seal-emblem" aria-hidden="true">
+                <svg width="34" height="34" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <line class="hex-seal-edge" data-hex-edge="0" x1="18" y1="3" x2="31" y2="10.5"/>
+                  <line class="hex-seal-edge" data-hex-edge="1" x1="31" y1="10.5" x2="31" y2="25.5"/>
+                  <line class="hex-seal-edge" data-hex-edge="2" x1="31" y1="25.5" x2="18" y2="33"/>
+                  <line class="hex-seal-edge" data-hex-edge="3" x1="18" y1="33" x2="5" y2="25.5"/>
+                  <line class="hex-seal-edge" data-hex-edge="4" x1="5" y1="25.5" x2="5" y2="10.5"/>
+                  <line class="hex-seal-edge" data-hex-edge="5" x1="5" y1="10.5" x2="18" y2="3"/>
+                  <polygon points="18,10 25,14 25,22 18,26 11,22 11,14" stroke="rgba(230,199,104,0.34)" stroke-width="1" fill="rgba(212,175,55,0.08)"/>
+                  <circle cx="18" cy="18" r="2.2" fill="#E6C768"/>
+                </svg>
+              </span>
+              <span class="invite-hex-seal-body">
+                <span class="invite-hex-seal-head">
+                  <span data-hex-seal-title>ختم دعوة الفريق السداسي</span>
+                  <span class="invite-hex-seal-code" data-hex-seal-code dir="ltr"></span>
+                </span>
+                <span class="invite-hex-seal-hint" data-hex-seal-hint>اضغط مطوّلاً لتفعيل الختم أو انضم مباشرة بالأسفل</span>
+              </span>
+            </button>
+
+            <!-- Recessed Segmented Auth Mode Control -->
+            <div class="login-seg-tabs" role="tablist" aria-label="طريقة الدخول" data-active-tab="signin">
+              <span class="login-seg-indicator" aria-hidden="true"></span>
+              <button id="loginTabSignIn" type="button" role="tab" aria-selected="true" class="login-seg-tab active">تسجيل الدخول</button>
+              <button id="loginTabSignUp" type="button" role="tab" aria-selected="false" class="login-seg-tab">حساب جديد</button>
+            </div>
+
+            <!-- Contextual New Account Guide (visible on 'حساب جديد' tab) -->
+            <div id="loginSignUpGuide" class="login-signup-guide hidden">
+              <div class="login-guide-step">
+                <span class="login-guide-num">1</span>
+                <span id="loginGuideStep1">سجّل الدخول بحساب Google للعب الجماعي مع الأصدقاء والمزامنة السحابية.</span>
+              </div>
+              <div class="login-guide-step">
+                <span class="login-guide-num">2</span>
+                <span id="loginGuideStep2">يمكنك فوراً إنشاء فريق جديد لأصدقائك أو الانضمام بكود دعوة أو مسح QR.</span>
+              </div>
+            </div>
+
+            <div id="loginInviteNotice" class="login-invite-box hidden"></div>
+            <div id="authStatusBox" class="login-status-box hidden"></div>
+
+            <div id="authActionGroup" class="login-actions">
+              <button id="btnGoogleSignIn" type="button" class="btn-google-royal">
+                <span class="google-g-chip" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.44a5.5 5.5 0 0 1-2.39 3.61v3h3.87c2.26-2.08 3.57-5.15 3.57-8.64z"/>
+                    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.87-3c-1.07.72-2.44 1.15-4.06 1.15-3.12 0-5.77-2.11-6.71-4.95H1.29v3.1A12 12 0 0 0 12 24z"/>
+                    <path fill="#FBBC05" d="M5.29 14.29A7.2 7.2 0 0 1 4.91 12c0-.79.14-1.56.38-2.29v-3.1H1.29A12 12 0 0 0 0 12c0 1.94.46 3.77 1.29 5.39l4-3.1z"/>
+                    <path fill="#EA4335" d="M12 4.76c1.76 0 3.34.61 4.58 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.29 6.61l4 3.1C6.23 6.87 8.88 4.76 12 4.76z"/>
+                  </svg>
+                </span>
+                <span id="btnGoogleSignInLabel" class="btn-google-label"><span class="btn-google-primary">الدخول بحساب Google</span> <span class="btn-google-sub">(للعب الجماعي مع الأصدقاء)</span></span>
+              </button>
+              <label id="authRememberDeviceLabel" for="chkRememberDevice" class="auth-remember-row">
+                <input id="chkRememberDevice" type="checkbox" class="mech-toggle-input" />
+                <span class="auth-remember-copy">
+                  <strong class="auth-remember-title">تذكر تسجيلي على هذا الجهاز الشخصي الموثوق</strong>
+                  <span class="muted auth-remember-desc">الوضع الافتراضي ينهي الجلسة عند إغلاق المتصفح لحماية خصوصيتك على الأجهزة المشتركة.</span>
+                </span>
+              </label>
+              <button id="btnOpenJoinModal" type="button" class="btn-amber hidden" style="width:100%;min-height:48px;">
+                🤝 الانضمام لفريق بكود دعوة
+              </button>
+              <button id="btnSignOutPending" type="button" class="btn-rose hidden" style="width:100%;min-height:46px;">
+                تبديل الحساب / تسجيل الخروج
+              </button>
+            </div>
+
+            <div class="login-divider">
+              <span id="loginDividerText">أو جرّب التطبيق بدون حساب (محلي على جهازك فقط)</span>
+            </div>
+
+            <button id="btnEnterDemo" type="button" class="btn-demo-royal">
+              <span data-hex-icon="match" data-hex-size="sm"></span>
+              <span id="btnEnterDemoLabel">الوضع التجريبي المحلي (على جهازك فقط)</span>
+            </button>
+            <div class="login-demo-note">
+              الدعوات والفرق الجماعية المباشرة تتطلب تسجيل الدخول بحساب Google
+            </div>
+
+            <div id="loginFootNote" class="login-foot-note">مزامنة سحابية محمية • درع ميدان وتكتيك السداسي</div>
+            <div style="margin-top:8px;text-align:center;">
+              <button id="btnLoginOpenLegal" type="button" class="login-legal-btn">
+                سياسة الخصوصية والشروط والدعم
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -5081,11 +5519,7 @@
         </div>
         <div class="row" style="gap:5px;flex-wrap:nowrap;">
           <button id="btnMemberShareInvite" type="button" class="hdr-invite-pill" title="دعوة أصدقاء والانضمام" aria-label="دعوة أصدقاء والانضمام">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-              <polyline points="16 6 12 2 8 6"/>
-              <line x1="12" y1="2" x2="12" y2="15"/>
-            </svg>
+            <span data-hex-icon="invite" data-hex-size="sm"></span>
             <span>دعوة</span>
           </button>
           <button id="btnNotifBell" type="button" class="hdr-btn-labeled bell-btn" title="مركز التنبيهات" aria-label="التنبيهات">
@@ -5134,78 +5568,110 @@
 
       <!-- 0. LIVE TEAM COMMAND CENTER (MULTIPLAYER HOME TAB) -->
       <section id="tab-team" class="tab-panel">
-        <div class="card" style="border-color:rgba(250,204,21,0.36);background:linear-gradient(145deg,rgba(250,204,21,0.08) 0%,rgba(16,17,24,0.97) 100%);">
-          <div class="row between" style="gap:10px;margin-bottom:10px;">
-            <div>
+        <div class="cmd-shell-card">
+          <!-- Level 1: Team Identity & Primary Utility Controls -->
+          <div class="cmd-identity-row">
+            <div style="min-width:0;flex:1 1 200px;">
               <div class="row" style="gap:7px;">
-                <h2 id="teamHubTitle" style="margin:0;">👥 فريق السداسي</h2>
-                <span id="teamHubCountBadge" class="badge">0 لاعب</span>
-                <span id="teamHubModeBadge" class="badge" style="background:rgba(34,197,94,0.14);color:#86efac;">جو أصدقاء</span>
+                <h2 id="teamHubTitle" class="cmd-team-title">
+                  <span data-hex-icon="team" data-hex-size="md"></span>
+                  <span id="teamHubTitleText">فريق السداسي</span>
+                </h2>
+                <span id="teamHubCountBadge" class="badge tabular-nums">0 لاعب</span>
+                <span id="teamHubModeBadge" class="badge" style="background:rgba(34,197,94,0.13);color:#86efac;">جو أصدقاء</span>
               </div>
-              <p id="teamHubSubtitle" class="muted" style="margin-top:4px;">قائمة الفريق المباشرة • تحديث فوري للجميع</p>
+              <p id="teamHubSubtitle" class="cmd-meta-line">قائمة الفريق المباشرة • تحديث فوري للجميع</p>
             </div>
             <div class="row" style="gap:6px;">
-              <button id="btnTeamHubInvite" type="button" class="btn-primary" style="min-height:42px;padding:6px 12px;font-size:0.78rem;">💬 دعوة أصدقاء + QR</button>
-              <button id="btnOpenTeamSettings" type="button" class="hdr-btn-labeled" style="min-height:42px;">⚙️ إعدادات الفريق</button>
+              <button id="btnTeamHubInvite" type="button" class="btn-primary" style="min-height:42px;padding:6px 12px;font-size:0.78rem;display:inline-flex;align-items:center;gap:6px;">
+                <span data-hex-icon="invite" data-hex-size="sm"></span>
+                <span>دعوة أصدقاء + QR</span>
+              </button>
+              <button id="btnOpenTeamSettings" type="button" class="hdr-btn-labeled" style="min-height:42px;display:inline-flex;align-items:center;gap:6px;">
+                <span data-hex-icon="settings" data-hex-size="sm"></span>
+                <span>إعدادات الفريق</span>
+              </button>
             </div>
           </div>
 
-          <!-- Upcoming Match Spotlight Banner -->
+          <!-- Level 2: Upcoming Match Spotlight Strip -->
           <div id="teamHubMatchBanner" class="cmd-match-banner">
             <div style="min-width:0;flex:1 1 200px;">
-              <div id="teamHubMatchTitle" style="font-weight:900;font-size:0.9rem;color:#FEF08A;">⚽ المباراة القادمة</div>
+              <div id="teamHubMatchTitle" style="font-weight:800;font-size:0.9rem;color:var(--gold-highlight);">المباراة القادمة</div>
               <div id="teamHubMatchMeta" class="muted" style="font-size:0.75rem;margin-top:2px;">جاري تحميل موعد المباراة القادمة...</div>
             </div>
-            <button id="btnTeamHubScheduleMatch" type="button" class="icon-btn" style="min-height:38px;font-size:0.74rem;white-space:nowrap;">📅 إدارة الموعد والقطّة</button>
+            <button id="btnTeamHubScheduleMatch" type="button" class="icon-btn" style="min-height:38px;font-size:0.74rem;white-space:nowrap;">إدارة الموعد والقطّة</button>
           </div>
 
-          <div class="grid-3" style="gap:8px;margin-bottom:10px;">
-            <div class="item-box" style="margin:0;text-align:center;">
-              <div class="muted" style="font-size:0.7rem;">مؤكّدون لهذه المباراة</div>
-              <div id="teamHubConfirmedKpi" style="font-size:1.15rem;font-weight:900;color:#22c55e;">0</div>
+          <!-- Level 3: Live Hex-6 Attendance Telemetry & Compact KPIs -->
+          <div class="cmd-telemetry-grid">
+            <div id="teamHexAttendancePanel" class="hex-att-panel" aria-live="polite">
+              <div class="hex-att-gauge-wrap">
+                <div id="teamHexAttendanceSvgWrap" aria-hidden="false"></div>
+                <div class="hex-att-center">
+                  <span id="teamHexAttendanceFraction" class="hex-att-fraction tabular-nums" dir="ltr">0/0</span>
+                  <span id="teamHexAttendancePct" class="hex-att-pct tabular-nums" dir="ltr">0%</span>
+                </div>
+              </div>
+              <div class="hex-att-copy">
+                <div class="hex-att-kicker">مؤشر الحضور السداسي للمباراة</div>
+                <div id="teamHexAttendanceStatus" class="hex-att-status">بانتظار تأكيدات اللاعبين</div>
+                <div id="teamHexAttendanceSub" class="hex-att-sub">
+                  <span>مؤكّدون: <strong id="teamHubConfirmedKpi" class="tabular-nums" style="color:var(--status-ok);">0</strong></span>
+                  <span class="cmd-meta-sep">•</span>
+                  <span id="teamHexSegmentsHint" class="tabular-nums">0/6 أضلاع مضاءة</span>
+                </div>
+              </div>
             </div>
-            <div class="item-box" style="margin:0;text-align:center;">
-              <div class="muted" style="font-size:0.7rem;">قطّة الفرد</div>
-              <div id="teamHubShareKpi" style="font-size:1.05rem;font-weight:900;color:var(--primary);">مجاني</div>
-            </div>
-            <div class="item-box" style="margin:0;text-align:center;">
-              <div class="muted" style="font-size:0.7rem;">موعد المباراة</div>
-              <div id="teamHubNextMatchKpi" style="font-size:0.84rem;font-weight:800;color:#f8fafc;">غير محدّد</div>
+
+            <div class="cmd-kpi-pair">
+              <div class="cmd-kpi-cell">
+                <div class="cmd-kpi-lbl">قطّة الفرد</div>
+                <div id="teamHubShareKpi" class="cmd-kpi-val" style="color:var(--gold-champagne);">مجاني</div>
+              </div>
+              <div class="cmd-kpi-cell">
+                <div class="cmd-kpi-lbl">موعد المباراة</div>
+                <div id="teamHubNextMatchKpi" class="cmd-kpi-val" style="font-size:0.84rem;">غير محدّد</div>
+              </div>
             </div>
           </div>
 
+          <!-- Fast One-Tap Daily Attendance (Zero Friction, Never Slider) -->
           <div id="teamQuickAttendRow" class="row between" style="gap:8px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--border-subtle);">
             <span class="muted" style="font-size:0.78rem;font-weight:700;">حضورك للمباراة القادمة:</span>
             <div class="row" style="gap:6px;flex-wrap:wrap;">
               <button type="button" data-quick-attend="جاي" class="btn-emerald cmd-attend-btn">✅ جاي</button>
               <button type="button" data-quick-attend="محتمل" class="btn-amber cmd-attend-btn">🤔 محتمل</button>
               <button type="button" data-quick-attend="معتذر" class="btn-rose cmd-attend-btn">❌ معتذر</button>
-              <button id="btnTeamHubManagePitch" type="button" class="icon-btn" style="min-height:42px;font-size:0.74rem;">💳 تفاصيل القطّة</button>
+              <button id="btnTeamHubManagePitch" type="button" class="icon-btn" style="min-height:42px;font-size:0.74rem;">تفاصيل القطّة</button>
             </div>
           </div>
         </div>
 
-        <!-- Unified Smart Action Card (Single Source of Truth via computeNextActionState) -->
-        <div id="nextActionCard" class="card" style="margin-bottom:12px;padding:12px 14px;border-color:rgba(250,204,21,0.44);background:linear-gradient(135deg,rgba(250,204,21,0.1) 0%,rgba(17,18,24,0.97) 100%);">
+        <!-- Level 4: Unified Smart Action Card (Single Focal Priority via computeNextActionState) -->
+        <div id="nextActionCard" class="card cmd-primary-action">
           <div class="row between" style="gap:10px;">
             <div style="flex:1;min-width:180px;">
               <div class="row" style="gap:6px;margin-bottom:3px;">
-                <span class="badge" style="font-size:0.68rem;background:rgba(250,204,21,0.18);color:var(--primary);">🎯 شو المطلوب منك الآن؟</span>
+                <span class="cmd-action-kicker">
+                  <span data-hex-icon="readiness" data-hex-size="sm"></span>
+                  <span>شو المطلوب منك الآن؟</span>
+                </span>
                 <span id="nextActionTag" class="muted" style="font-size:0.7rem;">خطوة واحدة سريعة</span>
               </div>
-              <strong id="nextActionTitle" style="display:block;font-size:0.92rem;color:#fff;">أكّد حضورك للمباراة القادمة</strong>
+              <strong id="nextActionTitle" style="display:block;font-size:0.94rem;color:var(--ink-primary);">أكّد حضورك للمباراة القادمة</strong>
               <p id="nextActionDesc" class="muted" style="font-size:0.76rem;margin-top:2px;">حدد موقفك بلمسة واحدة حتى تكتمل تشكيلة السداسي.</p>
             </div>
-            <button id="btnNextActionCta" type="button" class="btn-primary" style="width:auto;min-height:42px;white-space:nowrap;padding:8px 14px;font-size:0.78rem;">✅ سجّل حضورك</button>
+            <button id="btnNextActionCta" type="button" class="btn-primary" style="width:auto;min-height:42px;white-space:nowrap;padding:8px 14px;font-size:0.78rem;">سجّل حضورك</button>
           </div>
         </div>
 
-        <!-- Quick Command Shortcuts -->
+        <!-- Level 5: Quick Command Shortcuts (HEX-6 Instrument Icons) -->
         <div class="cmd-quick-grid" role="group" aria-label="اختصارات مركز التحكم">
-          <button type="button" data-cmd-tab="tactics" class="cmd-quick-btn"><span>📋</span><span>التشكيلة والتكتيك</span></button>
-          <button type="button" data-cmd-tab="ready" class="cmd-quick-btn"><span>🚦</span><span>الجاهزية والقطّة</span></button>
-          <button type="button" data-cmd-tab="live" class="cmd-quick-btn"><span>⚽</span><span>تسجيل مباراة</span></button>
-          <button type="button" data-cmd-tab="stats" class="cmd-quick-btn"><span>📊</span><span>الإحصائيات</span></button>
+          <button type="button" data-cmd-tab="tactics" class="cmd-quick-btn"><span data-hex-icon="tactics" data-hex-size="md"></span><span>التشكيلة والتكتيك</span></button>
+          <button type="button" data-cmd-tab="ready" class="cmd-quick-btn"><span data-hex-icon="readiness" data-hex-size="md"></span><span>الجاهزية والقطّة</span></button>
+          <button type="button" data-cmd-tab="live" class="cmd-quick-btn"><span data-hex-icon="match" data-hex-size="md"></span><span>تسجيل مباراة</span></button>
+          <button type="button" data-cmd-tab="stats" class="cmd-quick-btn"><span data-hex-icon="stats" data-hex-size="md"></span><span>الإحصائيات</span></button>
         </div>
 
         <div id="teamPendingCard" class="pending-status-card hidden" style="margin-bottom:12px;">
@@ -5848,6 +6314,11 @@
                 <span>تكبير الاستوديو</span>
               </button>
 
+              <button type="button" id="btnTacXray" class="tac-xray-btn" aria-pressed="false" title="تحليل السيطرة وظلال التغطية وخطوط التمرير">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="3" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="3" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="21" y2="12"/></svg>
+                <span>أشعة X</span>
+              </button>
+
               <select id="tacFormation" class="tac-formation-select" aria-label="اختيار الخطة">
                 <option value="2-2-1">&#x200E;&#x2066;2-2-1&#x2069;&#x200E; المتوازنة</option>
                 <option value="1-2-2">&#x200E;&#x2066;1-2-2&#x2069;&#x200E; الهجومية</option>
@@ -5876,6 +6347,36 @@
                     <span>بوستر</span>
                   </button>
                 </div>
+              </div>
+            </div>
+
+            <!-- 2.5) Always-Visible 5-System Tactical Intelligence Lab Dock -->
+            <div id="tacLabDock" class="tac-lab-dock" role="region" aria-label="مختبر الذكاء التكتيكي — المنظومات الخمس">
+              <div class="tac-lab-dock-head">
+                <span class="tac-lab-dock-title">🧠 مختبر الذكاء التكتيكي</span>
+                <span class="tac-lab-dock-pill">5 منظومات محلية 100%</span>
+              </div>
+              <div class="tac-lab-dock-grid">
+                <button type="button" data-lab-quick="xray" class="tac-lab-dock-btn" aria-pressed="false" title="أشعة X للسيطرة وظلال التغطية وخطوط التمرير">
+                  <strong>🔬 أشعة X</strong>
+                  <span>السيطرة والتمرير</span>
+                </button>
+                <button type="button" data-lab-quick="radar" class="tac-lab-dock-btn" title="رادار الزاوية العمياء — تدريب المسح البصري السريع">
+                  <strong>👁️ رادار العمياء</strong>
+                  <span>مسح وقرار سريع</span>
+                </button>
+                <button type="button" data-lab-quick="ghost" class="tac-lab-dock-btn" title="خطط الشبح — مسرح تفاعلي وتحدّي الإيقاف ورابط بدون دخول">
+                  <strong>👻 خطط الشبح</strong>
+                  <span>مسرح وتحدّي</span>
+                </button>
+                <button type="button" data-lab-quick="duel" class="tac-lab-dock-btn" title="مواجهة 1 ضد 1 الذكية — مدافع متكيّف ضد التكرار">
+                  <strong>⚔️ مواجهة 1v1</strong>
+                  <span>مدافع متكيّف</span>
+                </button>
+                <button type="button" data-lab-quick="pitwall" class="tac-lab-dock-btn" title="غرفة الدكة (Pit-Wall) — تدوير عادل ومنحنى إجهاد ومؤقّت أوفلاين">
+                  <strong>⏱️ غرفة الدكة</strong>
+                  <span>تدوير Pit-Wall</span>
+                </button>
               </div>
             </div>
 
@@ -5913,6 +6414,7 @@
               <div id="tacPitchStage" class="tac-pitch-stage pitch-25d">
                 <div class="tac-pitch-inner">
                   <svg id="tacPitchSvg" class="tac-svg" viewBox="0 0 360 520" role="img" aria-label="ملعب الاستوديو التكتيكي التفاعلي"></svg>
+                  <canvas id="tacXrayCanvas" class="xray-overlay-canvas hidden" aria-hidden="true"></canvas>
                 </div>
                 <div id="tacPitchCallout" class="tac-pitch-callout hidden" role="status" aria-live="polite">
                   <div class="tac-pitch-callout-head">
@@ -5924,6 +6426,8 @@
                   <div id="tacCalloutBody" class="tac-pitch-callout-body"></div>
                 </div>
               </div>
+              <!-- Feature 01: Dominance X-Ray Evaluation & Passing Lanes Readout (hidden when X-Ray is off) -->
+              <div id="tacXrayHud" class="xray-hud-panel hidden" role="region" aria-label="تحليل أشعة X التكتيكي"></div>
             </div>
 
             <!-- TIMELINE DOCK (OVERLAPPING PITCH BOTTOM) + GOLDEN SCRUBBER + 2-COL YOUR ROLE CARD -->
@@ -6033,6 +6537,15 @@
                   <button type="button" id="btnTacRecSave" class="btn-amber" style="white-space:nowrap;">💾 حفظ</button>
                   <button type="button" id="btnTacRecClear" class="btn-rose" title="مسح المسودة">✕</button>
                 </div>
+                <!-- Feature 03: Ghost Play Engine (Time-to-Intercept, Ghost Link, Challenge Mode, Local WebM Export) -->
+                <div style="padding:8px;margin-bottom:8px;border-radius:10px;background:rgba(250,204,21,0.06);border:1px solid rgba(250,204,21,0.28);">
+                  <div id="tacGhostInterceptInfo" class="muted" style="font-size:0.74rem;margin-bottom:6px;color:#fde047;"></div>
+                  <div class="grid-3" style="gap:5px;">
+                    <button type="button" id="btnTacGhostLink" class="icon-btn" style="min-height:34px;font-size:0.73rem;">🔗 رابط الشبح</button>
+                    <button type="button" id="btnTacGhostChallenge" class="icon-btn" style="min-height:34px;font-size:0.73rem;">🛡️ تحدّي الإيقاف</button>
+                    <button type="button" id="btnTacGhostWebm" class="icon-btn" style="min-height:34px;font-size:0.73rem;">🎬 تصدير WebM</button>
+                  </div>
+                </div>
                 <div id="tacSavedCustomPlans"></div>
               </div>
             </div>
@@ -6090,10 +6603,15 @@
                   <button id="btnTacUndoPublish" type="button" class="icon-btn hidden" style="min-height:32px;padding:4px 10px;font-size:0.74rem;border-color:rgba(245,158,11,0.45);color:#FDE68A;">↩️ تراجع عن النشر</button>
                 </div>
               </div>
+              <!-- Chrono Detent Lock: Tactile Swiss Mechanical Slider for Official Lineup Publish -->
+              <div id="tacChronoPublishMount" class="hidden" style="margin-bottom:6px;"></div>
               <div class="tac-mp-actions">
-                <button id="btnPublishLineupTeam" type="button" class="btn-primary" style="min-height:40px;font-size:0.8rem;">📢 نشر التشكيلة للفريق</button>
-                <button id="btnTacShareWhatsApp" type="button" class="btn-emerald" style="min-height:40px;font-size:0.8rem;">💬 مشاركة على واتساب</button>
-                <button id="btnTacAutoSplitConfirmed" type="button" class="btn-amber" style="grid-column:span 2;min-height:40px;font-size:0.8rem;">⚖️ توزيع الحاضرين لفريقين متكافئين تلقائياً</button>
+                <button id="btnPublishLineupTeam" type="button" class="chrono-fallback-btn" style="min-height:42px;font-size:0.78rem;display:inline-flex;align-items:center;justify-content:center;gap:6px;" title="بديل سريع للوحة المفاتيح وقارئات الشاشة لنشر التشكيلة">
+                  <span data-hex-icon="lineup" data-hex-size="sm"></span>
+                  <span>نشر التشكيلة (زر بديل)</span>
+                </button>
+                <button id="btnTacShareWhatsApp" type="button" class="btn-emerald" style="min-height:42px;font-size:0.8rem;">💬 مشاركة على واتساب</button>
+                <button id="btnTacAutoSplitConfirmed" type="button" class="btn-amber" style="grid-column:span 2;min-height:42px;font-size:0.8rem;">⚖️ توزيع الحاضرين لفريقين متكافئين تلقائياً</button>
               </div>
               <div id="tacAutoSplitBox" class="hidden" style="margin-top:4px;"></div>
             </div>
@@ -6101,8 +6619,42 @@
             <button id="btnSaveTactics" type="button" class="btn-primary hidden" style="width:100%;margin-top:4px;">💾 حفظ التشكيلة الرسمية للفريق (<bdi dir="ltr">6v6</bdi>)</button>
           </div>
 
-          <!-- RIGHT COLUMN: COLLAPSIBLE 10 ANIMATED SCENARIOS + CAPTAIN TACTICAL TOOLS -->
+          <!-- RIGHT COLUMN: TACTICAL INTELLIGENCE LAB + 10 ANIMATED SCENARIOS + CAPTAIN TOOLS -->
           <div style="display:flex;flex-direction:column;gap:12px;">
+            <details id="tacLabAccordion" class="tac-side-accordion" open>
+              <summary>
+                <span class="row" style="gap:8px;flex-wrap:wrap;">
+                  <span>🧠 مختبر الذكاء التكتيكي</span>
+                  <span class="badge">محلي 100%</span>
+                </span>
+                <span class="tac-acc-chev" aria-hidden="true">▾</span>
+              </summary>
+              <div class="tac-side-accordion-body">
+                <div class="tac-lab-entry-grid">
+                  <button type="button" id="btnOpenXrayFromLab" class="tac-lab-launch-btn" style="grid-column:span 2;" aria-pressed="false">
+                    <strong>🔬 أشعة X للسيطرة (Dominance X-Ray)</strong>
+                    <span>تغطية المساحات + ظلال التغطية + خطوط التمرير + النتيجة التكتيكية</span>
+                  </button>
+                  <button type="button" id="btnOpenBlindSideRadar" class="tac-lab-launch-btn">
+                    <strong>👁️ رادار الزاوية العمياء</strong>
+                    <span>مسح سريع وقرار تحت الضغط + صوت مكاني</span>
+                  </button>
+                  <button type="button" id="btnOpenGtoDuel" class="tac-lab-launch-btn">
+                    <strong>⚔️ مواجهة 1 ضد 1 الذكية</strong>
+                    <span>مدافع متكيّف يقيس تكرارك ويطوّر تنويعك</span>
+                  </button>
+                  <button type="button" id="btnOpenGhostTheater" class="tac-lab-launch-btn">
+                    <strong>👻 خطط الشبح والتحدّي</strong>
+                    <span>تحدّي إيقاف الخطة + رابط شبح + WebM</span>
+                  </button>
+                  <button type="button" id="btnOpenPitWallQuick" class="tac-lab-launch-btn">
+                    <strong>⏱️ غرفة الدكة (Pit-Wall)</strong>
+                    <span>تدوير عادل + منحنى إجهاد + مؤقّت أوفلاين</span>
+                  </button>
+                </div>
+              </div>
+            </details>
+
             <details id="tacScenariosAccordion" class="tac-side-accordion" open>
               <summary>
                 <span class="row" style="gap:8px;flex-wrap:wrap;">
@@ -6552,13 +7104,13 @@
 
     </main>
 
-    <!-- Fixed Unified 5-Tab Bottom Navigation Bar -->
+    <!-- Fixed Unified 5-Tab Bottom Navigation Bar (HEX-6 Instrument Icons) -->
     <nav class="bottom-nav" aria-label="التنقل الرئيسي">
-      <button type="button" data-btab="team" class="bnav-btn active"><span class="bnav-ico">👥</span><span>الفريق</span></button>
-      <button type="button" data-btab="tactics" class="bnav-btn"><span class="bnav-ico">📋</span><span>التشكيلة</span></button>
-      <button type="button" data-btab="live" class="bnav-btn"><span class="bnav-ico">⚽</span><span>المباراة</span></button>
-      <button type="button" data-btab="stats" class="bnav-btn"><span class="bnav-ico">📊</span><span>الإحصائيات</span></button>
-      <button type="button" data-btab="fifa" class="bnav-btn"><span class="bnav-ico">🪪</span><span>بطاقتي</span></button>
+      <button type="button" data-btab="team" class="bnav-btn active"><span class="bnav-ico" data-hex-icon="team" data-hex-size="lg"></span><span>الفريق</span></button>
+      <button type="button" data-btab="tactics" class="bnav-btn"><span class="bnav-ico" data-hex-icon="lineup" data-hex-size="lg"></span><span>التشكيلة</span></button>
+      <button type="button" data-btab="live" class="bnav-btn"><span class="bnav-ico" data-hex-icon="match" data-hex-size="lg"></span><span>المباراة</span></button>
+      <button type="button" data-btab="stats" class="bnav-btn"><span class="bnav-ico" data-hex-icon="stats" data-hex-size="lg"></span><span>الإحصائيات</span></button>
+      <button type="button" data-btab="fifa" class="bnav-btn"><span class="bnav-ico" data-hex-icon="profile" data-hex-size="lg"></span><span>بطاقتي</span></button>
     </nav>
   </div>
 
@@ -7201,6 +7753,34 @@
     </div>
   </div>
 
+  <!-- Logout Confirmation Dialog (Protects #btnLogout and #btnSignOutPending) -->
+  <div
+    id="logoutConfirmModal"
+    class="modal-bg logout-confirm-overlay hidden"
+    role="alertdialog"
+    aria-modal="true"
+    aria-hidden="true"
+    aria-labelledby="logoutConfirmTitle"
+    aria-describedby="logoutConfirmMessage"
+    data-logout-state="closed"
+  >
+    <div class="card modal-box logout-confirm-box">
+      <div class="logout-confirm-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" y1="12" x2="9" y2="12" />
+        </svg>
+      </div>
+      <h3 id="logoutConfirmTitle" class="logout-confirm-title">تسجيل الخروج</h3>
+      <p id="logoutConfirmMessage" class="logout-confirm-message">هل أنت متأكد أنك تريد تسجيل الخروج من حسابك؟</p>
+      <div class="logout-confirm-actions">
+        <button id="btnConfirmLogout" type="button" class="logout-confirm-btn-danger">نعم، تسجيل الخروج</button>
+        <button id="btnCancelLogout" type="button" class="logout-confirm-btn-cancel">إلغاء</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 3-Step Interactive Onboarding Tour Modal with Live Shield Preview -->
   <div id="tourModal" class="modal-bg hidden">
     <div class="card modal-box" style="max-width:440px;padding:14px;">
@@ -7419,6 +7999,10 @@
       </div>
 
       <div class="tac-pro-top-right">
+        <button type="button" id="btnTacProXray" class="tac-pro-gold-pill" aria-pressed="false" title="تبديل طبقة أشعة X للسيطرة والمساحات" dir="rtl">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
+          <span>أشعة X</span>
+        </button>
         <button type="button" id="btnTacProSave" class="tac-pro-gold-pill" title="حفظ الخطة الحالية في مكتبة الخطط" dir="rtl">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           <span class="tac-pro-save-lbl">حفظ الخطة</span>
@@ -7465,6 +8049,10 @@
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polygon points="12 8 13.4 10.8 16.5 11.2 14.2 13.4 14.8 16.5 12 15 9.2 16.5 9.8 13.4 7.5 11.2 10.6 10.8 12 8"/></svg>
         <span>أدوات الكابتن</span>
       </button>
+      <button type="button" data-pro-section="lab" class="tac-pro-sec-tab" role="tab" aria-selected="false" dir="rtl">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="3" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="3" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="21" y2="12"/></svg>
+        <span>المختبر التكتيكي</span>
+      </button>
     </nav>
 
     <!-- 3) 3-Column Stadium Workspace -->
@@ -7499,6 +8087,7 @@
         <div id="tacProLiveCaption" class="tac-pro-live-caption hidden"></div>
         <div id="tacProPitchCanvasWrap" class="tac-pro-pitch-wrap" data-tool="pointer">
           <svg id="tacProPitchSvg" class="tac-pro-pitch-svg" viewBox="0 0 860 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ملعب استوديو الخطط التكتيكية الأفقي"></svg>
+          <canvas id="tacProXrayCanvas" class="xray-overlay-canvas hidden" aria-hidden="true"></canvas>
         </div>
         <div id="tacProNativeHost" class="tac-pro-native-host hidden"></div>
       </main>
@@ -7671,6 +8260,7 @@
   <script type="module" src="/src/multiTeamEngine.ts"></script>
   <script type="module" src="/src/backend.ts"></script>
   <script type="module" src="/src/preMatchHub.ts"></script>
+  <script type="module" src="/src/ui/industrialDesign.ts"></script>
   <script type="module">
     (function () {
       const lazyModules = {};
@@ -8458,7 +9048,18 @@
         setTxt('loginTabSignUp', c.tabSignup);
         setTxt('loginGuideStep1', c.guide1);
         setTxt('loginGuideStep2', c.guide2);
-        setTxt('btnGoogleSignInLabel', loginAuthTab === 'signup' ? c.googleSignup : c.googleSignin);
+        const googleLabelEl = document.getElementById('btnGoogleSignInLabel');
+        if (googleLabelEl) {
+          const fullText = loginAuthTab === 'signup' ? c.googleSignup : c.googleSignin;
+          const parenIdx = fullText.indexOf('(');
+          if (parenIdx > 0) {
+            const mainPart = fullText.slice(0, parenIdx).trim();
+            const subPart = fullText.slice(parenIdx).trim();
+            googleLabelEl.innerHTML = `<span class="btn-google-primary">${esc(mainPart)}</span> <span class="btn-google-sub">${esc(subPart)}</span>`;
+          } else {
+            googleLabelEl.textContent = fullText;
+          }
+        }
         setTxt('btnOpenJoinModal', c.openJoin);
         setTxt('btnSignOutPending', c.signOut);
         setTxt('loginDividerText', c.divider);
@@ -8476,6 +9077,10 @@
           enBtn.setAttribute('aria-pressed', loginLang === 'en' ? 'true' : 'false');
         }
 
+        const segContainer = document.querySelector('#loginScreen .login-seg-tabs');
+        if (segContainer) {
+          segContainer.setAttribute('data-active-tab', loginAuthTab === 'signup' ? 'signup' : 'signin');
+        }
         const tabIn = document.getElementById('loginTabSignIn');
         const tabUp = document.getElementById('loginTabSignUp');
         const guide = document.getElementById('loginSignUpGuide');
@@ -8500,6 +9105,22 @@
           } else {
             invNotice.classList.add('hidden');
           }
+        }
+        // Check local in-memory match schedule ONLY (zero Firebase reads) for <3h floodlight ambience
+        try {
+          let nextMs = null;
+          if (db && db.nextMatch && db.nextMatch.date) {
+            const parsed = Date.parse(db.nextMatch.date + (db.nextMatch.time ? 'T' + db.nextMatch.time : 'T20:00'));
+            if (Number.isFinite(parsed)) nextMs = parsed;
+          }
+          window.__maydanNextMatchMs = nextMs;
+        } catch (e) {}
+        if (window.MaydanDesign && window.MaydanDesign.tunnelEntrance) {
+          window.MaydanDesign.tunnelEntrance.syncInviteSeal(
+            (urlCode && (lastLoginMode === 'signed_out' || lastLoginMode === 'needs_join')) ? urlCode : ''
+          );
+          window.MaydanDesign.tunnelEntrance.syncUpcomingMatchFloodlights();
+          window.MaydanDesign.tunnelEntrance.syncLabels();
         }
       }
 
@@ -8558,6 +9179,9 @@
         }
 
         syncLoginCopy();
+        if (window.MaydanDesign && window.MaydanDesign.tunnelEntrance) {
+          window.MaydanDesign.tunnelEntrance.onLoginVisible();
+        }
       }
 
       function isVerifiedCaptain() {
@@ -8876,12 +9500,17 @@
         const meta = getActiveTeamMeta();
         const players = Array.isArray(db.players) ? db.players : [];
         const titleEl = document.getElementById('teamHubTitle');
+        const titleTextEl = document.getElementById('teamHubTitleText');
         const countEl = document.getElementById('teamHubCountBadge');
         const modeEl = document.getElementById('teamHubModeBadge');
         const subEl = document.getElementById('teamHubSubtitle');
-        if (titleEl) titleEl.textContent = `👥 ${meta.teamName}`;
+        if (titleTextEl) {
+          titleTextEl.textContent = meta.teamName;
+        } else if (titleEl) {
+          titleEl.textContent = meta.teamName;
+        }
         if (countEl) countEl.textContent = `${players.length} لاعب`;
-        if (modeEl) modeEl.textContent = meta.lineupPermission === 'all' ? '🤝 جو أصدقاء' : '👑 تنظيم الكابتن';
+        if (modeEl) modeEl.textContent = meta.lineupPermission === 'all' ? 'جو أصدقاء' : 'تنظيم الكابتن';
         if (subEl) {
           subEl.textContent = isFirebaseMode
             ? 'فريق جماعي مباشر عبر السحابة • التحديث فوري للجميع'
@@ -8908,12 +9537,12 @@
         const matchBtnEl = document.getElementById('btnTeamHubScheduleMatch');
         if (matchTitleEl && matchMetaEl) {
           if (hasScheduledMatch) {
-            matchTitleEl.textContent = `⚽ ${ps.title || 'مباراة السداسي القادمة'}`;
-            const venueTxt = ps.venue ? ` • 🏟️ ${ps.venue}` : '';
-            matchMetaEl.textContent = `📅 ${matchDate} • ⏰ ${ps.matchTime || '20:30'}${venueTxt}`;
-            if (matchBtnEl) matchBtnEl.textContent = '📅 إدارة الموعد والقطّة';
+            matchTitleEl.textContent = ps.title || 'مباراة السداسي القادمة';
+            const venueTxt = ps.venue ? ` • ${ps.venue}` : '';
+            matchMetaEl.textContent = `${matchDate} • ${ps.matchTime || '20:30'}${venueTxt}`;
+            if (matchBtnEl) matchBtnEl.textContent = 'إدارة الموعد والقطّة';
           } else {
-            matchTitleEl.textContent = '📅 لم يُحدَّد موعد المباراة القادمة بعد';
+            matchTitleEl.textContent = 'لم يُحدَّد موعد المباراة القادمة بعد';
             matchMetaEl.textContent = 'حدّد التاريخ والملعب وتكلفة القطّة ليبدأ الأعضاء بتأكيد حضورهم.';
             if (matchBtnEl) matchBtnEl.textContent = '+ تحديد موعد المباراة';
           }
@@ -8930,6 +9559,23 @@
           btn.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
 
+        // Update Live Hex-6 Attendance Telemetry Gauge (supports any roster size proportionally)
+        const hexSvgWrap = document.getElementById('teamHexAttendanceSvgWrap');
+        const hexFracEl = document.getElementById('teamHexAttendanceFraction');
+        const hexPctEl = document.getElementById('teamHexAttendancePct');
+        const hexStatusEl = document.getElementById('teamHexAttendanceStatus');
+        const hexHintEl = document.getElementById('teamHexSegmentsHint');
+        if (window.MaydanDesign && typeof window.MaydanDesign.computeHexAttendanceSegments === 'function') {
+          const hexMetrics = window.MaydanDesign.computeHexAttendanceSegments(confirmedCount, players.length);
+          if (hexSvgWrap) {
+            hexSvgWrap.innerHTML = window.MaydanDesign.renderLiveHexAttendanceSvg(confirmedCount, players.length);
+          }
+          if (hexFracEl) hexFracEl.textContent = `${hexMetrics.confirmed}/${hexMetrics.total}`;
+          if (hexPctEl) hexPctEl.textContent = `${hexMetrics.pct}%`;
+          if (hexStatusEl) hexStatusEl.textContent = hexMetrics.statusLabelAr;
+          if (hexHintEl) hexHintEl.textContent = `${hexMetrics.litSegments}/6 أضلاع مضاءة`;
+        }
+
         const kpiConf = document.getElementById('teamHubConfirmedKpi');
         const kpiShare = document.getElementById('teamHubShareKpi');
         const kpiNext = document.getElementById('teamHubNextMatchKpi');
@@ -8937,7 +9583,7 @@
         if (kpiShare) kpiShare.textContent = shareText;
         if (kpiNext) {
           kpiNext.innerHTML = hasScheduledMatch
-            ? `<div dir="ltr" style="font-size:0.78rem;line-height:1.25;">${esc(ps.matchDate)}</div><div dir="ltr" style="font-size:0.72rem;color:var(--primary);margin-top:2px;">${esc(ps.matchTime || '20:30')}</div>`
+            ? `<div dir="ltr" style="font-size:0.78rem;line-height:1.25;">${esc(ps.matchDate)}</div><div dir="ltr" style="font-size:0.72rem;color:var(--gold-champagne);margin-top:2px;">${esc(ps.matchTime || '20:30')}</div>`
             : 'غير محدّد';
         }
 
@@ -9073,6 +9719,30 @@
         }
       }
 
+      let chronoPublishSliderInstance = null;
+      function ensureChronoPublishSlider() {
+        const mountEl = document.getElementById('tacChronoPublishMount');
+        if (!mountEl || !window.MaydanDesign || typeof window.MaydanDesign.ChronoLockSlider !== 'function') {
+          return null;
+        }
+        if (!chronoPublishSliderInstance) {
+          chronoPublishSliderInstance = new window.MaydanDesign.ChronoLockSlider({
+            container: mountEl,
+            titleAr: 'قفل الاعتماد الميكانيكي — نشر التشكيلة',
+            idleLabelAr: 'اسحب لنهاية المسار لنشر التشكيلة',
+            draggingLabelAr: 'واصل السحب حتى قفل الاعتماد...',
+            nearLabelAr: 'أفلت الآن لنشر التشكيلة رسمياً',
+            committingLabelAr: 'جاري نشر التشكيلة للفريق...',
+            successLabelAr: 'تم نشر التشكيلة بنجاح ✓',
+            errorLabelAr: 'تعذّر نشر التشكيلة — أعد المحاولة',
+            enableVibration: true,
+            enableSound: false,
+            onConfirm: () => handlePublishCurrentLineup()
+          });
+        }
+        return chronoPublishSliderInstance;
+      }
+
       function renderTacticsMultiplayerBar() {
         const banner = document.getElementById('tacPublishedBanner');
         const metaEl = document.getElementById('tacPublishedMeta');
@@ -9082,8 +9752,13 @@
         const btnSwp = document.getElementById('btnTacVoteSwap');
         const undoBtn = document.getElementById('btnTacUndoPublish');
         const pubBtn = document.getElementById('btnPublishLineupTeam');
+        const chronoMount = document.getElementById('tacChronoPublishMount');
         const canPub = canCurrentUserPublishLineup();
         if (pubBtn) pubBtn.classList.toggle('hidden', !canPub);
+        if (chronoMount) {
+          chronoMount.classList.toggle('hidden', !canPub);
+          if (canPub) ensureChronoPublishSlider();
+        }
         if (!banner || !db) return;
 
         const tac = db.tactics || {};
@@ -9402,8 +10077,12 @@
         syncPlatformOwnerCard();
         syncDemoNoticeBanner();
         renderQuotaEstimator();
-        document.getElementById('loginScreen').classList.add('hidden');
         document.getElementById('appShell').classList.remove('hidden');
+        if (window.MaydanDesign && window.MaydanDesign.tunnelEntrance && typeof window.MaydanDesign.tunnelEntrance.playExitDive === 'function') {
+          window.MaydanDesign.tunnelEntrance.playExitDive();
+        } else {
+          document.getElementById('loginScreen').classList.add('hidden');
+        }
         const isAdmin = isVerifiedCaptain();
         const meta = getActiveTeamMeta();
         const isOrg = isFirebaseMode && !isAdmin && meta.organizerUids.includes(getCurrentUid());
@@ -11555,8 +12234,35 @@
           } catch (e) {}
         }
       }
-      document.getElementById('btnLogout').addEventListener('click', handleSignOut);
-      document.getElementById('btnSignOutPending').addEventListener('click', handleSignOut);
+      function requestSignOutConfirmation(event) {
+        const triggerEl = event && event.currentTarget ? event.currentTarget : null;
+        if (window.MaydanDesign && window.MaydanDesign.logoutConfirm) {
+          window.MaydanDesign.logoutConfirm.open(handleSignOut, triggerEl);
+          return;
+        }
+        // Fallback if module hydration is still pending: keep dialog protective rather than signing out immediately
+        const modal = document.getElementById('logoutConfirmModal');
+        const confirmBtn = document.getElementById('btnConfirmLogout');
+        const cancelBtn = document.getElementById('btnCancelLogout');
+        if (modal && confirmBtn && cancelBtn && modal.classList.contains('hidden')) {
+          modal.classList.remove('hidden');
+          modal.setAttribute('aria-hidden', 'false');
+          cancelBtn.focus();
+          const closeFallback = () => {
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+            if (triggerEl && typeof triggerEl.focus === 'function') triggerEl.focus();
+          };
+          cancelBtn.onclick = closeFallback;
+          confirmBtn.onclick = () => {
+            confirmBtn.disabled = true;
+            cancelBtn.disabled = true;
+            handleSignOut();
+          };
+        }
+      }
+      document.getElementById('btnLogout').addEventListener('click', requestSignOutConfirmation);
+      document.getElementById('btnSignOutPending').addEventListener('click', requestSignOutConfirmation);
 
       // Join by Invite Code + 360-Point Card Creation Builder
       function renderJoinStats6Allocator(posVal) {
@@ -13577,51 +14283,61 @@
       });
 
       // ==================== MULTIPLAYER MODALS, TACTICS SYNC & QR SCANNER WIRING ====================
+      let lineupPublishInFlight = false;
       async function handlePublishCurrentLineup(customPayload) {
-        if (!db || !user) return;
+        if (!db || !user) return false;
+        if (lineupPublishInFlight) return false;
         if (!canCurrentUserPublishLineup()) {
           toast('نشر التشكيلة الرسمية مقتصر حالياً على منشئ الفريق ومنظّمي التشكيلة', true);
-          return;
+          return false;
         }
-        const livePayload = customPayload || (
-          window.MaydanTacticsStudio && typeof window.MaydanTacticsStudio.getCurrentLineupPayload === 'function'
-            ? window.MaydanTacticsStudio.getCurrentLineupPayload()
-            : (db.tactics || { formation: '2-2-1', slots: {} })
-        );
-        const payload = {
-          formation: livePayload.formation || '2-2-1',
-          slots: livePayload.slots || {},
-          publishedByUid: getCurrentUid(),
-          publishedByName: user.name || 'لاعب',
-          publishedAtMs: Date.now()
-        };
-        if (isFirebaseMode) {
-          const prevTac = db.tactics ? {
-            formation: db.tactics.formation || '2-2-1',
-            slots: db.tactics.slots || {},
-            ...(db.tactics.publishedByUid ? { publishedByUid: db.tactics.publishedByUid } : {}),
-            ...(db.tactics.publishedByName ? { publishedByName: db.tactics.publishedByName } : {}),
-            ...(db.tactics.publishedAtMs ? { publishedAtMs: db.tactics.publishedAtMs } : {})
-          } : null;
-          const res = await persistActionChecked('tactics', payload);
-          if (res.ok) {
-            db.tactics = { ...payload, previousSnapshot: prevTac };
+        lineupPublishInFlight = true;
+        try {
+          const livePayload = customPayload || (
+            window.MaydanTacticsStudio && typeof window.MaydanTacticsStudio.getCurrentLineupPayload === 'function'
+              ? window.MaydanTacticsStudio.getCurrentLineupPayload()
+              : (db.tactics || { formation: '2-2-1', slots: {} })
+          );
+          const payload = {
+            formation: livePayload.formation || '2-2-1',
+            slots: livePayload.slots || {},
+            publishedByUid: getCurrentUid(),
+            publishedByName: user.name || 'لاعب',
+            publishedAtMs: Date.now()
+          };
+          if (isFirebaseMode) {
+            const prevTac = db.tactics ? {
+              formation: db.tactics.formation || '2-2-1',
+              slots: db.tactics.slots || {},
+              ...(db.tactics.publishedByUid ? { publishedByUid: db.tactics.publishedByUid } : {}),
+              ...(db.tactics.publishedByName ? { publishedByName: db.tactics.publishedByName } : {}),
+              ...(db.tactics.publishedAtMs ? { publishedAtMs: db.tactics.publishedAtMs } : {})
+            } : null;
+            const res = await persistActionChecked('tactics', payload);
+            if (res.ok) {
+              db.tactics = { ...payload, previousSnapshot: prevTac };
+              renderTacticsMultiplayerBar();
+              toast('تم حفظ ونشر التشكيلة الرسمية 📢');
+              return true;
+            }
+            return false;
+          } else {
+            const prevSnap = db.tactics ? {
+              formation: db.tactics.formation || '2-2-1',
+              slots: db.tactics.slots || {},
+              publishedByUid: db.tactics.publishedByUid,
+              publishedByName: db.tactics.publishedByName,
+              publishedAtMs: db.tactics.publishedAtMs
+            } : null;
+            db.tactics = { ...payload, previousSnapshot: prevSnap };
+            db.lineupVotes = {};
+            saveLocal(db);
             renderTacticsMultiplayerBar();
-            toast('تم حفظ ونشر التشكيلة الرسمية 📢');
+            toast('تم نشر التشكيلة محلياً 📢');
+            return true;
           }
-        } else {
-          const prevSnap = db.tactics ? {
-            formation: db.tactics.formation || '2-2-1',
-            slots: db.tactics.slots || {},
-            publishedByUid: db.tactics.publishedByUid,
-            publishedByName: db.tactics.publishedByName,
-            publishedAtMs: db.tactics.publishedAtMs
-          } : null;
-          db.tactics = { ...payload, previousSnapshot: prevSnap };
-          db.lineupVotes = {};
-          saveLocal(db);
-          renderTacticsMultiplayerBar();
-          toast('تم نشر التشكيلة محلياً 📢');
+        } finally {
+          lineupPublishInFlight = false;
         }
       }
 
@@ -13669,7 +14385,16 @@
       }
 
       const btnPubTac = document.getElementById('btnPublishLineupTeam');
-      if (btnPubTac) btnPubTac.addEventListener('click', () => void handlePublishCurrentLineup());
+      if (btnPubTac) {
+        btnPubTac.addEventListener('click', () => {
+          const slider = ensureChronoPublishSlider();
+          if (slider) {
+            void slider.activate();
+          } else {
+            void handlePublishCurrentLineup();
+          }
+        });
+      }
       const btnVoteApp = document.getElementById('btnTacVoteApprove');
       if (btnVoteApp) btnVoteApp.addEventListener('click', () => void handleVoteCurrentLineup('approve'));
       const btnVoteSwp = document.getElementById('btnTacVoteSwap');
@@ -14815,6 +15540,24 @@
           }).catch(() => {});
         });
       }
+
+      // Feature 03: Zero-login, zero-Firestore Ghost Play Link viewer (#ghost=v1...)
+      // Strictly isolated from #join=, ?join=, and ?ref= invite/referral handling.
+      function checkGhostPlayHash() {
+        try {
+          if (location.hash && location.hash.startsWith('#ghost=')) {
+            import('./src/lab/ghostPlayUI.ts')
+              .then((mod) => {
+                if (mod && typeof mod.tryBootGhostViewerFromLocation === 'function') {
+                  mod.tryBootGhostViewerFromLocation((msg, isErr) => toast(msg, isErr));
+                }
+              })
+              .catch(() => {});
+          }
+        } catch (e) {}
+      }
+      checkGhostPlayHash();
+      window.addEventListener('hashchange', checkGhostPlayHash);
     })();
   </script>
 </body>

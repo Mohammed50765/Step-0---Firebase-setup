@@ -6,7 +6,7 @@ export const PRO_SVG_H = 520;
 const PITCH_PAD_X = 48;
 const PITCH_PAD_Y = 30;
 
-export type ProSectionTab = 'formations' | 'plans' | 'moves' | 'learn' | 'captain';
+export type ProSectionTab = 'formations' | 'plans' | 'moves' | 'learn' | 'captain' | 'lab';
 
 export type ProBoardTool =
   | 'pointer'
