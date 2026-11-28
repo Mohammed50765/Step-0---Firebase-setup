@@ -735,16 +735,12 @@ export function openBlackBoxModal(opts: BlackBoxOpenOptions = {}): void {
       volRange.value = String(Math.round(audioState.volume * 100));
     }
     if (statusEl) {
-      if (!audioState.speechAvailable) {
-        statusEl.textContent = 'التعليق الصوتي غير متاح في هذا المتصفح — الشرح النصي المتزامن يعمل بالكامل.';
-      } else if (audioState.muted) {
-        statusEl.textContent = 'الصوت مكتوم — يمكنك متابعة الشرح النصي المتزامن أو إلغاء الكتم في أي لحظة.';
+      if (audioState.muted) {
+        statusEl.textContent = 'الصوت مكتوم — الشرح النصي التكتيكي المتزامن يعمل بالكامل.';
       } else if (audioState.isSpeaking) {
-        statusEl.textContent = audioState.selectedVoiceName
-          ? `المحلل الصوتي يتحدث (${audioState.selectedVoiceName})`
-          : 'المحلل التكتيكي يتحدث الآن...';
+        statusEl.textContent = 'التوجيه النصي المتزامن نشط الآن مع المؤثرات الصوتية الهادئة...';
       } else {
-        statusEl.textContent = 'المحلل التكتيكي جاهز — الصوت يعمل بهدوء مع خفض تلقائي للموسيقى.';
+        statusEl.textContent = 'التوجيه النصي المتزامن جاهز — تنبيهات صوتية خفيفة مع خفض تلقائي للموسيقى.';
       }
     }
   }
@@ -935,10 +931,10 @@ export function openBlackBoxModal(opts: BlackBoxOpenOptions = {}): void {
             </div>
           </div>
 
-          <div class="bbox-audio-box" role="region" aria-label="التحكم بالصوت والتعليق">
+          <div class="bbox-audio-box" role="region" aria-label="التحكم بالصوت والتوجيه المتزامن">
             <div class="bbox-audio-controls">
               <button type="button" id="bboxAudioMuteBtn" class="bbox-audio-btn">🔊 الصوت</button>
-              <button type="button" id="bboxAudioSpeechBtn" class="bbox-audio-btn active">التعليق</button>
+              <button type="button" id="bboxAudioSpeechBtn" class="bbox-audio-btn active">إيقاع الشرح</button>
               <button type="button" id="bboxAudioMusicBtn" class="bbox-audio-btn">موسيقى هادئة</button>
               <label class="bbox-vol-wrap">
                 <span>المستوى</span>

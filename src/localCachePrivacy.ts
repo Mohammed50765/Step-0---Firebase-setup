@@ -26,6 +26,14 @@ export const USER_SCOPED_STORAGE_PREFIXES = [
   'maydan_onboard_draft',
   'maydan_active_team_',
   'maydan_last_uid',
+  'maydan_tactics_studio_v1',
+  'maydan_gto_duel_history_v1',
+  'maydan_read_notifs_v2',
+  'maydan_rating_meta_v1',
+  'maydan_local_tab_badges_v1',
+  'maydan_football_library_v1',
+  'maydan_dual_match_timer_v1',
+  'maydan_live_match_hud_v1',
 ] as const;
 
 export const PRESERVED_DEVICE_PREF_KEYS = new Set<string>([
@@ -35,7 +43,73 @@ export const PRESERVED_DEVICE_PREF_KEYS = new Set<string>([
   'maydan_tactics_muted',
   'maydan_lang',
   'maydan_font_scale',
+  'maydan_welcome_guide_seen_v1',
+  'maydan_tunnel_sound_pref_v1',
 ]);
+
+/**
+ * Explicit Section 7 classification of all browser storage keys across Categories A, B, C, and D.
+ */
+export const STORAGE_POLICY_CLASSIFICATION = {
+  categoryA_devicePrefs: [
+    'maydan_lang',
+    'maydan_font_scale',
+    'maydan_data_saver',
+    'maydan_tactics_muted',
+    'maydan_welcome_guide_seen_v1',
+    'maydan_tunnel_sound_pref_v1',
+    TRUSTED_DEVICE_CACHE_PREF_KEY,
+    TRUSTED_DEVICE_AUTH_PREF_KEY,
+  ],
+  categoryB_userPrivate: [
+    'maydan_last_uid',
+    'maydan_active_team_',
+    'maydan_google_player_',
+    'maydan_privacy_ok_',
+    'maydan_pending_join_code',
+    'maydan_onboard_draft',
+    'maydan_m6_migration_ckpt',
+    'maydan_gto_duel_history_v1',
+    'maydan_read_notifs_v2',
+    'maydan_local_tab_badges_v1',
+    'maydan_football_library_v1',
+  ],
+  categoryC_teamScoped: [
+    'maydan_team_cache_v1',
+    'maydan_tactics_studio_v1',
+    'maydan_rating_meta_v1',
+  ],
+  categoryD_tempMatchState: [
+    'maydan_dual_match_timer_v1',
+    'maydan_live_match_hud_v1',
+    'maydan_tunnel_entrance_played_v2',
+  ],
+} as const;
+
+/**
+ * Resolves an account/team-scoped storage key so shared devices never leak state across
+ * different accounts or teams. Falls back to baseKey when no uid/teamId is active (e.g. demo mode),
+ * and any unscoped baseKey in USER_SCOPED_STORAGE_PREFIXES is scrubbed on logout/account switch.
+ */
+export function resolveScopedStorageKey(
+  baseKey: string,
+  uid?: string | null,
+  teamId?: string | null
+): string {
+  const cleanBase = String(baseKey || '').trim();
+  const cleanUid = String(uid ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '');
+  const cleanTeam = String(teamId ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '');
+  if (cleanUid && cleanTeam) {
+    return `${cleanBase}__${cleanUid}__${cleanTeam}`;
+  }
+  if (cleanUid) {
+    return `${cleanBase}__${cleanUid}`;
+  }
+  if (cleanTeam && cleanTeam !== 'main') {
+    return `${cleanBase}__team_${cleanTeam}`;
+  }
+  return cleanBase;
+}
 
 export type FirestoreCacheMode = 'memory' | 'persistent';
 export type AuthPersistenceMode = 'session' | 'local';

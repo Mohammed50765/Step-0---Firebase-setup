@@ -9,6 +9,8 @@ export interface PitWallConfig {
   style: TacticalPlayStyle;
   unavailableIds?: string[];
   readinessLogs?: MinimalReadinessLog[];
+  /** Optional explicit substitution minutes from Dual Match & Substitution Timer (interval or manual mode) */
+  customScheduleMinutes?: number[];
 }
 
 export interface RotationPlayerSummary {
@@ -131,7 +133,7 @@ export function recalculateMinutesAndFatigue(
   fairnessSpreadMin: number;
   fatigueTracks: PlayerFatigueTrack[];
 } {
-  const safeMatch = Math.round(clampNumber(matchMinutes, 10, 120));
+  const safeMatch = Math.round(clampNumber(matchMinutes, 1, 240));
   const styleCfg = STYLE_META[style] || STYLE_META.balanced;
   const allPlayers = [...starters, ...bench];
   const sortedEvents = [...events]
@@ -235,7 +237,7 @@ export function generatePitWallPlan(
   players: MinimalPlayer[],
   config: PitWallConfig
 ): PitWallRotationPlan {
-  const matchMinutes = Math.round(clampNumber(config.matchMinutes || 60, 15, 120));
+  const matchMinutes = Math.round(clampNumber(config.matchMinutes || 60, 1, 240));
   const startersCount = Math.round(clampNumber(config.startersCount || 6, 4, 11));
   const style: TacticalPlayStyle = STYLE_META[config.style] ? config.style : 'balanced';
   const styleCfg = STYLE_META[style];
@@ -312,23 +314,47 @@ export function generatePitWallPlan(
 
   if (restingOutfield.length > 0 && activeOutfield.length > 0) {
     let eventIdx = 1;
-    for (let minute = intervalMinutes; minute <= matchMinutes - 4; minute += intervalMinutes) {
+    const customWindows = Array.isArray(config.customScheduleMinutes)
+      ? Array.from(
+          new Set(
+            config.customScheduleMinutes
+              .map((m) => Math.round(Number(m)))
+              .filter((m) => Number.isFinite(m) && m >= 1 && m < matchMinutes)
+          )
+        ).sort((a, b) => a - b)
+      : null;
+
+    const windows: number[] = [];
+    if (customWindows) {
+      windows.push(...customWindows);
+    } else {
+      for (let minute = intervalMinutes; minute <= matchMinutes - 4; minute += intervalMinutes) {
+        windows.push(minute);
+      }
+    }
+
+    let prevMinute = 0;
+    for (const minute of windows) {
+      const deltaMin = Math.max(1, minute - prevMinute);
+      prevMinute = minute;
       // Advance elapsed mins/fatigue for this block
       for (const a of activeOutfield) {
-        a.mins += intervalMinutes;
-        a.stintMins += intervalMinutes;
-        a.fatigue = clampNumber(a.fatigue + intervalMinutes * styleCfg.pitchFatiguePerMin, 0, 98);
+        a.mins += deltaMin;
+        a.stintMins += deltaMin;
+        a.fatigue = clampNumber(a.fatigue + deltaMin * styleCfg.pitchFatiguePerMin, 0, 98);
       }
       for (const b of restingOutfield) {
         b.fatigue = clampNumber(
-          b.fatigue - intervalMinutes * styleCfg.benchRecoverPerMin,
+          b.fatigue - deltaMin * styleCfg.benchRecoverPerMin,
           b.initialFatigue * 0.8,
           98
         );
       }
 
-      // How many subs per window: up to min(benchCount, 2) so tactical balance isn't disrupted
-      const subsThisWindow = Math.min(restingOutfield.length, activeOutfield.length, 2);
+      // In custom schedule mode, create 1 primary rotation pairing per scheduled window (or up to 2 in default auto mode)
+      const subsThisWindow = customWindows
+        ? 1
+        : Math.min(restingOutfield.length, activeOutfield.length, 2);
       for (let s = 0; s < subsThisWindow; s++) {
         // Pick outgoing: highest (mins + fatigue*0.25)
         activeOutfield.sort((x, y) => y.mins + y.fatigue * 0.2 - (x.mins + x.fatigue * 0.2));

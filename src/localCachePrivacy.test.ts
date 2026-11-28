@@ -253,3 +253,44 @@ test('planTeamAccountCleanup selects Firestore-rules-safe cleanup path for activ
   );
   assert.equal(planTeamAccountCleanup(null, 'u1'), 'cleanup_orphan_refs');
 });
+
+test('scrubAllAccountLocalCaches purges all tactical studio, GTO history, rating sidecar, read notifications, library, badges, and live match keys on logout/account switch', () => {
+  const ls = makeMemoryStorage({
+    maydan_tactics_studio_v1: '{"customPlans":[{"id":"secret_plan"}]}',
+    maydan_gto_duel_history_v1: '[{"winRatePct":88}]',
+    maydan_read_notifs_v2: '["notif_u1_m1"]',
+    maydan_rating_meta_v1: '{"p1":{"roleOverride":"ST"}}',
+    maydan_local_tab_badges_v1: '{"team":1700000000}',
+    maydan_football_library_v1: '[{"id":"custom_item"}]',
+    maydan_dual_match_timer_v1: '{"isRunning":true}',
+    maydan_live_match_hud_v1: '{"liveOurScore":3}',
+    maydan_lang: 'ar',
+    maydan_font_scale: '1',
+    maydan_welcome_guide_seen_v1: '1',
+  });
+  const ss = makeMemoryStorage({
+    maydan_dual_match_timer_v1: '{"isRunning":true}',
+    maydan_live_match_hud_v1: '{"liveOurScore":3}',
+  });
+
+  const res = scrubAllAccountLocalCaches(ls, ss);
+  assert.equal(res.removedLocalKeys.length, 8);
+  assert.equal(res.clearedSession, true);
+
+  // All 8 newly protected user/team/match keys must be purged
+  assert.equal(ls.getItem('maydan_tactics_studio_v1'), null);
+  assert.equal(ls.getItem('maydan_gto_duel_history_v1'), null);
+  assert.equal(ls.getItem('maydan_read_notifs_v2'), null);
+  assert.equal(ls.getItem('maydan_rating_meta_v1'), null);
+  assert.equal(ls.getItem('maydan_local_tab_badges_v1'), null);
+  assert.equal(ls.getItem('maydan_football_library_v1'), null);
+  assert.equal(ls.getItem('maydan_dual_match_timer_v1'), null);
+  assert.equal(ls.getItem('maydan_live_match_hud_v1'), null);
+  assert.equal(ss.length, 0);
+
+  // Category A device UI preferences remain untouched
+  assert.equal(ls.getItem('maydan_lang'), 'ar');
+  assert.equal(ls.getItem('maydan_font_scale'), '1');
+  assert.equal(ls.getItem('maydan_welcome_guide_seen_v1'), '1');
+});
+

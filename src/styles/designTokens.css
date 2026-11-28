@@ -2057,4 +2057,301 @@ body.data-saver .logout-confirm-box {
   animation: none !important;
 }
 
+/* ==========================================================================
+   DUAL MATCH & SUBSTITUTION TIMER SYSTEM (PIT-WALL 2.0)
+   ========================================================================== */
+.pw-clock-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pw-clock-metric-cell {
+  background: #0D0F13;
+  border: 1px solid rgba(243, 244, 246, 0.08);
+  border-radius: 10px;
+  padding: 8px 6px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.pw-clock-metric-cell--primary {
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.14) 0%, rgba(13, 15, 19, 0.96) 100%);
+  border-color: rgba(212, 175, 55, 0.42);
+  box-shadow: 0 1px 0 rgba(242, 214, 117, 0.16) inset;
+}
+
+.pw-clock-metric-lbl {
+  font-size: 0.68rem;
+  color: var(--ink-instrument);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pw-clock-metric-val {
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: var(--ink-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.pw-clock-metric-val--gold {
+  color: var(--gold-highlight);
+  font-size: 1.24rem;
+}
+
+.pw-timeline-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: #0B0D11;
+  border: 1px solid rgba(212, 175, 55, 0.24);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.pw-timeline-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #B89428 0%, #D4AF37 60%, #F2D675 100%);
+  border-radius: 999px;
+  transition: width 200ms linear;
+}
+
+.pw-timeline-marker {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 3px;
+  border-radius: 2px;
+  background: rgba(254, 240, 138, 0.85);
+  transform: translateX(-50%);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+}
+
+.pw-timeline-marker.is-confirmed {
+  background: #4ADE80;
+}
+
+.pw-timeline-marker.is-active {
+  background: #F43F5E;
+  width: 4px;
+}
+
+.pw-timeline-marker.is-snoozed {
+  background: #38BDF8;
+}
+
+.pw-next-sub-box {
+  background: rgba(212, 175, 55, 0.07);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+  border-radius: 10px;
+  padding: 9px 10px;
+  margin-bottom: 10px;
+}
+
+.pw-smart-alert {
+  background: linear-gradient(145deg, rgba(212, 175, 55, 0.18) 0%, rgba(20, 23, 30, 0.96) 100%);
+  border: 1.5px solid rgba(242, 214, 117, 0.65);
+  border-radius: 12px;
+  padding: 11px 12px;
+  margin-bottom: 10px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+}
+
+.pw-smart-alert--ended {
+  background: linear-gradient(145deg, rgba(34, 197, 94, 0.16) 0%, rgba(16, 20, 26, 0.96) 100%);
+  border-color: rgba(74, 222, 128, 0.52);
+}
+
+.pw-alert-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pw-alert-confirm-btn {
+  min-height: 40px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-weight: 900;
+  flex: 1 1 130px;
+}
+
+.pw-snooze-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.pw-snooze-label {
+  font-size: 0.74rem;
+  color: var(--ink-secondary);
+  font-weight: 800;
+}
+
+.pw-snooze-btn {
+  min-height: 38px;
+  padding: 5px 10px;
+  border-radius: 9px;
+  background: #171A22;
+  border: 1px solid rgba(212, 175, 55, 0.38);
+  color: var(--gold-highlight);
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pw-snooze-btn:hover {
+  background: rgba(212, 175, 55, 0.18);
+  border-color: var(--gold-highlight);
+}
+
+.pw-postponed-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #BAE6FD;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+.pw-postponed-inline {
+  font-size: 0.71rem;
+  font-weight: 700;
+  color: #7DD3FC;
+}
+
+.pw-custom-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pw-custom-input-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+
+.pw-mode-seg {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  background: #0D0F13;
+  padding: 4px;
+  border-radius: 11px;
+  border: 1px solid rgba(243, 244, 246, 0.08);
+}
+
+.pw-mode-seg-btn {
+  min-height: 38px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-instrument);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pw-mode-seg-btn.active {
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.22) 0%, rgba(212, 175, 55, 0.1) 100%);
+  border-color: rgba(212, 175, 55, 0.48);
+  color: var(--ink-primary);
+}
+
+.pw-schedule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pw-schedule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: rgba(13, 15, 19, 0.65);
+  border: 1px solid rgba(243, 244, 246, 0.06);
+  font-size: 0.78rem;
+}
+
+.pw-schedule-row.is-confirmed {
+  opacity: 0.68;
+}
+
+.pw-schedule-row-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pw-schedule-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pw-slot-status {
+  font-size: 0.69rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.pw-slot-status--pending {
+  color: var(--ink-instrument);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.pw-slot-status--confirmed {
+  color: #4ADE80;
+  background: rgba(34, 197, 94, 0.13);
+}
+
+.pw-slot-status--active {
+  color: #FDE047;
+  background: rgba(234, 179, 8, 0.2);
+}
+
+.pw-slot-status--snoozed {
+  color: #7DD3FC;
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.pw-slot-edit-card {
+  padding: 10px;
+  margin-bottom: 6px;
+  background: rgba(212, 175, 55, 0.09);
+  border: 1px solid rgba(212, 175, 55, 0.38);
+  border-radius: 10px;
+}
+
+.pw-slot-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+}
+
+
 

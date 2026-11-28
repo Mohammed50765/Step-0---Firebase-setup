@@ -9308,8 +9308,16 @@
         const undoToastBtn = document.getElementById('btnUndoToast');
         if (undoToastBtn) undoToastBtn.classList.add('hidden');
 
+        try {
+          sessionStorage.removeItem('maydan_live_match_hud_v1');
+        } catch (e) {}
+
         if (window.MaydanTacticsStudio) {
-          window.MaydanTacticsStudio.onTabDeactivated();
+          if (typeof window.MaydanTacticsStudio.onSessionReset === 'function') {
+            window.MaydanTacticsStudio.onSessionReset();
+          } else {
+            window.MaydanTacticsStudio.onTabDeactivated();
+          }
         }
         if (window.MaydanVoting && window.MaydanVoting.ui && typeof window.MaydanVoting.ui.stopTimer === 'function') {
           window.MaydanVoting.ui.stopTimer();
@@ -9325,22 +9333,32 @@
         }
         if (clearTeamCache) {
           try {
-            localStorage.removeItem(ONBOARD_DRAFT_KEY);
-            localStorage.removeItem('maydan_team_cache_v1');
-            const toSweep = [];
-            for (let i = 0; i < localStorage.length; i++) {
-              const k = localStorage.key(i);
-              if (k && (
-                k.startsWith('maydan_team_cache_v1') ||
-                k.startsWith('maydan_google_player_') ||
-                k.startsWith('maydan_m6_migration_ckpt') ||
-                k.startsWith('maydan_pending_join_code') ||
-                k.startsWith('maydan_onboard_draft')
-              )) {
-                toSweep.push(k);
+            if (window.MaydanLocalCachePrivacy && typeof window.MaydanLocalCachePrivacy.scrubAllAccountLocalCaches === 'function') {
+              window.MaydanLocalCachePrivacy.scrubAllAccountLocalCaches();
+            } else {
+              localStorage.removeItem(ONBOARD_DRAFT_KEY);
+              localStorage.removeItem('maydan_team_cache_v1');
+              const toSweep = [];
+              for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && (
+                  k.startsWith('maydan_team_cache_v1') ||
+                  k.startsWith('maydan_google_player_') ||
+                  k.startsWith('maydan_m6_migration_ckpt') ||
+                  k.startsWith('maydan_pending_join_code') ||
+                  k.startsWith('maydan_onboard_draft') ||
+                  k.startsWith('maydan_tactics_studio_v1') ||
+                  k.startsWith('maydan_gto_duel_history_v1') ||
+                  k.startsWith('maydan_read_notifs_v2') ||
+                  k.startsWith('maydan_rating_meta_v1') ||
+                  k.startsWith('maydan_local_tab_badges_v1') ||
+                  k.startsWith('maydan_football_library_v1')
+                )) {
+                  toSweep.push(k);
+                }
               }
+              toSweep.forEach((k) => { try { localStorage.removeItem(k); } catch (err) {} });
             }
-            toSweep.forEach((k) => { try { localStorage.removeItem(k); } catch (err) {} });
           } catch (e) {}
         }
 
@@ -11161,14 +11179,15 @@
         }
         if (window.MaydanTacticsStudio) {
           window.MaydanTacticsStudio.mount({
-            getPlayers: () => db.players || [],
+            getPlayers: () => (db && db.players) || [],
             getCurrentUser: () => user || null,
             getPlayerOvr: (p) => {
               const r = getRealisticRatingForPlayer(p);
               return r && Number.isFinite(r.finalOvr) ? r.finalOvr : null;
             },
-            getTactics: () => db.tactics || { formation: '2-2-1', slots: {} },
+            getTactics: () => (db && db.tactics) || { formation: '2-2-1', slots: {} },
             setTactics: (next) => {
+              if (!db) return;
               db.tactics = next;
               if (!isFirebaseMode) saveLocal(db);
             },
@@ -13400,7 +13419,65 @@
         return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
       }
 
+      const LIVE_HUD_SESSION_KEY = 'maydan_live_match_hud_v1';
+
+      function saveLiveHudSession() {
+        try {
+          if (typeof sessionStorage === 'undefined') return;
+          sessionStorage.setItem(
+            LIVE_HUD_SESSION_KEY,
+            JSON.stringify({
+              liveHalf,
+              liveOurScore,
+              liveOppScore,
+              liveStats,
+              liveEvents,
+            })
+          );
+        } catch (e) {}
+      }
+
+      function restoreLiveHudSession() {
+        try {
+          if (typeof sessionStorage === 'undefined') return;
+          const raw = sessionStorage.getItem(LIVE_HUD_SESSION_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object') return;
+          liveHalf = parsed.liveHalf === 2 ? 2 : 1;
+          liveOurScore = Math.max(0, Number(parsed.liveOurScore) || 0);
+          liveOppScore = Math.max(0, Number(parsed.liveOppScore) || 0);
+          if (parsed.liveStats && typeof parsed.liveStats === 'object') {
+            Object.keys(liveStats).forEach((k) => {
+              liveStats[k] = Math.max(0, Number(parsed.liveStats[k]) || 0);
+            });
+          }
+          if (Array.isArray(parsed.liveEvents)) {
+            liveEvents = parsed.liveEvents.slice(-50);
+          }
+        } catch (e) {}
+      }
+
+      function getUnifiedPitWallClock() {
+        if (
+          window.MaydanTacticsStudio &&
+          typeof window.MaydanTacticsStudio.getPitWallController === 'function'
+        ) {
+          return window.MaydanTacticsStudio.getPitWallController();
+        }
+        return null;
+      }
+
+      function syncLiveTimerFromAuthoritativeClock() {
+        const pw = getUnifiedPitWallClock();
+        if (pw) {
+          liveTimerSeconds = pw.getElapsedSeconds();
+          liveTimerRunning = pw.isRunning();
+        }
+      }
+
       function renderLiveHud() {
+        syncLiveTimerFromAuthoritativeClock();
         const tEl = document.getElementById('liveTimerDisplay');
         if (tEl) tEl.textContent = formatLiveClock(liveTimerSeconds);
         const hEl = document.getElementById('liveHalfBadge');
@@ -13428,7 +13505,27 @@
         }
       }
 
+      restoreLiveHudSession();
+
+      window.addEventListener('maydan:matchClockTick', (e) => {
+        const d = e && e.detail;
+        if (!d) return;
+        liveTimerSeconds = Math.max(0, Number(d.elapsedSec) || 0);
+        liveTimerRunning = Boolean(d.isRunning);
+        const tEl = document.getElementById('liveTimerDisplay');
+        if (tEl) tEl.textContent = formatLiveClock(liveTimerSeconds);
+        const spBtn = document.getElementById('btnLiveStartPause');
+        if (spBtn) spBtn.textContent = liveTimerRunning ? '⏸ إيقاف' : (liveTimerSeconds > 0 ? '▶ استئناف' : '▶ ابدأ');
+      });
+
       document.getElementById('btnLiveStartPause').addEventListener('click', () => {
+        const pw = getUnifiedPitWallClock();
+        if (pw) {
+          pw.toggleTimer();
+          syncLiveTimerFromAuthoritativeClock();
+          renderLiveHud();
+          return;
+        }
         if (liveTimerRunning) {
           clearInterval(liveTimerInterval);
           liveTimerInterval = null;
@@ -13446,26 +13543,45 @@
 
       document.getElementById('btnLiveHalf').addEventListener('click', () => {
         liveHalf = liveHalf === 1 ? 2 : 1;
+        saveLiveHudSession();
         renderLiveHud();
         toast(liveHalf === 2 ? 'تم الانتقال إلى الشوط الثاني ⏱️' : 'تمت العودة إلى الشوط الأول ⏱️');
       });
 
       document.getElementById('btnLiveOurPlus').addEventListener('click', () => {
+        const now = Date.now();
+        if (liveTapGuardMap.ourGoal && now - liveTapGuardMap.ourGoal < 600) {
+          toast('تم تجاهل اللمس المكرّر السريع (حماية 0.6 ثانية)');
+          return;
+        }
+        liveTapGuardMap.ourGoal = now;
+        syncLiveTimerFromAuthoritativeClock();
         liveOurScore += 1;
         liveEvents.push({ type: 'ourGoal', min: Math.max(1, Math.ceil(liveTimerSeconds / 60)), label: LIVE_EVENT_LABELS.ourGoal });
+        saveLiveHudSession();
         renderLiveHud();
       });
       document.getElementById('btnLiveOurMinus').addEventListener('click', () => {
         if (liveOurScore > 0) liveOurScore -= 1;
+        saveLiveHudSession();
         renderLiveHud();
       });
       document.getElementById('btnLiveOppPlus').addEventListener('click', () => {
+        const now = Date.now();
+        if (liveTapGuardMap.oppGoal && now - liveTapGuardMap.oppGoal < 600) {
+          toast('تم تجاهل اللمس المكرّر السريع (حماية 0.6 ثانية)');
+          return;
+        }
+        liveTapGuardMap.oppGoal = now;
+        syncLiveTimerFromAuthoritativeClock();
         liveOppScore += 1;
         liveEvents.push({ type: 'oppGoal', min: Math.max(1, Math.ceil(liveTimerSeconds / 60)), label: LIVE_EVENT_LABELS.oppGoal });
+        saveLiveHudSession();
         renderLiveHud();
       });
       document.getElementById('btnLiveOppMinus').addEventListener('click', () => {
         if (liveOppScore > 0) liveOppScore -= 1;
+        saveLiveHudSession();
         renderLiveHud();
       });
 
@@ -13478,6 +13594,7 @@
           liveStats[last.type] = Math.max(0, liveStats[last.type] - 1);
           if (last.type === 'goals' && last.incScore) liveOurScore = Math.max(0, liveOurScore - 1);
         }
+        saveLiveHudSession();
         renderLiveHud();
         toast(`تم التراجع عن: ${last.label} ↩`);
       });
@@ -13490,6 +13607,7 @@
           return;
         }
         liveTapGuardMap[k] = now;
+        syncLiveTimerFromAuthoritativeClock();
         liveStats[k]++;
         let incScore = false;
         if (k === 'goals') {
@@ -13502,11 +13620,16 @@
           min: Math.max(1, Math.ceil(liveTimerSeconds / 60)),
           label: LIVE_EVENT_LABELS[k] || k
         });
+        saveLiveHudSession();
         renderLiveHud();
       }));
 
       document.getElementById('btnResetLive').addEventListener('click', () => {
         if (liveTimerInterval) { clearInterval(liveTimerInterval); liveTimerInterval = null; }
+        const pw = getUnifiedPitWallClock();
+        if (pw) {
+          pw.resetTimer();
+        }
         liveTimerRunning = false;
         liveTimerSeconds = 0;
         liveHalf = 1;
@@ -13514,6 +13637,7 @@
         liveOppScore = 0;
         liveEvents = [];
         liveStats = { goals: 0, assists: 0, shots: 0, saves: 0, turnovers: 0 };
+        saveLiveHudSession();
         renderLiveHud();
         toast('تم تصفير عدّاد ومؤقّت المباراة المباشرة');
       });

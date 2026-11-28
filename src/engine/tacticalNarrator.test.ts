@@ -79,3 +79,48 @@ test('TacticalNeuralNarrator degrades gracefully when speech and Web Audio are u
 
   assert.ok(stateUpdates >= 4);
 });
+
+test('TacticalNeuralNarrator never invokes window.speechSynthesis even when a fake speechSynthesis object exists on globalThis.window', () => {
+  let speechSynthCalled = false;
+  const g = globalThis as unknown as { window?: Record<string, unknown> };
+  const prevWin = g.window;
+  g.window = {
+    speechSynthesis: {
+      speak() {
+        speechSynthCalled = true;
+      },
+      cancel() {
+        speechSynthCalled = true;
+      },
+      pause() {
+        speechSynthCalled = true;
+      },
+      resume() {
+        speechSynthCalled = true;
+      },
+      getVoices() {
+        speechSynthCalled = true;
+        return [];
+      },
+    },
+    setTimeout: ((fn: () => void) => {
+      fn();
+      return 1;
+    }) as unknown as typeof setTimeout,
+    clearTimeout: (() => {}) as unknown as typeof clearTimeout,
+  };
+
+  try {
+    const narrator = new TacticalNeuralNarrator();
+    narrator.unlockFromUserGesture();
+    narrator.speakSegment('تحرّك الجناح يفتح زاوية التمرير في العمق.');
+    narrator.pause();
+    narrator.resume();
+    narrator.cancelSpeech();
+    narrator.dispose();
+    assert.equal(speechSynthCalled, false, 'window.speechSynthesis must never be called');
+  } finally {
+    g.window = prevWin;
+  }
+});
+

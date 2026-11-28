@@ -52,7 +52,6 @@ import {
   type ComparisonVariant,
 } from './tacticsComparisons';
 import {
-  pickBestArabicVoice,
   prepareArabicNarrationText,
   computeSpeechRate,
   estimateSpeechTimeoutMs,
@@ -95,6 +94,7 @@ import {
 import { openTacticalLabModal, type TacticalLabTab } from './lab/tacticalLabUI';
 import { openBlackBoxModal } from './lab/blackBoxUI';
 import { PitWallRotationController } from './lab/pitWallUI';
+import { getSharedAudioContext } from './ui/entryAudio';
 
 const STUDIO_STORAGE_KEY = 'maydan_tactics_studio_v1';
 const SVG_W = 360;
@@ -1001,9 +1001,8 @@ function applyFigurinePoseToDom(
 
 function playSubAlertBeep(): void {
   try {
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
     [660, 880].forEach((freq, i) => {
       const osc = ctx.createOscillator();
@@ -1044,7 +1043,6 @@ class TacticsStudioController {
   private speedDrawerOpen = false;
   private focusMineOnly = false;
   private captainTab: CaptainToolTab = 'smart';
-  private cachedArabicVoice: SpeechSynthesisVoice | null = null;
 
   // Unified rAF Timeline & Animation Engine
   private sequence: TacticalSequence;
@@ -1209,6 +1207,18 @@ class TacticsStudioController {
     if (this.isProFullscreen) {
       this.exitProFullscreen();
     }
+  }
+
+  /**
+   * Resets all in-memory studio preferences, custom plans, and match timers on logout
+   * or account/team switch so zero tactical or match state leaks across accounts on shared devices.
+   */
+  public onSessionReset(): void {
+    this.onTabDeactivated();
+    this.prefs = loadPrefs();
+    this.recordedFrames = [];
+    this.isRecordingMode = false;
+    this.pitWallCtrl?.resetTimerForSessionCleanup();
   }
 
   public isProFullscreenActive(): boolean {
@@ -1856,32 +1866,14 @@ class TacticsStudioController {
     if (this.voiceEnabled) this.speakText(this.sequence.frames[next]?.narration || '');
   }
 
-  // ==================== WEB SPEECH API (ARABIC VOICE) ====================
+  // ==================== SYNCHRONIZED READING CADENCE & WEB AUDIO CUES ====================
 
   private isSpeechSupported(): boolean {
-    return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+    return typeof window !== 'undefined';
   }
 
   private initSpeechVoices(): void {
-    if (!this.isSpeechSupported()) return;
-    const refresh = () => {
-      try {
-        const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
-        this.cachedArabicVoice = pickBestArabicVoice(voices);
-      } catch {
-        this.cachedArabicVoice = null;
-      }
-    };
-    refresh();
-    try {
-      if (typeof window.speechSynthesis.addEventListener === 'function') {
-        window.speechSynthesis.addEventListener('voiceschanged', refresh);
-      } else {
-        window.speechSynthesis.onvoiceschanged = refresh;
-      }
-    } catch {
-      // Some webviews expose read-only speechSynthesis
-    }
+    // No browser speechSynthesis voice initialization required (pure synchronized text + Web Audio cues)
   }
 
   private stopSpeech(): void {
@@ -1889,36 +1881,36 @@ class TacticsStudioController {
       window.clearTimeout(this.speechSafetyTimer);
       this.speechSafetyTimer = null;
     }
-    if (this.isSpeechSupported()) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // Ignore browser speech cancellation error
-      }
-    }
+    this.waitingForSpeech = false;
   }
 
   private speakText(text: string, onComplete?: () => void): void {
     this.stopSpeech();
     const cleanText = prepareArabicNarrationText(text);
-    if (!this.isSpeechSupported() || !cleanText) {
+    if (!cleanText) {
       onComplete?.();
       return;
     }
     try {
-      const utter = new SpeechSynthesisUtterance(cleanText);
-      const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
-      const arVoice = this.cachedArabicVoice || pickBestArabicVoice(voices);
-      if (arVoice) {
-        this.cachedArabicVoice = arVoice;
-        utter.voice = arVoice;
-        utter.lang = arVoice.lang || 'ar-SA';
-      } else {
-        utter.lang = 'ar-SA';
+      // Optional subtle Web Audio step transition chime (zero reliance on window.speechSynthesis)
+      const ctx = getSharedAudioContext();
+      if (ctx) {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(528, now);
+        osc.frequency.exponentialRampToValueAtTime(660, now + 0.09);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.linearRampToValueAtTime(0.025, now + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.12);
       }
-      utter.rate = computeSpeechRate(this.speed);
-      utter.pitch = 1.0;
 
+      const rate = computeSpeechRate(this.speed);
       let finished = false;
       const done = () => {
         if (finished) return;
@@ -1929,11 +1921,7 @@ class TacticsStudioController {
         }
         onComplete?.();
       };
-      utter.onend = done;
-      utter.onerror = done;
-      // Safety timeout in case a mobile browser stalls onend
-      this.speechSafetyTimer = window.setTimeout(done, estimateSpeechTimeoutMs(cleanText, utter.rate));
-      window.speechSynthesis.speak(utter);
+      this.speechSafetyTimer = window.setTimeout(done, estimateSpeechTimeoutMs(cleanText, rate));
     } catch {
       onComplete?.();
     }
@@ -2558,43 +2546,36 @@ class TacticsStudioController {
   }
 
   private startRotationTimer(): void {
-    if (this.timerRunning) return;
-    if (this.timerSecondsLeft <= 0) this.timerSecondsLeft = this.prefs.rotationInterval * 60;
-    this.timerRunning = true;
-    this.timerIntervalId = window.setInterval(() => {
-      if (this.timerSecondsLeft > 0) {
-        this.timerSecondsLeft--;
-        this.updateTimerDisplayOnly();
-      }
-      if (this.timerSecondsLeft === 0) {
-        this.pauseRotationTimer();
-        playSubAlertBeep();
-        this.ctx?.toast('⏱️ حان وقت التبديل العادل الآن! راجع جدول التبديلات 🔄');
-      }
-    }, 1000);
+    const ctrl = this.getOrCreatePitWallController();
+    if (!ctrl.isRunning()) ctrl.toggleTimer();
+    this.timerRunning = ctrl.isRunning();
     this.updateTimerDisplayOnly();
   }
 
   private pauseRotationTimer(): void {
-    this.timerRunning = false;
-    if (this.timerIntervalId !== null) {
-      window.clearInterval(this.timerIntervalId);
-      this.timerIntervalId = null;
-    }
+    const ctrl = this.getOrCreatePitWallController();
+    if (ctrl.isRunning()) ctrl.toggleTimer();
+    this.timerRunning = ctrl.isRunning();
     this.updateTimerDisplayOnly();
   }
 
   private resetRotationTimer(): void {
-    this.pauseRotationTimer();
-    this.timerSecondsLeft = this.prefs.rotationInterval * 60;
+    const ctrl = this.getOrCreatePitWallController();
+    ctrl.resetTimer();
+    this.timerRunning = false;
+    this.timerSecondsLeft = ctrl.getTimerState().matchDurationMinutes * 60;
     this.updateTimerDisplayOnly();
   }
 
   private updateTimerDisplayOnly(): void {
+    const ctrl = this.pitWallCtrl;
+    const formatted = ctrl ? ctrl.getFormattedRemainingOrElapsed() : this.formatClock(this.timerSecondsLeft);
+    const running = ctrl ? ctrl.isRunning() : this.timerRunning;
+    this.timerRunning = running;
     const el = document.getElementById('tacTimerDisplay');
-    if (el) el.textContent = this.formatClock(this.timerSecondsLeft);
+    if (el) el.textContent = formatted;
     const btn = document.getElementById('btnTacTimerToggle');
-    if (btn) btn.textContent = this.timerRunning ? '⏸ إيقاف المنبّه' : '▶ تشغيل المنبّه';
+    if (btn) btn.textContent = running ? '⏸ إيقاف المنبّه' : '▶ تشغيل المنبّه';
   }
 
   // ==================== RENDERERS ====================
@@ -4290,7 +4271,7 @@ class TacticsStudioController {
     if (voiceBtn) {
       const supported = this.isSpeechSupported();
       voiceBtn.innerHTML = !supported ? SVG_ICO_VOL_OFF : this.voiceEnabled ? SVG_ICO_VOL_ON : SVG_ICO_VOL_OFF;
-      voiceBtn.title = !supported ? 'التعليق الصوتي غير مدعوم' : this.voiceEnabled ? 'إيقاف التعليق الصوتي' : 'تفعيل التعليق الصوتي';
+      voiceBtn.title = this.voiceEnabled ? 'إيقاف إيقاع الشرح المتزامن' : 'تفعيل إيقاع الشرح المتزامن';
       voiceBtn.setAttribute('aria-label', voiceBtn.title);
       voiceBtn.classList.toggle('active', this.voiceEnabled && supported);
     }
@@ -4723,6 +4704,10 @@ class TacticsStudioController {
     this.getOrCreatePitWallController().render(body);
   }
 
+  public getPitWallController(): PitWallRotationController {
+    return this.getOrCreatePitWallController();
+  }
+
   private getOrCreatePitWallController(): PitWallRotationController {
     if (!this.pitWallCtrl) {
       this.pitWallCtrl = new PitWallRotationController({
@@ -4730,6 +4715,13 @@ class TacticsStudioController {
         getReadiness: () => (this.ctx?.getReadiness ? this.ctx.getReadiness() : []),
         getStartersCount: () => PITCH_SIZE_META[this.prefs.size].count,
         toast: (msg, isErr) => this.ctx?.toast(msg, isErr),
+        onTimerDisplaySync: (formattedClock, isRunning) => {
+          this.timerRunning = isRunning;
+          const el = document.getElementById('tacTimerDisplay');
+          if (el) el.textContent = formattedClock;
+          const proClockEl = document.getElementById('tacProPitWallClock');
+          if (proClockEl) proClockEl.textContent = formattedClock;
+        },
       });
     }
     return this.pitWallCtrl;
@@ -5636,10 +5628,10 @@ class TacticsStudioController {
         </div>
         <div class="tac-pro-move-card">
           <strong>غرفة الدكة والتبديلات (Pit-Wall)</strong>
-          <p class="tac-pro-hint">المؤقّت السريع (<span dir="ltr">${this.formatClock(this.timerSecondsLeft)}</span>) + جدول تبديلات عادل ومنحنى إجهاد</p>
+          <p class="tac-pro-hint">المؤقّت المزدوج (<span id="tacProPitWallClock" dir="ltr">${this.getOrCreatePitWallController().getFormattedRemainingOrElapsed()}</span>) + جدول تبديلات عادل ومنحنى إجهاد</p>
           <div class="tac-pro-move-btns" style="margin-top:6px;">
             <button type="button" data-pro-lab="pitwall" class="tac-pro-mini-btn is-gold">⏱️ فتح Pit-Wall</button>
-            <button type="button" data-pro-cap-act="timer-toggle" class="tac-pro-mini-btn">${this.timerRunning ? 'إيقاف' : 'تشغيل'}</button>
+            <button type="button" data-pro-cap-act="timer-toggle" class="tac-pro-mini-btn">${this.getOrCreatePitWallController().isRunning() ? 'إيقاف' : 'تشغيل'}</button>
             <button type="button" data-pro-cap-act="timer-reset" class="tac-pro-mini-btn">تصفير</button>
           </div>
         </div>

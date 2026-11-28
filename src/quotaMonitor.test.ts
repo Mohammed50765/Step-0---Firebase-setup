@@ -49,12 +49,15 @@ test('estimateDailySparkReads stays well within 50k Spark limit for 10 teams x 1
   assert.ok(est.percentOfSparkLimit < 50);
 });
 
-test('quotaMonitor tracks reads by category cleanly', () => {
-  const before = quotaMonitor.getSnapshot().totalReads;
+test('quotaMonitor tracks reads and writes by category cleanly', () => {
+  const before = quotaMonitor.getSnapshot();
   quotaMonitor.recordReads('core', 10);
   quotaMonitor.recordReads('tab', 5);
+  quotaMonitor.recordWrites(3);
   quotaMonitor.setActiveListeners(4);
   const after = quotaMonitor.getSnapshot();
-  assert.equal(after.totalReads, before + 15);
+  assert.equal(after.totalReads, before.totalReads + 15);
+  assert.equal(after.totalWrites, before.totalWrites + 3);
   assert.equal(after.activeListeners, 4);
 });
+

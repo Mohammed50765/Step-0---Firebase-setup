@@ -1,13 +1,14 @@
 /**
- * MAYDAN BLACK BOX — TACTICAL NEURAL NARRATOR
- * Documentary-style male Arabic tactical analyst voice + subtle optional Web Audio cinematic pad.
+ * MAYDAN BLACK BOX — SYNCHRONIZED TACTICAL NARRATOR & AMBIENT AUDIO ENGINE
+ * Synchronized Arabic tactical text cadence + subtle optional Web Audio transition cues & pad.
  *
  * Strictly honors:
+ * - Zero reliance on `window.speechSynthesis` or `SpeechSynthesisUtterance` (no unstable browser voices)
  * - Zero paid APIs or external audio dependencies
  * - Browser autoplay policies (audio starts ONLY after explicit user interaction)
- * - Background music never competes with speech (automatic ducking while speaking)
+ * - Automatic ambient pad ducking during active narration reading segments
  * - Clean mute, volume, pause, resume, replay, and unavailable-audio fallback
- * - Zero audio resource leaks (`dispose()` releases AudioContext and cancels SpeechSynthesis)
+ * - Zero audio resource leaks (`dispose()` releases AudioContext and clears timers)
  */
 
 import {
@@ -34,7 +35,7 @@ const MALE_VOICE_HINTS = ['maged', 'tarik', 'naayf', 'hamed', 'bassel', 'omar', 
 const FEMALE_VOICE_HINTS = ['laila', 'mariam', 'zariyah', 'salma', 'amina', 'rana', 'sana', 'fatima', 'female'];
 
 /**
- * Ranks browser Arabic voices specifically toward a calm, warm male documentary analyst persona.
+ * Pure ranking helper retained for unit test compatibility without invoking browser speechSynthesis.
  */
 export function pickDocumentaryMaleArabicVoice<T extends VoiceCandidate>(
   voices: ReadonlyArray<T>
@@ -79,8 +80,7 @@ export function pickDocumentaryMaleArabicVoice<T extends VoiceCandidate>(
 }
 
 /**
- * Computes calm, documentary speech cadence parameters for the analyst voice.
- * Controlled moderate pace (never frantic) and slightly warm lower pitch.
+ * Computes calm, documentary reading cadence parameters for synchronized text timing.
  */
 export function computeDocumentaryVoiceParams(playbackRate = 1): {
   rate: number;
@@ -93,8 +93,7 @@ export function computeDocumentaryVoiceParams(playbackRate = 1): {
 }
 
 /**
- * Computes background music gain with automatic speech ducking so ambient music
- * never competes with the narrator on mobile speakers.
+ * Computes background music gain with automatic ducking during active narration reading segments.
  */
 export function computeAmbientGain(opts: {
   muted: boolean;
@@ -121,10 +120,6 @@ export class TacticalNeuralNarrator {
 
   constructor(onStateChange?: (state: NarratorAudioState) => void) {
     this.onStateChange = onStateChange;
-    const speechAvailable =
-      typeof window !== 'undefined' &&
-      'speechSynthesis' in window &&
-      typeof SpeechSynthesisUtterance !== 'undefined';
     const webAudioAvailable =
       typeof window !== 'undefined' &&
       Boolean(
@@ -137,12 +132,13 @@ export class TacticalNeuralNarrator {
       muted: false,
       volume: 0.85,
       speechEnabled: true,
-      musicEnabled: false, // Optional subtle cinematic music — user can enable anytime
-      speechAvailable,
+      musicEnabled: false,
+      // Synchronized text & Web Audio cue cadence is deterministic and never depends on browser speechSynthesis
+      speechAvailable: webAudioAvailable,
       webAudioAvailable,
       isSpeaking: false,
       isPaused: false,
-      selectedVoiceName: null,
+      selectedVoiceName: 'التوجيه النصي المتزامن',
     };
   }
 
@@ -208,8 +204,8 @@ export class TacticalNeuralNarrator {
   }
 
   /**
-   * Speaks a concise Arabic tactical narration segment if unlocked, unmuted, and supported.
-   * Always safe to call when audio is muted or unavailable (graceful silent no-op).
+   * Triggers a synchronized Arabic tactical explanation segment with an optional soft Web Audio
+   * phase-transition cue and timed reading cadence — with zero use of window.speechSynthesis.
    */
   public speakSegment(rawArabicText: string, playbackRate = 1): void {
     if (this.disposed) return;
@@ -229,26 +225,11 @@ export class TacticalNeuralNarrator {
     }
 
     try {
-      const synth = window.speechSynthesis;
-      const utter = new SpeechSynthesisUtterance(clean);
-      const voices = typeof synth.getVoices === 'function' ? synth.getVoices() : [];
-      const voice = pickDocumentaryMaleArabicVoice(voices);
-      if (voice) {
-        utter.voice = voice;
-        utter.lang = voice.lang || 'ar-SA';
-        this.state.selectedVoiceName = voice.name;
-      } else {
-        utter.lang = 'ar-SA';
-      }
-
-      const { rate, pitch } = computeDocumentaryVoiceParams(playbackRate);
-      utter.rate = rate;
-      utter.pitch = pitch;
-      utter.volume = Math.max(0.1, Math.min(1, this.state.volume));
-
+      const { rate } = computeDocumentaryVoiceParams(playbackRate);
       this.state.isSpeaking = true;
       this.state.isPaused = false;
       this.updateAmbientPadGain();
+      this.playSoftFeedback('select');
       this.emit();
 
       const clearSpeaking = () => {
@@ -262,12 +243,12 @@ export class TacticalNeuralNarrator {
         this.emit();
       };
 
-      utter.onend = clearSpeaking;
-      utter.onerror = clearSpeaking;
-
-      const safetyMs = estimateSpeechTimeoutMs(clean, rate);
-      this.speechTimerId = window.setTimeout(clearSpeaking, safetyMs);
-      synth.speak(utter);
+      const readingMs = estimateSpeechTimeoutMs(clean, rate);
+      if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+        this.speechTimerId = window.setTimeout(clearSpeaking, readingMs);
+      } else {
+        clearSpeaking();
+      }
     } catch {
       this.state.isSpeaking = false;
       this.updateAmbientPadGain();
@@ -279,9 +260,6 @@ export class TacticalNeuralNarrator {
     if (this.disposed) return;
     this.state.isPaused = true;
     try {
-      if (this.state.speechAvailable && window.speechSynthesis.speaking) {
-        window.speechSynthesis.pause();
-      }
       if (this.audioCtx && this.audioCtx.state === 'running') {
         void this.audioCtx.suspend();
       }
@@ -295,9 +273,6 @@ export class TacticalNeuralNarrator {
     if (this.disposed) return;
     this.state.isPaused = false;
     try {
-      if (this.state.speechAvailable && window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-      }
       if (this.audioCtx && this.audioCtx.state === 'suspended' && this.state.musicEnabled && !this.state.muted) {
         void this.audioCtx.resume();
       }
@@ -308,19 +283,12 @@ export class TacticalNeuralNarrator {
   }
 
   public cancelSpeech(): void {
-    if (this.speechTimerId !== null) {
+    if (this.speechTimerId !== null && typeof window !== 'undefined') {
       window.clearTimeout(this.speechTimerId);
       this.speechTimerId = null;
     }
     this.state.isSpeaking = false;
     this.state.isPaused = false;
-    if (this.state.speechAvailable) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // Ignore browser cancel quirk
-      }
-    }
     this.updateAmbientPadGain();
   }
 

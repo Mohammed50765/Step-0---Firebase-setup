@@ -22,6 +22,7 @@ import {
 } from '../engine/gtoDuel';
 
 import type { PitWallRotationController } from './pitWallUI';
+import { getSharedAudioContext } from '../ui/entryAudio';
 
 export type TacticalLabTab = 'radar' | 'ghost' | 'duel' | 'pitwall';
 
@@ -68,15 +69,13 @@ function saveGtoHistory(entry: StoredGtoHistoryEntry): void {
 
 /**
  * Plays an optional spatial Web Audio cue (left/right stereo pan) for Blind-Side Radar.
- * Falls back cleanly to mono if StereoPannerNode is unsupported, and silently ignores blocked audio.
+ * Reuses a shared AudioContext to prevent Web Audio context leaks, falls back cleanly
+ * to mono if StereoPannerNode is unsupported, and silently ignores blocked audio.
  */
 function playBlindSideSpatialCue(pan: number, urgency: 'low' | 'medium' | 'high'): void {
   try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ac = new AudioCtx();
+    const ac = getSharedAudioContext();
+    if (!ac) return;
     const osc = ac.createOscillator();
     const gain = ac.createGain();
     osc.type = urgency === 'high' ? 'triangle' : 'sine';

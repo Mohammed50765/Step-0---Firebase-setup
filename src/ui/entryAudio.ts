@@ -293,3 +293,28 @@ export class EntryAudioEngine {
     }
   }
 }
+
+let sharedAppAudioCtx: AudioContext | null = null;
+
+/**
+ * Returns a single shared AudioContext across the entire application so sound cues
+ * (Pit-Wall alerts, Blind-Side Radar spatial cues, ChronoLock detents, Tactical Studio)
+ * never leak new AudioContext instances on mobile browsers.
+ */
+export function getSharedAudioContext(): AudioContext | null {
+  try {
+    if (sharedAppAudioCtx && sharedAppAudioCtx.state !== 'closed') {
+      if (sharedAppAudioCtx.state === 'suspended' && typeof sharedAppAudioCtx.resume === 'function') {
+        void sharedAppAudioCtx.resume().catch(() => {});
+      }
+      return sharedAppAudioCtx;
+    }
+    const Ctor = getAudioContextCtor();
+    if (!Ctor) return null;
+    sharedAppAudioCtx = new Ctor();
+    return sharedAppAudioCtx;
+  } catch {
+    return null;
+  }
+}
+

@@ -7,6 +7,7 @@
  * optional navigator.vibrate(12), optional muted-by-default mechanical click,
  * and full keyboard + fallback button accessibility.
  */
+import { getSharedAudioContext } from './entryAudio';
 
 export const CHRONO_DETENT_THRESHOLD = 0.92;
 
@@ -293,11 +294,8 @@ export class ChronoLockSlider {
   private triggerOptionalDetentClick(): void {
     if (!this.opts.enableSound) return;
     try {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ac = new AudioCtx();
+      const ac = getSharedAudioContext();
+      if (!ac) return;
       const osc = ac.createOscillator();
       const gain = ac.createGain();
       osc.type = 'triangle';

@@ -1,4 +1,5 @@
 export const SPARK_FREE_DAILY_READ_LIMIT = 50000;
+export const SPARK_FREE_DAILY_WRITE_LIMIT = 20000;
 const QUOTA_STORAGE_KEY = 'maydan_firestore_quota_v1';
 
 export type ReadCategory = 'session' | 'core' | 'tab' | 'oneShot';
@@ -6,6 +7,7 @@ export type ReadCategory = 'session' | 'core' | 'tab' | 'oneShot';
 export interface DailyQuotaSnapshot {
   date: string;
   totalReads: number;
+  totalWrites: number;
   byCategory: Record<ReadCategory, number>;
   activeListeners: number;
   quotaExceeded: boolean;
@@ -103,6 +105,7 @@ class QuotaMonitorService {
     return {
       date: this.todayStr(),
       totalReads: 0,
+      totalWrites: 0,
       byCategory: { session: 0, core: 0, tab: 0, oneShot: 0 },
       activeListeners: 0,
       quotaExceeded: false,
@@ -120,6 +123,7 @@ class QuotaMonitorService {
       return {
         date: today,
         totalReads: Math.max(0, Number(parsed.totalReads || 0)),
+        totalWrites: Math.max(0, Number(parsed.totalWrites || 0)),
         byCategory: {
           session: Math.max(0, Number(parsed.byCategory?.session || 0)),
           core: Math.max(0, Number(parsed.byCategory?.core || 0)),
@@ -152,6 +156,15 @@ class QuotaMonitorService {
     const delta = Math.max(1, Math.round(count));
     this.state.totalReads += delta;
     this.state.byCategory[category] = (this.state.byCategory[category] || 0) + delta;
+    this.save();
+  }
+
+  recordWrites(count: number = 1): void {
+    if (this.state.date !== this.todayStr()) {
+      this.state = this.emptyToday();
+    }
+    const delta = Math.max(1, Math.round(count));
+    this.state.totalWrites = (this.state.totalWrites || 0) + delta;
     this.save();
   }
 

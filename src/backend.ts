@@ -2418,17 +2418,13 @@ class MaydanBackendService {
       const payQuery = isCaptain
         ? query(collection(db, 'pitchPayments'), where('teamId', '==', TEAM_ID))
         : query(collection(db, 'pitchPayments'), where('ownerUid', '==', uid));
-      this.tabUnsubs.push(
-        onSnapshot(
-          payQuery,
-          (snap) => {
-            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
-            state.pitchPayments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            onUpdate();
-          },
-          handleErr(OperationType.LIST, 'pitchPayments')
-        )
-      );
+      void getDocs(payQuery)
+        .then((snap) => {
+          quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+          state.pitchPayments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          onUpdate();
+        })
+        .catch(handleErr(OperationType.LIST, 'pitchPayments'));
     };
 
     const subMatchSessions = () => {
@@ -2475,29 +2471,25 @@ class MaydanBackendService {
     };
 
     const subPlayerPhotosTeam = () => {
-      this.tabUnsubs.push(
-        onSnapshot(
-          query(collection(db, 'playerPhotos'), where('teamId', '==', TEAM_ID)),
-          (snap) => {
-            quotaMonitor.recordReads('tab', Math.max(1, snap.docChanges().length || snap.size));
-            const nextMap: Record<string, { dataUrl: string; photoZoom: number; photoY: number }> = {
-              ...this.photosMap,
+      void getDocs(query(collection(db, 'playerPhotos'), where('teamId', '==', TEAM_ID)))
+        .then((snap) => {
+          quotaMonitor.recordReads('oneShot', Math.max(1, snap.size));
+          const nextMap: Record<string, { dataUrl: string; photoZoom: number; photoY: number }> = {
+            ...this.photosMap,
+          };
+          snap.docs.forEach((d) => {
+            const data = d.data();
+            nextMap[d.id] = {
+              dataUrl: sanitizeImageDataUrl(data.dataUrl, 250000),
+              photoZoom: Number(data.photoZoom || 105),
+              photoY: typeof data.photoY === 'number' ? data.photoY : 18,
             };
-            snap.docs.forEach((d) => {
-              const data = d.data();
-              nextMap[d.id] = {
-                dataUrl: sanitizeImageDataUrl(data.dataUrl, 250000),
-                photoZoom: Number(data.photoZoom || 105),
-                photoY: typeof data.photoY === 'number' ? data.photoY : 18,
-              };
-            });
-            this.photosMap = nextMap;
-            this.mergePhotosIntoPlayers(state);
-            onUpdate();
-          },
-          handleErr(OperationType.LIST, 'playerPhotos')
-        )
-      );
+          });
+          this.photosMap = nextMap;
+          this.mergePhotosIntoPlayers(state);
+          onUpdate();
+        })
+        .catch(handleErr(OperationType.LIST, 'playerPhotos'));
     };
 
     const subPendingJoinRequests = () => {

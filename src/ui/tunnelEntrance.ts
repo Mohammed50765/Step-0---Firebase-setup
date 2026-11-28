@@ -122,7 +122,7 @@ export class TunnelEntranceSessionGuard {
   }
 }
 
-export const STADIUM_AMBIENCE_ASSET_PATH = '/assets/audio/stadium-tunnel-ambience.mp3';
+export const STADIUM_AMBIENCE_ASSET_PATH = '';
 const SESSION_PLAYED_KEY = 'maydan_tunnel_entrance_played_v2';
 
 export interface TunnelAudioCopy {
@@ -155,7 +155,7 @@ export const TUNNEL_COPY: TunnelAudioCopy = {
     soundOff: 'أجواء الملعب',
     soundOn: 'أجواء الملعب مفعّلة',
     skip: 'تخطي',
-    missingAsset: 'ميزة أجواء الملعب جاهزة — أضف ملف صوت مرخّص في public/assets/audio/stadium-tunnel-ambience.mp3',
+    missingAsset: 'ميزة أجواء الملعب تعمل بتوليد صوتي فوري (Web Audio) بدون ملفات خارجية',
     alreadyPlayed: 'تم تشغيل أجواء الدخول لهذه الجلسة',
     blocked: 'تعذّر تشغيل الصوت في المتصفح الحالي — يمكنك المتابعة بشكل طبيعي',
     sealTitle: 'ختم دعوة الفريق السداسي',
@@ -166,7 +166,7 @@ export const TUNNEL_COPY: TunnelAudioCopy = {
     soundOff: 'Stadium Sound',
     soundOn: 'Stadium Sound On',
     skip: 'Skip',
-    missingAsset: 'Stadium ambience ready — add a licensed recording at public/assets/audio/stadium-tunnel-ambience.mp3',
+    missingAsset: 'Stadium ambience powered by pure 0-KB Web Audio synthesis',
     alreadyPlayed: 'Stadium ambience already played for this entry session',
     blocked: 'Browser blocked audio playback — continuing silently',
     sealTitle: '6v6 Squad Contract Seal',
